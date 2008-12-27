@@ -1,0 +1,1086 @@
+#!/usr/bin/python
+
+import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, signal, sha, pydoc, tempfile, re, quopri, cStringIO, base64
+
+EchoCommands = False
+SshArgs = ["ssh", "-S", "~/.ssh/%l-%r@%h:%p"]
+
+def escape(s):
+   return quopri.encodestring(s, 1).replace('=\n','').replace('/', '=3D')
+
+def rm_rf(path):
+   for (dirpath,dirs,files) in os.walk(path, topdown=False):
+      for f in files: 
+         os.unlink(dirpath + "/" + f)
+
+      os.rmdir(dirpath)
+
+def mkdirexist(path):
+   try:
+      os.makedirs(path)
+   except OSError, e:
+      if e.errno == errno.EEXIST:
+         pass
+      else:
+         raise e
+      
+class MrLocations():
+   def __init__(self, config=None, locs=[], stdin=False, filename=None):
+      self.locs = locs # Allow pick() to derive an instance with a subset of the classes
+      self.config = config
+
+      if not filename:
+         filename = os.environ.get('MRCONFIG')
+         #print >>sys.stderr, "Env filename is", filename
+
+      if filename:
+         # Read config file from stdin
+         self.config = ConfigParser.SafeConfigParser()
+         r = self.config.read(filename)
+         if not r:
+            print >>sys.stderr, "Unable to locate config file", filename
+            return False
+
+         #print >>sys.stderr, "Reading config", filename, self.config.sections()
+         os.environ['MRCONFIG'] = filename
+
+      elif stdin:
+         # Read config file from stdin
+         self.config = ConfigParser.SafeConfigParser()
+         self.config.readfp(sys.stdin)
+
+         # Keep a copy of the config around so our children can reference it
+         fd, name = tempfile.mkstemp()
+         os.environ['MRCONFIG'] = name
+         fh = os.fdopen(fd, 'w')
+         self.config.write(fh)
+         fh.close()
+
+      # Unless we were passed an explicit list of locations, grab all
+      # from the config file.
+      if not locs:
+         for s in self.config.sections():
+            if s == "global": continue
+            l = MrLocation()
+            l.name = s
+            l.rootdir = self.config.get(s, "rootdir")         
+            l.jobdir = l.rootdir + "/jobs"
+            if self.config.has_option(s, "hostname"): 
+               l.hostname = self.config.get(s, "hostname") 
+            else:
+               l.hostname = None
+
+            if self.config.has_option(s, "syncdir"): 
+               l.syncdir = self.config.get(s, "syncdir")
+            else:
+               l.syncdir = self.config.get("global", "syncdir")
+
+            self.locs.append(l)
+
+      # Nail open SSH connections for low-latency muxing
+      for l in self.locs:
+         if l.hostname:
+            #print "Setting-up persistent SSH connection to", l.hostname
+            subprocess.call(SshArgs + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+
+   def thisis(self, n):
+      # This sets of an easy to use member to get the info for this Location
+      self.this = self.locs[n]
+      self.thisnum = n
+
+   def pickn(self, seed=None):
+      """Pick some pseudo-random locations.  The number of locations
+      chosen is based on the replication factor in the config.
+      Specify a seed to get deterministic results (e.g. for a given
+      extension number.)  The return value is the list of indices into
+      the current locations."""
+
+      #print "pick seed=", seed
+      reps = Locations.config.getint("global", "replication")
+      candidates = range(0, len(self.locs))
+      used = []
+      if seed: random.seed(seed)
+
+      for i in range(0, reps):
+         if not candidates:
+            print >>sys.stderr, "Cannot pick %d locations from %d available" % (n, len(self.locs))
+            break
+         l = random.choice(candidates)
+         used.append(l)
+         candidates.remove(l)
+     
+      #print >>sys.stderr, "pick", seed, "->", used
+
+      return used
+         
+   def pick(self, seed=None):
+      """Return a new MrLocations instance that uses a subset of the
+locations of this instance."""
+
+      used = self.pickn(seed)
+      return MrLocations(Locations.config, [Locations.locs[i] for i in used])
+         
+   def forAllLocal(self, cmd, stdout=None):
+      cmd = ["mr", "_local", "-n", "NODENUM"] + cmd
+      fp = cStringIO.StringIO()
+      self.config.write(fp)
+
+      return self.forAll(cmd, subst=True, stdout=stdout, stdinstr=fp.getvalue())
+
+   def forAll(self, Cmdv, src=[], dst=[], absolutes=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, stderr=None, call=False):
+      if src and type(src) != type([]): src = [src]
+      if dst and type(dst) != type([]): dst = [dst]
+
+      if subst:
+         def sub(loc, n, num):
+            return n.replace("ROOTDIR", loc.rootdir).replace("JOBDIR", loc.jobdir).replace("SYNCDIR", loc.syncdir).replace("NODENUM", str(num))
+            
+      if stdinstr:
+         std=subprocess.PIPE
+
+      procs = Procs(stdinstr=stdinstr, stdout=stdout, stderr=stderr)
+
+      i = 0
+      for loc in self.locs:
+         if subst: 
+            cmd = [sub(loc,n,i) for n in Cmdv]
+            a = [sub(loc,s,i) for s in absolutes]
+         else:
+            cmd = list(Cmdv)
+            a = absolutes
+
+         s = [loc.rootdir + "/" + f for f in src]
+         d = [loc.rootdir + "/" + f for f in dst]
+
+         if loc.hostname:
+            cmd = SshArgs + [loc.hostname] + cmd + s + d
+         else:
+            if s and glob:
+               s = multiglob(s)
+               if not s: continue
+
+            if d and glob:
+               d = multiglob(d)
+               if not d: continue
+
+            if a and glob:
+               a = multiglob(a)
+               if not a: continue
+
+            cmd += s + d + a
+            
+         if trailer:
+            cmd += trailer
+
+         procs.Popen(cmd, call=call)
+
+         i += 1
+
+      return procs
+   
+   def put(self, src, dst, procs=None):
+      if not procs: procs = Procs()
+
+      s = multiglob([src])
+
+      if not s:
+         print >>sys.stderr, "No such file:", src
+         return procs
+
+      for loc in self.locs:
+         d = loc.rootdir + "/" + dst
+
+         if loc.hostname:
+            d = loc.hostname + ":" + d
+
+         cmd = ["rsync", "-a", "-e", string.join(SshArgs)] + s + [d]
+
+         procs.Popen(cmd)
+
+      return procs
+
+   def get(self, args, procs=None):
+      p = optparse.OptionParser()
+      p.disable_interspersed_args()
+      p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
+      (options, args) = p.parse_args(args)
+
+      if options.cat:
+         assert(len(args) > 0)
+         dst = tempfile.mkdtemp() + "/"
+         src = args
+      else:
+         assert(len(args) > 1)
+         dst = args[-1]
+         src = args[:-1]
+
+      if not procs: procs = Procs()
+
+      for loc in self.locs:
+         s = [loc.rootdir + "/" + f for f in src]
+         #print loc.rootdir, src, s
+
+         if loc.hostname:
+            s = [loc.hostname + ":" + string.join(s)]
+         else:
+            s = multiglob(s)
+            if not s:
+               #print >>sys.stderr, "No such file:", src
+               continue
+
+         cmd = ["rsync", "-R", "-a", "-e", string.join(SshArgs)] + s + [dst]
+         #print cmd
+
+         procs.Popen(cmd)
+
+      procs.collect()
+
+      if options.cat:
+         for (dirpath, dirnames, filenames) in os.walk(dst):
+            for f in filenames:
+               fname = os.path.join(dirpath, f)
+               sys.stdout.write(file(fname).read()) #XXX reads whole file into memory
+         rm_rf(dst)
+
+      return procs
+         
+class MrLocation:
+   def __init__(self):
+      pass
+
+            
+
+def getOpt():
+   p = optparse.OptionParser()
+   p.disable_interspersed_args()
+
+   usage = ''
+   for cmd in MrCommands.__dict__:
+      if cmd[0] == "_": continue
+      method = MrCommands.__dict__[cmd].__get__(None, MrCommands)
+
+      #pydoc.TextDoc().docroutine(MrCommands.__dict__[cmd])
+      #print help(MrCommands.__dict__[cmd])
+      usage += pydoc.text.indent(pydoc.text.document(method)).replace("(args)","")
+      
+   p.set_usage("""%prog command args...\nSupported commands:\n""" + usage)
+   (options, args) = p.parse_args()
+   
+   if not args: 
+      p.print_help()
+      return False
+
+   method = MrCommands.__dict__.get(args[0]).__get__(None, MrCommands)
+   if method and callable(method):
+      if args[0] != '_local':
+         global SyncDir
+         global Locations
+
+         f = os.environ.get('MRCONFIG', "mr.conf")
+         Locations = MrLocations(filename=f)
+         SyncDir = Locations.config.get("global", "syncdir")
+
+      return method(args[1:])
+   else:
+      print >>sys.stderr, "Unknown command ", args[0]
+      p.print_help()
+      return False
+
+def parseLocationURL(locurl):
+   # We define rsync+ssh as a scheme
+   urlparse.uses_netloc.append("file")
+   urlparse.uses_netloc.append("ssh")
+
+   u = urlparse.urlsplit(locurl)
+
+   # Fix-up the results
+   if not u.scheme and not u.netloc and u.path[0] == '/':
+      u = urlparse.urlparse("file://" + u.path)
+
+   return u
+
+
+class ErrorFile():
+   """This class implements a few file-like methods so that it can be used
+   in place of a real file in some cases.  Whatever is written to this file
+   is printed on stderr with a static prefix (like syslog)."""
+
+   def __init__(self, prefix):
+      self.prefix = prefix
+
+   def write(self, buf):
+      print >> sys.stderr, prefix, ":", buf
+
+   def fileno(self): return sys.stderr.fileno()
+
+class Procs():
+   """This class is used to launch some number of child processes and reap them.
+   It provides methods to instantiate a process for each node."""
+
+   procs = []
+
+   def __init__(self, stdinstr=None, stdout=None, stderr=None, stdin=None):
+      self.stdout = stdout
+      self.stderr = stderr
+      self.stdin = stdin
+      self.stdinstr = stdinstr
+
+      if stdinstr:
+         self.stdin = subprocess.PIPE
+
+   def Popen(self, lst, prefix=None, call=False):
+      if call:
+         if EchoCommands: print >>sys.stderr, lst
+         subprocess.call(lst)
+         return 
+
+      if prefix == None: prefix = len(self.procs)
+      if self.stderr:
+         err = self.stderr
+      else:
+         err = ErrorFile(prefix)
+
+      if EchoCommands: print >>sys.stderr, lst
+      r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=err)
+      self.procs.append(r)
+
+      if self.stdinstr:
+         r.stdin.write(self.stdinstr)
+         r.stdin.close()
+
+   def mergeSorted(self):
+      return SubprocessMergeSorted(self.procs)
+
+   def catStdout(self):
+      #print >>sys.stderr, self.procs
+      return FileCat([x.stdout for x in self.procs])
+
+   def collect(self):
+      retval = True
+      for p in self.procs:
+         if p.wait(): retval = False
+
+      return retval
+
+# The design is as follows:
+#   1. Jobs are submitted in an uncoordinated manner, so they have unique
+#      identifiers that aren't generated by the user. but that are identical
+#      across all nodes running a job. 
+#   2. To manage the problem of listing jobs and removing jobs, we use a 
+#      directory structure to contain all current jobs.  Deleting a file should
+#      (eventually) lead to a job not running further.
+#   3. New jobs should be invoked synchrously by calling a job scheduler with a
+#      hint that points to the job.  Failure to send this hint should only delay
+#      the job scheduler discovering the job since it should periodically poll
+#      for changes in the job directory.
+#   4. We assume out of band replication of the job dir across nodes (via NFS, 
+#      rsync, etc.)
+
+class JobScheduler():
+   """JobScheduler maintains a set of child processes working on a set of jobs."""
+
+   def __init__(self, options, numthreads=None):
+      self.jobs = {}  # A dictionary of job objects indexed by job name
+      self.procs = {} # A dictionary of subprocess.Popen objects index by pid
+      self.options = options
+
+      self.freethreads = numthreads 
+      if not self.freethreads:
+         self.freethreads = 4 #XXX
+
+   def ReadJobDir(self):
+      """Check for new/removed jobs"""
+
+      jobs = os.listdir(self.options.jobdir)
+      removed = set(self.jobs) - set(jobs)
+      recent = set(jobs) - set(self.jobs)
+      for j in removed:
+         print "Job", j, "removed"
+         del self.jobs[j]
+
+      for j in recent:
+         #print "Job", j, "adding"
+         try:
+            self.jobs[j] = MrJob(self.options.jobdir + "/" + j)
+         except:
+            traceback.print_exc()
+            print >>sys.stderr, "Error parsing job description", j, "; skipping"
+
+   def RunForever(self):
+      """Run forever"""
+
+      while True:
+         self.RunUntilDone()
+         # If we get here, then we ran out of stuff to do, so wait a bit before trying again
+         print >>sys.stderr, "Nothing to do, waiting for work"
+         time.sleep(1)
+
+   def RunOnce(self):
+         """Try to launch a work item and return True on success (None->nothing to do)"""
+
+         self.freethreads -= 1
+
+         # Look for something with work to do
+         for job in self.jobs.keys(): #XXX, Should randomize order
+            proc = self.jobs[job].compute(self.options)
+            if proc: 
+               #print >>sys.stderr, "Launched", proc.pid
+               self.procs[proc.pid] = proc
+               return True
+            else:
+               # No more work to do, check to see if job is complete
+               if not self.jobs[job].continuous:
+                  self.JobDone(job)
+
+         self.freethreads += 1
+         return None
+
+   def JobDone(self, job):
+      """A job has run to completion, remove it locally."""
+
+      del self.jobs[job]
+      os.unlink(self.options.jobdir + "/" + job)
+
+   def RunUntilDone(self):
+      """Run until we run out of work to do"""
+
+      self.ReadJobDir()  
+      while self.RunUntilNeedMore():
+         pass
+
+   def RunUntilNeedMore(self):
+      """Run until last read of JobDir is exhausted.  Return True iff we did something"""
+
+      didSomething = False
+      sleep = 0.0001
+
+      while True:
+         if self.freethreads:
+            if self.RunOnce():
+               didSomething = True
+            else:
+               # Nothing to do right now
+
+               if not len(self.procs): 
+                  # Nothing still running, so return
+                  #print >>sys.stderr, "RunOnce() not true; no running procs"
+                  return didSomething 
+
+               # Don't return because we're still working,
+               # but wait before we look for more work to do.
+               #print >>sys.stderr, "Wait for completion and/or more work"
+
+               # Use SIGCHLD to trigger polling for exited children
+               #signal.signal(signal.SIGCHLD, lambda x,y: self.CollectChildren())
+
+               # Sleeping hurts latency for detecting new inputs, but avoids busy waits.
+               # So we do an exponential backoff in how long we sleep with a max of 1 second
+               time.sleep(sleep)
+               sleep *= 10
+               if sleep > 1: sleep = 1  # Max out at 1 sec sleep
+
+               #signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+
+               self.CollectChildren() # Won't block
+         else:
+            self.CollectChildren() # Will block
+
+   def CollectChildren(self): 
+      # This is a loop in case multiple children are exited
+      while len(self.procs):
+         if not self.freethreads:
+            # Maxed out on threads, so wait for a child to finish
+            #print >>sys.stderr, "Wait for a child to exit"
+            opts = 0
+         else:
+            # Check for children, but don't block waiting
+            opts = os.WNOHANG
+
+         (pid, status) = os.waitpid(-1, opts) 
+         if pid:
+            #print "Process", pid, "exited with status", status
+            self.finalize(self.procs[pid], status)
+            del self.procs[pid]
+            self.freethreads += 1
+         else:
+            # No children pending, so return
+            return
+
+   def finalize(self, p, status):
+      #print >>sys.stderr, "Job completed", status
+      print >>p.statfile, status
+      p.statfile.close()
+      p.statfile = None
+      
+      # Print errors to stderr
+      errs = file(p.errfilename)
+      first = True
+      for line in errs: 
+         if first: 
+            print >>sys.stderr, "== Errors from %s ==" % p.errfilename
+            first = None
+         
+         sys.stderr.write(line)
+      if not first:
+         print >>sys.stderr, "=="
+      del p
+     
+class MrJob():
+   """Each MrJob object represents a job, as specified in a job file, and
+    provides methods for identifying and processing inputs for that job."""
+
+   def __init__(self, fname):
+      config = ConfigParser.SafeConfigParser()
+
+      processed = config.read(fname)
+      if not processed:  
+         raise IOError(errno.ENOENT, "Could not open file", fname)
+
+      self.jobname = os.path.basename(fname)
+      self.cmd = config.get("mrjob", "cmd", raw=True)
+      self.inputs = config.get("mrjob", "inputs")
+      self.continuous = config.has_option("mrjob", "continuous")
+      self.gather = config.has_option("mrjob", "gather")
+
+   def compute(self, options):
+      inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
+
+      if self.gather:
+         exts = [os.path.splitext(i)[1] for i in inputs]
+         exts = list(set(exts))  # Get unique extensions
+
+         for ext in exts:
+            # Don't process .d directories as named inputs (feedback loop)
+            if ext == ".d": continue
+
+            # Apply all of the files with the same extension,
+            # but only if that extension belongs on this node.
+            choices = Locations.pickn(ext)
+            if Locations.thisnum not in choices:
+               continue
+
+            #Get list of files with this extension
+            xlen = len(ext)
+            files = []
+            for i in inputs:
+               if i[-xlen:] == ext:
+                  files.append(i)
+
+            outfilename = "/reduce/" + self.jobname + ext
+
+            p = self.computeItem(files, outfilename, options)
+            if p: 
+               #print >>sys.stderr, "Gather ext", ext, "on node", Locations.thisnum, files, "of", self.inputs
+
+               return p
+
+         return None # Nothing to do
+
+      for i in inputs:
+         if i[-2:] == ".d": 
+            # Don't process .d directories as named inputs (feedback loop)
+            continue
+
+         bname = os.path.basename(i)
+
+         relativename = i[len(options.rootdir):]
+         outfilename = relativename + ".d/" + escape(self.cmd)
+
+         p = self.computeItem(i, outfilename, options)
+         if p: return p
+
+      return None # Nothing to do
+
+   def computeItem(self, inputs, outfilename, options):
+      if type(inputs) != type([]):
+         inputs = [inputs]
+
+      statfilename = options.syncdir + "/" + outfilename
+      mkdirexist(os.path.dirname(statfilename))
+      try:
+         statfile = os.fdopen(os.open(statfilename, os.O_CREAT|os.O_EXCL|os.O_WRONLY), "w")
+      except OSError, e:
+         if e.errno == errno.EEXIST:
+            # This is a common case; somebody has already grabbed
+            # the synchronization file, so we don't need to process
+            # this file.
+            #print >>sys.stderr, "Did not win", statfilename
+            return None
+         else:
+            traceback.print_exc()
+               #XXX: re-raise
+            raise "Error"
+
+      # Now we hold the "lock" the statfile, so proceed...
+
+      print >>statfile, socket.gethostname(), os.getpid()
+      statfile.flush()
+
+      obase = options.rootdir + "/" + outfilename
+      oname = obase + ".0"
+      ename = obase + ".stderr"
+      mkdirexist(os.path.dirname(oname))
+      sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
+      serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
+
+      if '%(input)' in self.cmd:
+         cmd = self.cmd.split()
+         iidx = cmd.index('%(input)')
+         cmd[iidx:iidx] = inputs
+      else:
+         cmd = self.cmd.split() + inputs
+
+      #print >>sys.stderr, "Launching", cmd 
+      os.environ['MROUTPUT'] = obase
+      p = subprocess.Popen(cmd, stdout=sout, stderr=serr)
+      p.statfile = statfile
+      p.errfilename = ename
+      sout.close()
+      serr.close()
+
+      print >>sys.stderr, "computeItem", cmd, ">", oname, socket.gethostname(), p.pid
+      return p
+
+class MrCommands:
+   @staticmethod
+   def split(args):
+      """
+-n # [-r regex] infile outfile 
+
+Split an inputfile into n pieces.  By default, the first
+whitespace-delimited field is used as the key.  All lines with the
+same key will be placed in the same output file.  The -r option can be
+used to specify a Perl-compatible regular expression that matches the
+key.  If the regex contains a group, then what matches the group is
+the key; otherwise, the whole match is the key.
+
+The root of the output file names must be specified either on the
+command line or in the MROUTPUT environment variable (which is set for
+all programs running as MR jobs).  
+"""
+      p = optparse.OptionParser()
+      p.add_option("-n", "--nways", help="Number of output files to use")
+      p.add_option("-r", "--regex", action="store", help="Regex that matches the key portion of input lines")
+      (options, args) = p.parse_args(args)
+      options.nways = int(options.nways)
+
+      ofile = os.environ.get('MROUTPUT')
+      if not ofile:
+         if len(args) < 2:
+            print >>sys.stderr, "Output filename must be specified in MROUTPUT environment variable or command-line argument."
+            return False
+         ofile = args[-1]
+
+      assert(len(args))
+      infile = args[0]
+
+      #print >>sys.stderr, "Writing to", ofile
+
+      if not options.nways:
+         print >>sys.stderr, "-n option required"
+         return False
+      
+      if not options.regex:
+         options.regex = '^([^\s]*)'
+         
+      options.regex = re.compile(options.regex)
+
+      files = []
+      for i in range(0, options.nways):
+         fname = ofile + "." + str(i+1)
+         files.append(file(fname, "w"))
+
+      for line in file(infile):
+         key = options.regex.search(line)
+         if key:
+            g = key.groups()
+            if len(g):
+               key = g[0]
+            else:
+               key = key.group(0)
+         else:
+            print >>sys.stderr, "Key not found in line:", line.rstrip()
+
+         i = hash(key) % options.nways
+         files[i].write(line)
+
+      for f in files: f.close()
+
+   @staticmethod
+   def kill(args):
+      """
+job-id...
+Kill the specified job(s)
+"""
+      if len(args) < 1:
+         print >>sys.stderr, "Must specify a JobId to kill"
+         return False
+      args = ["/jobs/" + a for a in args]
+      Locations.forAll(["rm"], args).collect()
+
+   @staticmethod
+   def mv(args):
+      """src... dst\nRename a file within the virtual store."""
+      if len(args) < 2:
+         print >>sys.stderr, "mv requires at least 2 arguments"
+         return False
+
+      dst = args[-1]
+      each = args[:-1]
+      if len(each) > 1: dst += "/"
+ 
+      return Locations.forAll(["mv"], each, dst).collect()
+
+   @staticmethod
+   def mkdir(args):
+      """Make a directory (or directories) on all nodes.  Has unix "mkdir -p" semantics."""
+      # Make sure destination exists
+      Locations.forAll(["mkdir", "-p"], args, glob=False).collect()
+
+   @staticmethod
+   def jobs(args):
+      """Show all of the jobs still active."""
+
+      tmpdir = tempfile.mkdtemp()
+
+      Locations.get(["/jobs/*", tmpdir]).collect()
+      fmt = "%-28s %-15s %s"
+      print fmt % ("Job ID","Command", "Inputs")
+         
+      for f in os.listdir(tmpdir):
+         j = MrJob(os.path.join(tmpdir, f))
+         print fmt % (f, j.cmd, j.inputs)
+
+      rm_rf(tmpdir)
+
+   @staticmethod
+   def store(args):
+      """src... dst
+
+Copy the specified file(s) into the virtual store.  
+"""
+      assert(len(args) > 1)
+      dst = args[-1]
+      args = args[:-1]
+      if len(args) > 1: dst += "/"
+
+      procs = Procs()
+      for a in args:
+         Locations.pick().put(a, dst+"/", procs=procs)
+         
+      procs.collect()
+
+   @staticmethod
+   def map(args):
+      """
+[-f] [-c] [-i inputglob] cmd [args...]
+[-f] [-c] [-i inputglob] cmd [args...] | cmd [args...] |...
+
+Run the specified command on each input file (in the virtual store)
+described by the inputglob.  Multiple inputglob arguments can be
+given.  The -c option says that the commond should continue to run on
+new inputs as they arrive.
+
+Multiple commands can be chained together with |.  Each output file of
+the first command becomes an input for the next command in the
+pipeline.
+
+The -f option says that any previously cached output should be ignored
+and the program re-run.
+"""
+
+      p = optparse.OptionParser()
+      p.disable_interspersed_args()
+      p.add_option("-i", "--inputglob", action="append", help="Glob of input files (in root)")
+      p.add_option("-c", "--continuous", action="store_true", help="Continue to look for new input files to arrive")
+      p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
+      (options, cmd) = p.parse_args(args)
+      
+      cmds = string.join(cmd).split("|")
+      iglobs = options.inputglob
+      assert (type(iglobs) == type([]))
+
+      for cmd in cmds:
+         gather = False
+         cmd = cmd.strip()
+         if cmd[0] == ">":
+            gather = True
+            cmd = cmd.lstrip(">")
+
+         if cmd == "dist":
+            MapComponent("mr _local restore -s", iglobs, options)
+
+            # There is no change to the iglobs directory
+         else:
+            jobname = MapComponent(cmd, iglobs, options, gather=gather)
+
+            # Each component of pipeline uses previous output as input
+            if gather:
+               iglobs = ["/reduce/" + jobname + ".*[0-9]"]
+            else:
+               iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
+
+      MrCommands.get(["-c"] + iglobs)
+
+   @staticmethod
+   def get(args):
+      return Locations.get(args)
+
+   @staticmethod
+   def cat(args):
+      #print >>sys.stderr, "cat", args
+      #procs = Locations.forAll(["cat"], args, call=True).collect()
+      #procs = Locations.forAll(["cat"], args, stderr=file("/dev/null","w"), serial=True).collect()
+      procs = Locations.forAll(["cat"], args, stdout=subprocess.PIPE)
+      u = procs.catStdout()
+      for line in u:
+         sys.stdout.write(line)
+
+      return procs.collect()
+
+   @staticmethod
+   def _local(args):
+      p = optparse.OptionParser()
+      p.disable_interspersed_args()
+      p.add_option("-n", "--nodenum", help="Id number of this node")
+      (options, cmd) = p.parse_args(args)
+
+      global Locations
+      Locations = MrLocations(stdin=True)
+
+      #print >>sys.stderr, "Locations:", Locations.locs
+
+      if options.nodenum:
+         os.environ['MRNODENUM'] = options.nodenum
+      else:
+         options.nodenum = os.environ['MRNODENUM']
+
+      Locations.thisis(int(options.nodenum))
+
+      method = MrLocalCommands.__dict__.get(cmd[0]).__get__(None, MrLocalCommands)
+      if method and callable(method):
+         return method(cmd[1:])
+      else:
+         print >>sys.stderr, "Unknown command _local", cmd[0]
+         p.print_help()
+         return False
+
+   @staticmethod
+   def ls(args):
+      """Simple file & directory listing."""
+      if not args: args = ["/"]
+      procs = Locations.forAllLocal(["ls"] + args, stdout=subprocess.PIPE)
+      u = Uniq(procs.mergeSorted())
+      for line in u:
+         line = line.strip()[2:]
+         if line: print line
+
+   @staticmethod
+   def rm(args):
+      """
+[flags] file...
+
+Remove empty file or directory.  Normal rm flags are passed through.
+"""
+      options = []
+      for a in args:
+         if a[0] == "-":
+            options.append(a)
+         else:
+            args = args[len(options):]
+
+            if not args: args = "/"
+
+            break
+
+      return Locations.forAll(["rm", "-f"] + options, args).collect()
+
+   @staticmethod
+   def rmdir(args):
+      """
+[flags] dir...
+
+Remove empty directory (or directories).  Normal rmdir flags are passed through.
+"""
+      options = []
+      for a in args:
+         if a[0] == "-":
+            options.append(a)
+         else:
+            args = args[len(options):]
+
+            if not args: args = "/"
+
+      return Locations.forAll(["rm", "-f"] + options, args).collect()
+
+   @staticmethod
+   def init(args):
+      mkdirexist(SyncDir)
+      return Locations.forAll(["mkdir", "-p", "SYNCDIR", "ROOTDIR"], ["/jobs", "/partition"], subst=True, glob=False).collect()
+ 
+def MapComponent(cmd, iglobs, options, gather=False):
+   jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
+
+   if options.continuous:
+      jobdesc += "continuous = True\n"
+
+   if gather:
+      jobdesc += "gather = True\n"
+
+   hash = sha.sha(jobdesc).digest()
+   hash = base64.b64encode(hash, '+_')  # Normal b64 but / is _
+   hash = hash.rstrip('\n\r =')
+   jobfilename = "/tmp/" + hash
+   jobfile = open(jobfilename, "w")
+   jobfile.write(jobdesc)
+   jobfile.close()
+
+   if options.fresh:
+      if gather:
+         statfiles = ["SYNCDIR/reduce/" + hash + ".*[0-9]"]
+      else:
+         statfiles = ["SYNCDIR/" + g + ".d/" + escape(cmd) for g in iglobs] 
+
+      #print >>sys.stderr, "rming", statfiles
+         
+      Locations.forAll(["rm", "-f"], 
+                       absolutes=statfiles,
+                       subst=True).collect()
+
+   # Install the job on each node
+   Locations.put(jobfilename, "/jobs/").collect()
+  
+   # Now make sure there's a scheduler running in each place (or hint existing scheduler)
+   Locations.forAllLocal(["sched", "-j", hash]).collect()
+
+   return hash
+
+class MrLocalCommands:
+
+   @staticmethod
+   def restore(args):
+      """[-s] files...
+
+Iff -s is specified, then nodes should be chosen based on a pure
+function of the file's suffix so that similarly split files will be
+stored on the same nodes.  Also file will be stored into the same
+directory in the virtual store that it originated in.
+"""
+
+      p = optparse.OptionParser()
+      p.disable_interspersed_args()
+      p.add_option("-s", "--suffix", action="store_true", help="Store based on file's suffix")
+      (options, args) = p.parse_args(args)
+   
+      procs = Procs()
+      n = None
+      for f in args:
+         dst = os.path.dirname(f[len(Locations.this.rootdir):]) + "/"
+         Locations.forAll(["mkdir", "-p"], dst, glob=False)
+         
+         if options.suffix: 
+            ext = os.path.splitext(f)[1]
+            n = ext
+         
+         dsts = Locations.pick(n)
+         #if options.suffix: print >>sys.stderr, "Extension", ext, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
+         dsts.put(f, dst, procs=procs)
+
+      procs.collect()
+
+   @staticmethod
+   def ls(args):
+      os.chdir(Locations.this.rootdir)  
+      args = [("./" + a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
+      procs = Procs()
+      args = multiglob(args)
+      if not args: return
+      cmd = ["find"] + args + ["-maxdepth", "1"]
+      procs.Popen(cmd)
+      procs.collect()
+
+   @staticmethod
+   def sched(args):
+      # XXX: Use -j hints
+      s = JobScheduler(Locations.this)
+      s.RunUntilDone()
+
+def multiglob(globs):
+   assert(type(globs) == type([]))
+   ret = []
+   for g in globs:
+      ret += glob.glob(g)
+   return ret
+  
+def main():
+   return getOpt()
+
+class Uniq():
+   def __init__(self, iter):
+      self.iter = iter.__iter__()
+
+   def __iter__(self):
+      self.prev = None
+      self.first = True
+      return self
+
+   def next(self):
+      while True:
+         n = self.iter.next()
+         if self.first or n != self.prev: break
+
+      self.prev = n
+      self.first = False
+      return n
+      
+class FileCat():
+   def __init__(self, fileObjs): 
+      """Take a list of file objects""" 
+      self.files = fileObjs
+
+   def __iter__(self):
+      return self
+
+   def next(self):
+      while self.files:
+         l = self.files[0].readline()
+         if l: return l
+         self.files.pop(0)
+      raise StopIteration
+ 
+class SubprocessMergeSorted():
+   def __init__(self, procs): 
+      """Take a list of subprocesses"""
+      self.procs = procs
+      self.nextline = [None] * len(self.procs)
+
+   def __iter__(self): 
+      return self
+
+   def next(self):
+      smallest = None
+      for i in range(0, len(self.procs)):
+           # Job slot is set to None after that job terminates
+           if not self.procs[i]: continue
+
+           # Get next line from this job if we don't already have one cached
+           if not self.nextline[i]:
+              self.nextline[i] = self.procs[i].stdout.readline()
+
+              # Check to see if the job terminated
+              #if not self.nextline[i]:
+                 #print >>sys.stderr, i, "exited", self.procs[i].poll()
+
+           # See if this job's next line should go before any others
+           if self.nextline[i] and (smallest == None or self.nextline[i] < self.nextline[smallest]):
+              smallest = i
+
+      if smallest == None:
+            #print >>sys.stderr, "Done; left", self.nextline
+            raise StopIteration
+
+      s = self.nextline[smallest]
+      self.nextline[smallest] = None
+      return s 
+
+main()
