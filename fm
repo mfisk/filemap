@@ -40,6 +40,7 @@ def mkdirexist(path):
          pass
       else:
          raise e
+
       
 class MrLocations():
    def __init__(self, config=None, locs=[], stdin=False, filename=None):
@@ -55,8 +56,7 @@ class MrLocations():
          self.config = ConfigParser.SafeConfigParser()
          r = self.config.read(filename)
          if not r:
-            print >>sys.stderr, "Unable to locate config file", filename
-            return False
+            raise Exception("Unable to locate config file")
 
          #print >>sys.stderr, "Reading config", filename, self.config.sections()
          os.environ['FMCONFIG'] = filename
@@ -113,7 +113,7 @@ class MrLocations():
       the current locations."""
 
       #print "pick seed=", seed
-      reps = Locations.config.getint("global", "replication")
+      reps = self.config.getint("global", "replication")
       candidates = range(0, len(self.locs))
       used = []
       if seed: random.seed(seed)
@@ -135,10 +135,12 @@ class MrLocations():
 locations of this instance."""
 
       used = self.pickn(seed)
-      return MrLocations(Locations.config, [Locations.locs[i] for i in used])
+      return MrLocations(self.config, [self.locs[i] for i in used])
          
    def forAllLocal(self, cmd, stdout=None):
-      cmd = ["mr", "_local", "-n", "NODENUM"] + cmd
+      """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
+
+      cmd = ["fm", "_local", "-n", "NODENUM"] + cmd
       fp = cStringIO.StringIO()
       self.config.write(fp)
 
@@ -267,41 +269,6 @@ class MrLocation:
 
             
 
-def getOpt():
-   p = optparse.OptionParser()
-   p.disable_interspersed_args()
-
-   usage = ''
-   for cmd in MrCommands.__dict__:
-      if cmd[0] == "_": continue
-      method = MrCommands.__dict__[cmd].__get__(None, MrCommands)
-
-      #pydoc.TextDoc().docroutine(MrCommands.__dict__[cmd])
-      #print help(MrCommands.__dict__[cmd])
-      usage += pydoc.text.indent(pydoc.text.document(method)).replace("(args)","")
-      
-   p.set_usage("""%prog command args...\nSupported commands:\n""" + usage)
-   (options, args) = p.parse_args()
-   
-   if not args: 
-      p.print_help()
-      return False
-
-   method = MrCommands.__dict__.get(args[0]).__get__(None, MrCommands)
-   if method and callable(method):
-      if args[0] != '_local':
-         global SyncDir
-         global Locations
-
-         f = os.environ.get('FMCONFIG', "filemap.conf")
-         Locations = MrLocations(filename=f)
-         SyncDir = Locations.config.get("global", "syncdir")
-
-      return method(args[1:])
-   else:
-      print >>sys.stderr, "Unknown command ", args[0]
-      p.print_help()
-      return False
 
 def parseLocationURL(locurl):
    # We define rsync+ssh as a scheme
@@ -658,9 +625,61 @@ class MrJob():
       print >>sys.stderr, "computeItem", cmd, ">", oname, socket.gethostname(), p.pid
       return p
 
-class MrCommands:
-   @staticmethod
-   def split(args):
+class CommandSetBase(object):
+   """This is a base-class for defining static methods which are used as
+   command line-based commands.  You should inherit from it and define
+   methods.  All methods will be callable.  Usage and help information
+   will only include methods that do not begin with an underscore."""
+
+   def __method(self, mname):
+      return self.__class__.__dict__[mname].__get__(None, type(self))
+
+   def __usage(self):
+      """Return a multi-line usage string based on the defined methods and
+their doc strings."""
+
+      usage = ''
+      for cmd in self.__class__.__dict__:
+         if cmd[0] == "_": continue
+         method = self.__method(cmd)
+         usage += pydoc.text.indent(pydoc.text.document(method)).replace("(args)","")
+      return usage
+
+   def __init__(self, args):
+      p = optparse.OptionParser()
+      p.disable_interspersed_args()
+      p.set_usage("""%prog command args...\nSupported commands:\n""" + self.__usage())
+      (options, args) = p.parse_args(args)
+   
+      if not args: 
+         p.print_help()
+         sys.exit(1)
+
+      try:
+         method = self.__method(args[0])
+
+      except:
+         print >>sys.stderr, "Unknown command ", args[0]
+         p.print_help()
+         sys.exit(1)
+
+      method(self, args[1:])
+
+class MrCommands(CommandSetBase):
+   _locs = None
+
+   def not__init__(self, args):
+      self._locs = None
+      CommandSetBase.__init__(self, args)
+
+   def _Locations(self):
+      if not self._locs: 
+         f = os.environ.get('FMCONFIG', "filemap.conf")
+         self._locs = MrLocations(filename=f)
+         #SyncDir = Locations.config.get("global", "syncdir")
+      return self._locs
+
+   def split(self, args):
       """
 -n # [-r regex] infile outfile 
 
@@ -723,8 +742,7 @@ all programs running as FM jobs).
 
       for f in files: f.close()
 
-   @staticmethod
-   def kill(args):
+   def kill(self, args):
       """
 job-id...
 Kill the specified job(s)
@@ -733,10 +751,9 @@ Kill the specified job(s)
          print >>sys.stderr, "Must specify a JobId to kill"
          return False
       args = ["/jobs/" + a for a in args]
-      Locations.forAll(["rm"], args).collect()
+      self._Locations.forAll(["rm"], args).collect()
 
-   @staticmethod
-   def mv(args):
+   def mv(self, args):
       """src... dst\nRename a file within the virtual store."""
       if len(args) < 2:
          print >>sys.stderr, "mv requires at least 2 arguments"
@@ -746,21 +763,19 @@ Kill the specified job(s)
       each = args[:-1]
       if len(each) > 1: dst += "/"
  
-      return Locations.forAll(["mv"], each, dst).collect()
+      return self._Locations().forAll(["mv"], each, dst).collect()
 
-   @staticmethod
-   def mkdir(args):
+   def mkdir(self, args):
       """Make a directory (or directories) on all nodes.  Has unix "mkdir -p" semantics."""
       # Make sure destination exists
-      Locations.forAll(["mkdir", "-p"], args, glob=False).collect()
+      self._Locations().forAll(["mkdir", "-p"], args, glob=False).collect()
 
-   @staticmethod
-   def jobs(args):
+   def jobs(self, args):
       """Show all of the jobs still active."""
 
       tmpdir = tempfile.mkdtemp()
 
-      Locations.get(["/jobs/*", tmpdir]).collect()
+      self._Locations().get(["/jobs/*", tmpdir]).collect()
       fmt = "%-28s %-15s %s"
       print fmt % ("Job ID","Command", "Inputs")
          
@@ -770,8 +785,7 @@ Kill the specified job(s)
 
       rm_rf(tmpdir)
 
-   @staticmethod
-   def store(args):
+   def store(self, args):
       """src... dst
 
 Copy the specified file(s) into the virtual store.  
@@ -783,12 +797,11 @@ Copy the specified file(s) into the virtual store.
 
       procs = Procs()
       for a in args:
-         Locations.pick().put(a, dst+"/", procs=procs)
+         self._Locations().pick().put(a, dst+"/", procs=procs)
          
       procs.collect()
 
-   @staticmethod
-   def map(args):
+   def map(self, args):
       """
 [-f] [-c] [-i inputglob] cmd [args...]
 [-f] [-c] [-i inputglob] cmd [args...] | cmd [args...] |...
@@ -825,11 +838,11 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
          if cmd == "dist":
-            MapComponent("mr _local restore -s", iglobs, options)
+            self._MapComponent("fm _local restore -s", iglobs, options)
 
             # There is no change to the iglobs directory
          else:
-            jobname = MapComponent(cmd, iglobs, options, gather=gather)
+            jobname = self._MapComponent(cmd, iglobs, options, gather=gather)
 
             # Each component of pipeline uses previous output as input
             if gather:
@@ -837,63 +850,33 @@ and the program re-run.
             else:
                iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
 
-      MrCommands.get(["-c"] + iglobs)
+      self.get(["-c"] + iglobs)
 
-   @staticmethod
-   def get(args):
-      return Locations.get(args)
+   def get(self, args):
+      return self._Locations().get(args)
 
-   @staticmethod
-   def cat(args):
-      #print >>sys.stderr, "cat", args
-      #procs = Locations.forAll(["cat"], args, call=True).collect()
-      #procs = Locations.forAll(["cat"], args, stderr=file("/dev/null","w"), serial=True).collect()
-      procs = Locations.forAll(["cat"], args, stdout=subprocess.PIPE)
+   def cat(self, args):
+      procs = self._Locations().forAll(["cat"], args, stdout=subprocess.PIPE)
       u = procs.catStdout()
       for line in u:
          sys.stdout.write(line)
 
       return procs.collect()
 
-   @staticmethod
-   def _local(args):
-      p = optparse.OptionParser()
-      p.disable_interspersed_args()
-      p.add_option("-n", "--nodenum", help="Id number of this node")
-      (options, cmd) = p.parse_args(args)
+   def _local(self, args):
+      """This is for slave (remote) instantiations."""
+      MrLocalCommands(args)
 
-      global Locations
-      Locations = MrLocations(stdin=True)
-
-      #print >>sys.stderr, "Locations:", Locations.locs
-
-      if options.nodenum:
-         os.environ['FMNODENUM'] = options.nodenum
-      else:
-         options.nodenum = os.environ['FMNODENUM']
-
-      Locations.thisis(int(options.nodenum))
-
-      method = MrLocalCommands.__dict__.get(cmd[0]).__get__(None, MrLocalCommands)
-      if method and callable(method):
-         return method(cmd[1:])
-      else:
-         print >>sys.stderr, "Unknown command _local", cmd[0]
-         p.print_help()
-         return False
-
-   @staticmethod
-   def ls(args):
+   def ls(self, args):
       """Simple file & directory listing."""
       if not args: args = ["/"]
-      procs = Locations.forAllLocal(["ls"] + args, stdout=subprocess.PIPE)
+      procs = self._Locations().forAllLocal(["ls"] + args, stdout=subprocess.PIPE)
       u = Uniq(procs.mergeSorted())
       for line in u:
          line = line.strip()[2:]
          if line: print line
 
-   @staticmethod
-   def rm(args):
+   def rm(self, args):
       """
 [flags] file...
 
@@ -910,9 +893,8 @@ Remove empty file or directory.  Normal rm flags are passed through.
 
             break
 
-      return Locations.forAll(["rm", "-f"] + options, args).collect()
+      return self._Locations().forAll(["rm", "-f"] + options, args).collect()
 
-   @staticmethod
    def rmdir(args):
       """
 [flags] dir...
@@ -928,54 +910,70 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
 
             if not args: args = "/"
 
-      return Locations.forAll(["rm", "-f"] + options, args).collect()
+      return self._Locations().forAll(["rm", "-f"] + options, args).collect()
 
-   @staticmethod
-   def init(args):
+   def init(self, args):
       mkdirexist(SyncDir)
-      return Locations.forAll(["mkdir", "-p", "SYNCDIR", "ROOTDIR"], ["/jobs", "/partition"], subst=True, glob=False).collect()
+      return self._Locations().forAll(["mkdir", "-p", "SYNCDIR", "ROOTDIR"], ["/jobs", "/partition"], subst=True, glob=False).collect()
  
-def MapComponent(cmd, iglobs, options, gather=False):
-   jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
+   def _MapComponent(self, cmd, iglobs, options, gather=False):
+      jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
 
-   if options.continuous:
-      jobdesc += "continuous = True\n"
+      if options.continuous:
+         jobdesc += "continuous = True\n"
 
-   if gather:
-      jobdesc += "gather = True\n"
-
-   hash = sha.sha(jobdesc).digest()
-   hash = base64.b64encode(hash, '+_')  # Normal b64 but / is _
-   hash = hash.rstrip('\n\r =')
-   jobfilename = "/tmp/" + hash
-   jobfile = open(jobfilename, "w")
-   jobfile.write(jobdesc)
-   jobfile.close()
-
-   if options.fresh:
       if gather:
-         statfiles = ["SYNCDIR/reduce/" + hash + ".*[0-9]"]
+         jobdesc += "gather = True\n"
+
+      hash = sha.sha(jobdesc).digest()
+      hash = base64.b64encode(hash, '+_')  # Normal b64 but / is _
+      hash = hash.rstrip('\n\r =')
+      jobfilename = "/tmp/" + hash
+      jobfile = open(jobfilename, "w")
+      jobfile.write(jobdesc)
+      jobfile.close()
+
+      if options.fresh:
+         if gather:
+            statfiles = ["SYNCDIR/reduce/" + hash + ".*[0-9]"]
+         else:
+            statfiles = ["SYNCDIR/" + g + ".d/" + escape(cmd) for g in iglobs] 
+
+         #print >>sys.stderr, "rming", statfiles
+
+         self._Locations().forAll(["rm", "-f"], 
+                          absolutes=statfiles,
+                          subst=True).collect()
+
+      # Install the job on each node
+      self._Locations().put(jobfilename, "/jobs/").collect()
+
+      # Now make sure there's a scheduler running in each place (or hint existing scheduler)
+      self._Locations().forAllLocal(["sched", "-j", hash]).collect()
+
+      return hash
+
+class MrLocalCommands(CommandSetBase):
+   def __init__(self, args):
+      p = optparse.OptionParser()
+      p.disable_interspersed_args()
+      p.add_option("-n", "--nodenum", help="Id number of this node")
+      (options, cmd) = p.parse_args(args)
+
+      if options.nodenum:
+         os.environ['FMNODENUM'] = options.nodenum
       else:
-         statfiles = ["SYNCDIR/" + g + ".d/" + escape(cmd) for g in iglobs] 
+         options.nodenum = os.environ['FMNODENUM']
 
-      #print >>sys.stderr, "rming", statfiles
-         
-      Locations.forAll(["rm", "-f"], 
-                       absolutes=statfiles,
-                       subst=True).collect()
+      self.Locations = MrLocations(stdin=True)
+      self.Locations.thisis(int(options.nodenum))
 
-   # Install the job on each node
-   Locations.put(jobfilename, "/jobs/").collect()
-  
-   # Now make sure there's a scheduler running in each place (or hint existing scheduler)
-   Locations.forAllLocal(["sched", "-j", hash]).collect()
+      try:
+         CommandSetBase.__init__(self, cmd)
+      except:
+         traceback.print_exc()
 
-   return hash
-
-class MrLocalCommands:
-
-   @staticmethod
-   def restore(args):
+   def restore(self, args):
       """[-s] files...
 
 Iff -s is specified, then nodes should be chosen based on a pure
@@ -992,22 +990,21 @@ directory in the virtual store that it originated in.
       procs = Procs()
       n = None
       for f in args:
-         dst = os.path.dirname(f[len(Locations.this.rootdir):]) + "/"
-         Locations.forAll(["mkdir", "-p"], dst, glob=False)
+         dst = os.path.dirname(f[len(self.Locations.this.rootdir):]) + "/"
+         self.Locations.forAll(["mkdir", "-p"], dst, glob=False)
          
          if options.suffix: 
             ext = os.path.splitext(f)[1]
             n = ext
          
-         dsts = Locations.pick(n)
+         dsts = self.Locations.pick(n)
          #if options.suffix: print >>sys.stderr, "Extension", ext, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
          dsts.put(f, dst, procs=procs)
 
       procs.collect()
 
-   @staticmethod
-   def ls(args):
-      os.chdir(Locations.this.rootdir)  
+   def ls(self, args):
+      os.chdir(self.Locations.this.rootdir)  
       args = [("./" + a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
       procs = Procs()
       args = multiglob(args)
@@ -1016,22 +1013,25 @@ directory in the virtual store that it originated in.
       procs.Popen(cmd)
       procs.collect()
 
-   @staticmethod
-   def sched(args):
+   def sched(self, args):
       # XXX: Use -j hints
-      s = JobScheduler(Locations.this)
+
+      # For now, the scheduler and MrJob still assume a global Locations var
+      global Locations
+      Locations = self.Locations
+
+      s = JobScheduler(self.Locations.this)
       s.RunUntilDone()
 
 def multiglob(globs):
+   """Take a list of globs and return a list of all of the files that match any of those globs."""
+
    assert(type(globs) == type([]))
    ret = []
    for g in globs:
       ret += glob.glob(g)
    return ret
   
-def main():
-   return getOpt()
-
 class Uniq():
    def __init__(self, iter):
       self.iter = iter.__iter__()
@@ -1100,4 +1100,5 @@ class SubprocessMergeSorted():
       self.nextline[smallest] = None
       return s 
 
-main()
+MrCommands(sys.argv[1:])
+
