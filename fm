@@ -1,5 +1,22 @@
 #!/usr/bin/python
 
+#
+# Public Domain License:
+#
+# This program was prepared by Los Alamos National Security, LLC at
+# Los Alamos National Laboratory (LANL) under contract
+# No. DE-AC52-06NA25396 with the U.S. Department of Energy (DOE). All
+# rights in the program are reserved by the DOE and Los Alamos
+# National Security, LLC.  Permission is granted to the public to copy
+# and use this software without charge, provided that this Notice and
+# any statement of authorship are reproduced on all copies.  Neither
+# the U.S. Government nor LANS makes any warranty, express or implied,
+# or assumes any liability or responsibility for the use of this
+# software.
+#
+# Author: Mike Fisk <mfisk@lanl.gov>
+#
+
 import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, signal, sha, pydoc, tempfile, re, quopri, cStringIO, base64
 
 EchoCommands = False
@@ -30,7 +47,7 @@ class MrLocations():
       self.config = config
 
       if not filename:
-         filename = os.environ.get('MRCONFIG')
+         filename = os.environ.get('FMCONFIG')
          #print >>sys.stderr, "Env filename is", filename
 
       if filename:
@@ -42,7 +59,7 @@ class MrLocations():
             return False
 
          #print >>sys.stderr, "Reading config", filename, self.config.sections()
-         os.environ['MRCONFIG'] = filename
+         os.environ['FMCONFIG'] = filename
 
       elif stdin:
          # Read config file from stdin
@@ -51,7 +68,7 @@ class MrLocations():
 
          # Keep a copy of the config around so our children can reference it
          fd, name = tempfile.mkstemp()
-         os.environ['MRCONFIG'] = name
+         os.environ['FMCONFIG'] = name
          fh = os.fdopen(fd, 'w')
          self.config.write(fh)
          fh.close()
@@ -276,7 +293,7 @@ def getOpt():
          global SyncDir
          global Locations
 
-         f = os.environ.get('MRCONFIG', "mr.conf")
+         f = os.environ.get('FMCONFIG', "filemap.conf")
          Locations = MrLocations(filename=f)
          SyncDir = Locations.config.get("global", "syncdir")
 
@@ -631,7 +648,7 @@ class MrJob():
          cmd = self.cmd.split() + inputs
 
       #print >>sys.stderr, "Launching", cmd 
-      os.environ['MROUTPUT'] = obase
+      os.environ['FMOUTPUT'] = obase
       p = subprocess.Popen(cmd, stdout=sout, stderr=serr)
       p.statfile = statfile
       p.errfilename = ename
@@ -655,8 +672,8 @@ key.  If the regex contains a group, then what matches the group is
 the key; otherwise, the whole match is the key.
 
 The root of the output file names must be specified either on the
-command line or in the MROUTPUT environment variable (which is set for
-all programs running as MR jobs).  
+command line or in the FMOUTPUT environment variable (which is set for
+all programs running as FM jobs).  
 """
       p = optparse.OptionParser()
       p.add_option("-n", "--nways", help="Number of output files to use")
@@ -664,10 +681,10 @@ all programs running as MR jobs).
       (options, args) = p.parse_args(args)
       options.nways = int(options.nways)
 
-      ofile = os.environ.get('MROUTPUT')
+      ofile = os.environ.get('FMOUTPUT')
       if not ofile:
          if len(args) < 2:
-            print >>sys.stderr, "Output filename must be specified in MROUTPUT environment variable or command-line argument."
+            print >>sys.stderr, "Output filename must be specified in FMOUTPUT environment variable or command-line argument."
             return False
          ofile = args[-1]
 
@@ -851,9 +868,9 @@ and the program re-run.
       #print >>sys.stderr, "Locations:", Locations.locs
 
       if options.nodenum:
-         os.environ['MRNODENUM'] = options.nodenum
+         os.environ['FMNODENUM'] = options.nodenum
       else:
-         options.nodenum = os.environ['MRNODENUM']
+         options.nodenum = os.environ['FMNODENUM']
 
       Locations.thisis(int(options.nodenum))
 
