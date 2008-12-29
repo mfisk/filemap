@@ -20,7 +20,7 @@
 import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, signal, sha, pydoc, tempfile, re, quopri, cStringIO, base64
 
 EchoCommands = False
-SshArgs = ["ssh", "-S", "~/.ssh/%l-%r@%h:%p"]
+SshCmd = ["ssh", "-S", "~/.ssh/%l-%r@%h:%p"]
 
 def escape(s):
    return quopri.encodestring(s, 1).replace('=\n','').replace('/', '=3D')
@@ -42,7 +42,7 @@ def mkdirexist(path):
          raise e
 
       
-class MrLocations():
+class FmLocations():
    def __init__(self, config=None, locs=[], stdin=False, filename=None):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
       self.config = config
@@ -78,7 +78,7 @@ class MrLocations():
       if not locs:
          for s in self.config.sections():
             if s == "global": continue
-            l = MrLocation()
+            l = FmLocation()
             l.name = s
             l.rootdir = self.config.get(s, "rootdir")         
             l.jobdir = l.rootdir + "/jobs"
@@ -98,7 +98,7 @@ class MrLocations():
       for l in self.locs:
          if l.hostname:
             #print "Setting-up persistent SSH connection to", l.hostname
-            subprocess.call(SshArgs + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+            subprocess.call(SshCmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
 
    def thisis(self, n):
       # This sets of an easy to use member to get the info for this Location
@@ -131,11 +131,11 @@ class MrLocations():
       return used
          
    def pick(self, seed=None):
-      """Return a new MrLocations instance that uses a subset of the
+      """Return a new FmLocations instance that uses a subset of the
 locations of this instance."""
 
       used = self.pickn(seed)
-      return MrLocations(self.config, [self.locs[i] for i in used])
+      return FmLocations(self.config, [self.locs[i] for i in used])
          
    def forAllLocal(self, cmd, stdout=None):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
@@ -172,7 +172,7 @@ locations of this instance."""
          d = [loc.rootdir + "/" + f for f in dst]
 
          if loc.hostname:
-            cmd = SshArgs + [loc.hostname] + cmd + s + d
+            cmd = SshCmd + [loc.hostname] + cmd + s + d
          else:
             if s and glob:
                s = multiglob(s)
@@ -212,7 +212,7 @@ locations of this instance."""
          if loc.hostname:
             d = loc.hostname + ":" + d
 
-         cmd = ["rsync", "-a", "-e", string.join(SshArgs)] + s + [d]
+         cmd = ["rsync", "-a", "-e", string.join(SshCmd)] + s + [d]
 
          procs.Popen(cmd)
 
@@ -247,7 +247,7 @@ locations of this instance."""
                #print >>sys.stderr, "No such file:", src
                continue
 
-         cmd = ["rsync", "-R", "-a", "-e", string.join(SshArgs)] + s + [dst]
+         cmd = ["rsync", "-R", "-a", "-e", string.join(SshCmd)] + s + [dst]
          #print cmd
 
          procs.Popen(cmd)
@@ -263,7 +263,7 @@ locations of this instance."""
 
       return procs
          
-class MrLocation:
+class FmLocation:
    def __init__(self):
       pass
 
@@ -385,7 +385,7 @@ class JobScheduler():
       for j in recent:
          #print "Job", j, "adding"
          try:
-            self.jobs[j] = MrJob(self.options.jobdir + "/" + j)
+            self.jobs[j] = FmJob(self.options.jobdir + "/" + j)
          except:
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
@@ -509,8 +509,8 @@ class JobScheduler():
          print >>sys.stderr, "=="
       del p
      
-class MrJob():
-   """Each MrJob object represents a job, as specified in a job file, and
+class FmJob():
+   """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
 
    def __init__(self, fname):
@@ -665,7 +665,7 @@ their doc strings."""
 
       method(self, args[1:])
 
-class MrCommands(CommandSetBase):
+class FmCommands(CommandSetBase):
    _locs = None
 
    def not__init__(self, args):
@@ -675,7 +675,7 @@ class MrCommands(CommandSetBase):
    def _Locations(self):
       if not self._locs: 
          f = os.environ.get('FMCONFIG', "filemap.conf")
-         self._locs = MrLocations(filename=f)
+         self._locs = FmLocations(filename=f)
          #SyncDir = Locations.config.get("global", "syncdir")
       return self._locs
 
@@ -780,7 +780,7 @@ Kill the specified job(s)
       print fmt % ("Job ID","Command", "Inputs")
          
       for f in os.listdir(tmpdir):
-         j = MrJob(os.path.join(tmpdir, f))
+         j = FmJob(os.path.join(tmpdir, f))
          print fmt % (f, j.cmd, j.inputs)
 
       rm_rf(tmpdir)
@@ -834,21 +834,21 @@ and the program re-run.
          gather = False
          cmd = cmd.strip()
          if cmd[0] == ">":
-            gather = True
             cmd = cmd.lstrip(">")
 
-         if cmd == "dist":
+            # First, re-distribute the data
             self._MapComponent("fm _local restore -s", iglobs, options)
 
-            # There is no change to the iglobs directory
-         else:
-            jobname = self._MapComponent(cmd, iglobs, options, gather=gather)
+            # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
+            gather = True
 
-            # Each component of pipeline uses previous output as input
-            if gather:
-               iglobs = ["/reduce/" + jobname + ".*[0-9]"]
-            else:
-               iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
+         jobname = self._MapComponent(cmd, iglobs, options, gather=gather)
+
+         # Each component of pipeline uses previous output as input
+         if gather:
+            iglobs = ["/reduce/" + jobname + ".*[0-9]"]
+         else:
+            iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
 
       self.get(["-c"] + iglobs)
 
@@ -865,7 +865,7 @@ and the program re-run.
 
    def _local(self, args):
       """This is for slave (remote) instantiations."""
-      MrLocalCommands(args)
+      FmLocalCommands(args)
 
    def ls(self, args):
       """Simple file & directory listing."""
@@ -953,7 +953,7 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
 
       return hash
 
-class MrLocalCommands(CommandSetBase):
+class FmLocalCommands(CommandSetBase):
    def __init__(self, args):
       p = optparse.OptionParser()
       p.disable_interspersed_args()
@@ -965,7 +965,7 @@ class MrLocalCommands(CommandSetBase):
       else:
          options.nodenum = os.environ['FMNODENUM']
 
-      self.Locations = MrLocations(stdin=True)
+      self.Locations = FmLocations(stdin=True)
       self.Locations.thisis(int(options.nodenum))
 
       try:
@@ -1016,7 +1016,7 @@ directory in the virtual store that it originated in.
    def sched(self, args):
       # XXX: Use -j hints
 
-      # For now, the scheduler and MrJob still assume a global Locations var
+      # For now, the scheduler and FmJob still assume a global Locations var
       global Locations
       Locations = self.Locations
 
@@ -1100,5 +1100,5 @@ class SubprocessMergeSorted():
       self.nextline[smallest] = None
       return s 
 
-MrCommands(sys.argv[1:])
+FmCommands(sys.argv[1:])
 
