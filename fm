@@ -95,10 +95,17 @@ class FmLocations():
             self.locs.append(l)
 
       # Nail open SSH connections for low-latency muxing
-      for l in self.locs:
-         if l.hostname:
-            #print "Setting-up persistent SSH connection to", l.hostname
-            subprocess.call(SshCmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+      global SshCmd
+      try:
+         for l in self.locs:
+            if l.hostname:
+               #print "Setting-up persistent SSH connection to", l.hostname
+               subprocess.check_call(SshCmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+      except:
+         traceback.print_exc()
+         print >>sys.stderr, """Warning, unable to use "ssh -o 'ControlMaster auto' -fN"."""
+         # Fall-back to non-persistent SSH connections (might not be OpenSSH >= 4.0)
+         SshCmd = ["ssh"]
 
    def thisis(self, n):
       # This sets of an easy to use member to get the info for this Location
@@ -626,13 +633,13 @@ class FmJob():
       return p
 
 class CommandSetBase(object):
-   """This is a base-class for defining static methods which are used as
+   """This is a base-class for defining methods which are used as
    command line-based commands.  You should inherit from it and define
    methods.  All methods will be callable.  Usage and help information
    will only include methods that do not begin with an underscore."""
 
    def __method(self, mname):
-      return self.__class__.__dict__[mname].__get__(None, type(self))
+      return self.__class__.__dict__[mname]#.__get__(None, type(self))
 
    def __usage(self):
       """Return a multi-line usage string based on the defined methods and
@@ -642,7 +649,7 @@ their doc strings."""
       for cmd in self.__class__.__dict__:
          if cmd[0] == "_": continue
          method = self.__method(cmd)
-         usage += pydoc.text.indent(pydoc.text.document(method)).replace("(args)","")
+         usage += pydoc.text.indent(pydoc.text.document(method)).replace("(self, args)","")
       return usage
 
    def __init__(self, args):
@@ -895,7 +902,7 @@ Remove empty file or directory.  Normal rm flags are passed through.
 
       return self._Locations().forAll(["rm", "-f"] + options, args).collect()
 
-   def rmdir(args):
+   def rmdir(self, args):
       """
 [flags] dir...
 
