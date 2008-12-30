@@ -103,7 +103,7 @@ class FmLocations():
                subprocess.check_call(SshCmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
       except:
          traceback.print_exc()
-         print >>sys.stderr, """Warning, unable to use "ssh -o 'ControlMaster auto' -fN"."""
+         print >>sys.stderr, """Warning, unable to use "ssh -o 'ControlMaster auto' -fN"; Will do without."""
          # Fall-back to non-persistent SSH connections (might not be OpenSSH >= 4.0)
          SshCmd = ["ssh"]
 
@@ -397,13 +397,20 @@ class JobScheduler():
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
 
-   def RunForever(self):
+   def RunUntilDone(self):
       """Run forever"""
 
+      self.ReadJobDir()  
+
+      # Run as long as there are jobs (new data may arrive later)
       while True:
-         self.RunUntilDone()
+         self.RunUntilNoInput()
+
+         if not len(self.jobs): return
+
          # If we get here, then we ran out of stuff to do, so wait a bit before trying again
          print >>sys.stderr, "Nothing to do, waiting for work"
+
          time.sleep(1)
 
    def RunOnce(self):
@@ -432,10 +439,9 @@ class JobScheduler():
       del self.jobs[job]
       os.unlink(self.options.jobdir + "/" + job)
 
-   def RunUntilDone(self):
+   def RunUntilNoInput(self):
       """Run until we run out of work to do"""
 
-      self.ReadJobDir()  
       while self.RunUntilNeedMore():
          pass
 
@@ -639,7 +645,7 @@ class CommandSetBase(object):
    will only include methods that do not begin with an underscore."""
 
    def __method(self, mname):
-      return self.__class__.__dict__[mname]#.__get__(None, type(self))
+      return self.__class__.__dict__[mname]
 
    def __usage(self):
       """Return a multi-line usage string based on the defined methods and
