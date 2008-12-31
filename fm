@@ -427,6 +427,7 @@ class JobScheduler():
                return True
             else:
                # No more work to do, check to see if job is complete
+               # XXX: need to check for completion of parent jobs
                if not self.jobs[job].continuous:
                   self.JobDone(job)
 
@@ -440,13 +441,7 @@ class JobScheduler():
       os.unlink(self.options.jobdir + "/" + job)
 
    def RunUntilNoInput(self):
-      """Run until we run out of work to do"""
-
-      while self.RunUntilNeedMore():
-         pass
-
-   def RunUntilNeedMore(self):
-      """Run until last read of JobDir is exhausted.  Return True iff we did something"""
+      """Run until there is no more input on it.  Return True iff we did something"""
 
       didSomething = False
       sleep = 0.0001
@@ -465,10 +460,7 @@ class JobScheduler():
 
                # Don't return because we're still working,
                # but wait before we look for more work to do.
-               #print >>sys.stderr, "Wait for completion and/or more work"
-
-               # Use SIGCHLD to trigger polling for exited children
-               #signal.signal(signal.SIGCHLD, lambda x,y: self.CollectChildren())
+               #print >>sys.stderr, "Wait for completion (and/or more work)"
 
                # Sleeping hurts latency for detecting new inputs, but avoids busy waits.
                # So we do an exponential backoff in how long we sleep with a max of 1 second
