@@ -20,10 +20,12 @@
 import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, signal, sha, pydoc, tempfile, re, quopri, cStringIO, base64
 
 EchoCommands = False
-SshCmd = ["ssh", "-S", "~/.ssh/%l-%r@%h:%p"]
+
+nonalphanumre = re.compile('\W')
 
 def escape(s):
-   return quopri.encodestring(s, 1).replace('=\n','').replace('/', '=3D')
+   (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
+   return s
 
 def rm_rf(path):
    for (dirpath,dirs,files) in os.walk(path, topdown=False):
@@ -82,30 +84,31 @@ class FmLocations():
             l.name = s
             l.rootdir = self.config.get(s, "rootdir")         
             l.jobdir = l.rootdir + "/jobs"
-            if self.config.has_option(s, "hostname"): 
-               l.hostname = self.config.get(s, "hostname") 
-            else:
-               l.hostname = None
-
-            if self.config.has_option(s, "syncdir"): 
-               l.syncdir = self.config.get(s, "syncdir")
-            else:
-               l.syncdir = self.config.get("global", "syncdir")
-
+            l.hostname = self.config_get(s, "hostname")
+            l.syncdir = self.config_get(s, "syncdir")
+            l.fmcmd = self.config_get(s, "fmcmd", "fm")
+            l.sshcmd = self.config_get(s, "ssh", "ssh -S ~/.ssh/%l-%r@%h:%p", raw=True).split()
             self.locs.append(l)
 
       # Nail open SSH connections for low-latency muxing
-      global SshCmd
       try:
          for l in self.locs:
             if l.hostname:
                #print "Setting-up persistent SSH connection to", l.hostname
-               subprocess.check_call(SshCmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+               subprocess.check_call(l.sshcmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
       except:
          traceback.print_exc()
          print >>sys.stderr, """Warning, unable to use "ssh -o 'ControlMaster auto' -fN"; Will do without."""
          # Fall-back to non-persistent SSH connections (might not be OpenSSH >= 4.0)
-         SshCmd = ["ssh"]
+         #SshCmd = ["ssh"]
+
+   def config_get(self, section, key, defval=None, raw=False):
+      if self.config.has_option(section, key):
+         return self.config.get(section, key, raw=raw)
+      elif self.config.has_option("global", key):
+         return self.config.get("global", key, raw=raw)
+      else:
+         return defval
 
    def thisis(self, n):
       # This sets of an easy to use member to get the info for this Location
@@ -147,19 +150,19 @@ locations of this instance."""
    def forAllLocal(self, cmd, stdout=None):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
 
-      cmd = ["fm", "_local", "-n", "NODENUM"] + cmd
+      cmd = ["%(FM)", "_local", "-n", "%(NODENUM)"] + cmd
       fp = cStringIO.StringIO()
       self.config.write(fp)
 
       return self.forAll(cmd, subst=True, stdout=stdout, stdinstr=fp.getvalue())
 
-   def forAll(self, Cmdv, src=[], dst=[], absolutes=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, stderr=None, call=False):
+   def forAll(self, Cmdv, src=[], dst=[], absolutes=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, stderr=None, call=False, once=False):
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
 
       if subst:
-         def sub(loc, n, num):
-            return n.replace("ROOTDIR", loc.rootdir).replace("JOBDIR", loc.jobdir).replace("SYNCDIR", loc.syncdir).replace("NODENUM", str(num))
+         def sub(loc, cmdword, num):
+            return cmdword.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(num)).replace("%(FM)", loc.fmcmd)
             
       if stdinstr:
          std=subprocess.PIPE
@@ -179,7 +182,7 @@ locations of this instance."""
          d = [loc.rootdir + "/" + f for f in dst]
 
          if loc.hostname:
-            cmd = SshCmd + [loc.hostname] + cmd + s + d
+            cmd = loc.sshcmd + [loc.hostname] + cmd + s + d
          else:
             if s and glob:
                s = multiglob(s)
@@ -202,6 +205,9 @@ locations of this instance."""
 
          i += 1
 
+         # Stop now if "once" argument was set
+         if once and i: return procs
+
       return procs
    
    def put(self, src, dst, procs=None):
@@ -219,7 +225,7 @@ locations of this instance."""
          if loc.hostname:
             d = loc.hostname + ":" + d
 
-         cmd = ["rsync", "-a", "-e", string.join(SshCmd)] + s + [d]
+         cmd = ["rsync", "-a", "-e", string.join(loc.sshcmd)] + s + [d]
 
          procs.Popen(cmd)
 
@@ -254,8 +260,7 @@ locations of this instance."""
                #print >>sys.stderr, "No such file:", src
                continue
 
-         cmd = ["rsync", "-R", "-a", "-e", string.join(SshCmd)] + s + [dst]
-         #print cmd
+         cmd = ["rsync", "-Rrptgo", "--copy-unsafe-links", "-e", string.join(loc.sshcmd)] + s + [dst]
 
          procs.Popen(cmd)
 
@@ -265,7 +270,7 @@ locations of this instance."""
          for (dirpath, dirnames, filenames) in os.walk(dst):
             for f in filenames:
                fname = os.path.join(dirpath, f)
-               sys.stdout.write(file(fname).read()) #XXX reads whole file into memory
+               sys.stdout.writelines(file(fname))
          rm_rf(dst)
 
       return procs
@@ -404,12 +409,13 @@ class JobScheduler():
 
       # Run as long as there are jobs (new data may arrive later)
       while True:
-         self.RunUntilNoInput()
+         while self.RunUntilNoInput():
+            break
 
          if not len(self.jobs): return
 
          # If we get here, then we ran out of stuff to do, so wait a bit before trying again
-         print >>sys.stderr, "Nothing to do, waiting for work"
+         #print >>sys.stderr, "Nothing to do, waiting for work"
 
          time.sleep(1)
 
@@ -612,16 +618,22 @@ class FmJob():
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
 
-      if '%(input)' in self.cmd:
-         cmd = self.cmd.split()
+      cmd = self.cmd.replace('%(FM)', options.fmcmd)
+
+      if '%(input)' in cmd:
+         cmd = cmd.split()
          iidx = cmd.index('%(input)')
          cmd[iidx:iidx] = inputs
       else:
-         cmd = self.cmd.split() + inputs
+         cmd = cmd.split() + inputs
 
-      #print >>sys.stderr, "Launching", cmd 
       os.environ['FMOUTPUT'] = obase
-      p = subprocess.Popen(cmd, stdout=sout, stderr=serr)
+      try:
+         p = subprocess.Popen(cmd, stdout=sout, stderr=serr)
+      except:
+         print >>sys.stderr, "Error", sys.exc_value, "executing", cmd
+         return None
+
       p.statfile = statfile
       p.errfilename = ename
       sout.close()
@@ -688,7 +700,7 @@ class FmCommands(CommandSetBase):
       """
 -n # [-r regex] infile outfile 
 
-Split an inputfile into n pieces.  By default, the first
+aSplit an inputfile into n pieces.  By default, the first
 whitespace-delimited field is used as the key.  All lines with the
 same key will be placed in the same output file.  The -r option can be
 used to specify a Perl-compatible regular expression that matches the
@@ -842,7 +854,7 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
             # First, re-distribute the data
-            self._MapComponent("fm _local restore -s", iglobs, options)
+            self._MapComponent("%(FM) _local restore -s", iglobs, options)
 
             # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
             gather = True
@@ -918,8 +930,7 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
       return self._Locations().forAll(["rm", "-f"] + options, args).collect()
 
    def init(self, args):
-      mkdirexist(SyncDir)
-      return self._Locations().forAll(["mkdir", "-p", "SYNCDIR", "ROOTDIR"], ["/jobs", "/partition"], subst=True, glob=False).collect()
+      self._Locations().forAll(["mkdir", "-p", "%(SYNCDIR)", "%(ROOTDIR)"], ["/jobs", "/reduce"], subst=True, glob=False).collect()
  
    def _MapComponent(self, cmd, iglobs, options, gather=False):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
@@ -940,15 +951,13 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
 
       if options.fresh:
          if gather:
-            statfiles = ["SYNCDIR/reduce/" + hash + ".*[0-9]"]
+            statfiles = ["%(SYNCDIR)/reduce/" + hash + ".*[0-9]"]
          else:
-            statfiles = ["SYNCDIR/" + g + ".d/" + escape(cmd) for g in iglobs] 
+            statfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) for g in iglobs] 
 
-         #print >>sys.stderr, "rming", statfiles
-
-         self._Locations().forAll(["rm", "-f"], 
-                          absolutes=statfiles,
-                          subst=True).collect()
+         # Delete sync files so that computation is forced to (re-)execute
+         # These files are shared, so our forAll() is set to do only one node (once=True)
+         self._Locations().forAll(["rm", "-f"], absolutes=statfiles, once=True, subst=True).collect()
 
       # Install the job on each node
       self._Locations().put(jobfilename, "/jobs/").collect()
