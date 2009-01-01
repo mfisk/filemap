@@ -86,7 +86,7 @@ class FmLocations():
             l.jobdir = l.rootdir + "/jobs"
             l.hostname = self.config_get(s, "hostname")
             l.syncdir = self.config_get(s, "syncdir")
-            l.fmcmd = self.config_get(s, "fmcmd", "fm")
+            l.fmcmd = self.config_get(s, "fm", "fm")
             l.sshcmd = self.config_get(s, "ssh", "ssh -S ~/.ssh/%l-%r@%h:%p", raw=True).split()
             self.locs.append(l)
 
