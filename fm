@@ -1187,7 +1187,7 @@ directory in the virtual store that it originated in.
          #print >>sys.stderr, "Warning", sys.exc_type, sys.exc_value, "; assuming scheduler not running yet"
          newname = sockname + "." + str(os.getpid())
          s.bind(newname)
-         s.listen(1000)
+         s.listen(1000) #XXX: We need to harvest these in the scheduler loop
          os.rename(newname, sockname)
 
       # If we get here, then we've bound as the (new) server
