@@ -577,7 +577,7 @@ class FmJob():
 
             p = self.computeItem(files, outfilename, options)
             if p: 
-               print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisnum, files, "of", self.inputs
+               #print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisnum, files, "of", self.inputs
 
                return p
 
