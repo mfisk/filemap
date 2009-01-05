@@ -718,7 +718,7 @@ class FmCommands(CommandSetBase):
       """
 -n # [-r regex] infile outfile 
 
-aSplit an inputfile into n pieces.  By default, the first
+Split an inputfile into n pieces.  By default, the first
 whitespace-delimited field is used as the key.  All lines with the
 same key will be placed in the same output file.  The -r option can be
 used to specify a Perl-compatible regular expression that matches the
