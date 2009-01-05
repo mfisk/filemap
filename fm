@@ -17,7 +17,7 @@
 # Author: Mike Fisk <mfisk@lanl.gov>
 #
 
-import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, signal, sha, pydoc, tempfile, re, quopri, cStringIO, base64
+import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, sha, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex
 
 EchoCommands = False
 
@@ -43,7 +43,6 @@ def mkdirexist(path):
       else:
          raise e
 
-      
 class FmLocations():
    def __init__(self, config=None, locs=[], stdin=False, filename=None):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
@@ -87,7 +86,9 @@ class FmLocations():
             l.hostname = self.config_get(s, "hostname")
             l.syncdir = self.config_get(s, "syncdir")
             l.fmcmd = self.config_get(s, "fm", "fm")
-            l.sshcmd = self.config_get(s, "ssh", "ssh -S ~/.ssh/%l-%r@%h:%p", raw=True).split()
+            l.sshcmdstr = self.config_get(s, "ssh", "ssh -o 'ControlMaster auto' -KAS ~/.ssh/%l-%r@%h:%p", raw=True)
+            l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
+            l.rsynccmd = shlex.split(self.config_get(s, "rsync", "rsync", raw=True), comments=True)
             self.locs.append(l)
 
       # Nail open SSH connections for low-latency muxing
@@ -95,12 +96,11 @@ class FmLocations():
          for l in self.locs:
             if l.hostname:
                #print "Setting-up persistent SSH connection to", l.hostname
-               subprocess.check_call(l.sshcmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+               #subprocess.check_call(l.sshcmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
+               pass
       except:
          traceback.print_exc()
          print >>sys.stderr, """Warning, unable to use "ssh -o 'ControlMaster auto' -fN"; Will do without."""
-         # Fall-back to non-persistent SSH connections (might not be OpenSSH >= 4.0)
-         #SshCmd = ["ssh"]
 
    def config_get(self, section, key, defval=None, raw=False):
       if self.config.has_option(section, key):
@@ -140,11 +140,13 @@ class FmLocations():
 
       return used
          
-   def pick(self, seed=None):
+   def pick(self, seed=None, selfIsNoop=False):
       """Return a new FmLocations instance that uses a subset of the
 locations of this instance."""
 
       used = self.pickn(seed)
+      if selfIsNoop and self.thisnum in used: 
+         used.remove(self.thisnum)
       return FmLocations(self.config, [self.locs[i] for i in used])
          
    def forAllLocal(self, cmd, stdout=None):
@@ -225,7 +227,7 @@ locations of this instance."""
          if loc.hostname:
             d = loc.hostname + ":" + d
 
-         cmd = ["rsync", "-a", "-e", string.join(loc.sshcmd)] + s + [d]
+         cmd = loc.rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
 
          procs.Popen(cmd)
 
@@ -260,7 +262,7 @@ locations of this instance."""
                #print >>sys.stderr, "No such file:", src
                continue
 
-         cmd = ["rsync", "-Rrptgo", "--copy-unsafe-links", "-e", string.join(loc.sshcmd)] + s + [dst]
+         cmd = loc.rsynccmd + ["-Rrptgo", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
 
          procs.Popen(cmd)
 
@@ -344,19 +346,17 @@ class Procs():
          r.stdin.write(self.stdinstr)
          r.stdin.close()
 
-   def mergeSorted(self):
-      return SubprocessMergeSorted(self.procs)
-
-   def catStdout(self):
-      #print >>sys.stderr, self.procs
-      return FileCat([x.stdout for x in self.procs])
-
-   def collect(self):
-      retval = True
+   def collect(self, ignoreErrors=False):
+      errors = 0
+      total = len(self.procs)
       for p in self.procs:
-         if p.wait(): retval = False
+         if p.wait(): errors += 1
 
-      return retval
+      if not ignoreErrors and errors:
+         print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
+         sys.exit(-1)
+
+      return (errors == 0)
 
 # The design is as follows:
 #   1. Jobs are submitted in an uncoordinated manner, so they have unique
@@ -382,7 +382,7 @@ class JobScheduler():
 
       self.freethreads = numthreads 
       if not self.freethreads:
-         self.freethreads = 4 #XXX
+         self.freethreads = 4 #XXX: Use configfile setting
 
    def ReadJobDir(self):
       """Check for new/removed jobs"""
@@ -395,7 +395,7 @@ class JobScheduler():
          del self.jobs[j]
 
       for j in recent:
-         #print "Job", j, "adding"
+         print "Job", j, "added"
          try:
             self.jobs[j] = FmJob(self.options.jobdir + "/" + j)
          except:
@@ -403,16 +403,15 @@ class JobScheduler():
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
 
    def RunUntilDone(self):
-      """Run forever"""
-
-      self.ReadJobDir()  
+      """Run until all jobs complete."""
 
       # Run as long as there are jobs (new data may arrive later)
       while True:
          while self.RunUntilNoInput():
             break
 
-         if not len(self.jobs): return
+         if not len(self.jobs): 
+            return
 
          # If we get here, then we ran out of stuff to do, so wait a bit before trying again
          #print >>sys.stderr, "Nothing to do, waiting for work"
@@ -433,8 +432,9 @@ class JobScheduler():
                return True
             else:
                # No more work to do, check to see if job is complete
-               # XXX: need to check for completion of parent jobs
-               if not self.jobs[job].continuous:
+               # Note, job cannot be complete if parent is still active
+               j = self.jobs[job]
+               if not j.continuous and not j.running and (not j.parent or not self.jobs.has_key(j.parent)):
                   self.JobDone(job)
 
          self.freethreads += 1
@@ -444,6 +444,7 @@ class JobScheduler():
       """A job has run to completion, remove it locally."""
 
       del self.jobs[job]
+      #print >>sys.stderr, "Job", job, "done"
       os.unlink(self.options.jobdir + "/" + job)
 
    def RunUntilNoInput(self):
@@ -454,6 +455,7 @@ class JobScheduler():
 
       while True:
          if self.freethreads:
+            self.ReadJobDir()  
             if self.RunOnce():
                didSomething = True
             else:
@@ -473,8 +475,6 @@ class JobScheduler():
                time.sleep(sleep)
                sleep *= 10
                if sleep > 1: sleep = 1  # Max out at 1 sec sleep
-
-               #signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 
                self.CollectChildren() # Won't block
          else:
@@ -518,6 +518,10 @@ class JobScheduler():
          sys.stderr.write(line)
       if not first:
          print >>sys.stderr, "=="
+
+      os.rename(p.outfilename + ".new", p.outfilename)
+      p.job.running -= 1 
+
       del p
      
 class FmJob():
@@ -536,6 +540,13 @@ class FmJob():
       self.inputs = config.get("mrjob", "inputs")
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config.has_option("mrjob", "reduce")
+      if config.has_option("mrjob", "parent"):
+         self.parent = config.get("mrjob", "parent")
+      else:
+         self.parent = None
+
+      # Number of threads currently processing data for this job.
+      self.running = 0
 
    def compute(self, options):
       inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
@@ -552,6 +563,7 @@ class FmJob():
             # but only if that extension belongs on this node.
             choices = Locations.pickn(ext)
             if Locations.thisnum not in choices:
+               #print >>sys.stderr, Locations.thisnum, "hashes", ext, "to", choices
                continue
 
             #Get list of files with this extension
@@ -565,7 +577,7 @@ class FmJob():
 
             p = self.computeItem(files, outfilename, options)
             if p: 
-               #print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisnum, files, "of", self.inputs
+               print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisnum, files, "of", self.inputs
 
                return p
 
@@ -580,7 +592,7 @@ class FmJob():
 
          relativename = i[len(options.rootdir):]
          outfilename = relativename + ".d/" + escape(self.cmd)
-
+         
          p = self.computeItem(i, outfilename, options)
          if p: return p
 
@@ -615,7 +627,7 @@ class FmJob():
       oname = obase + ".0"
       ename = obase + ".stderr"
       mkdirexist(os.path.dirname(oname))
-      sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
+      sout = os.fdopen(os.open(oname + ".new", os.O_CREAT|os.O_WRONLY), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
 
       cmd = self.cmd.replace('%(FM)', options.fmcmd)
@@ -636,6 +648,9 @@ class FmJob():
 
       p.statfile = statfile
       p.errfilename = ename
+      p.outfilename = oname
+      p.job = self
+      self.running += 1
       sout.close()
       serr.close()
 
@@ -847,6 +862,7 @@ and the program re-run.
       iglobs = options.inputglob
       assert (type(iglobs) == type([]))
 
+      jobname = None
       for cmd in cmds:
          reduce = False
          cmd = cmd.strip()
@@ -854,12 +870,19 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
             # First, re-distribute the data
-            self._MapComponent("%(FM) _local restore -s", iglobs, options)
+            jobname = self._MapComponent("%(FM) _local restore -s", iglobs, options, parent=jobname)
+
+            # Barrier; Wait for that job (and its parents) to finish:
+            # But first, make sure a scheduler is running
+            self._Locations().forAllLocal(["sched"]).collect()
+
+            print >>sys.stderr, "Waiting for distribute to complete before reducing.  Job", jobname
+            self._Locations().forAllLocal(["wait", jobname]).collect()
 
             # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
             reduce = True
 
-         jobname = self._MapComponent(cmd, iglobs, options, reduce=reduce)
+         jobname = self._MapComponent(cmd, iglobs, options, reduce=reduce, parent=jobname)
 
          # Each component of pipeline uses previous output as input
          if reduce:
@@ -867,6 +890,10 @@ and the program re-run.
          else:
             iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
 
+      self._Locations().forAllLocal(["sched"]).collect()
+
+      print >>sys.stderr, "Waiting for completion.  Job", jobname
+      self._Locations().forAllLocal(["wait", jobname]).collect()
       self.get(["-c"] + iglobs)
 
    def get(self, args):
@@ -874,11 +901,9 @@ and the program re-run.
 
    def cat(self, args):
       procs = self._Locations().forAll(["cat"], args, stdout=subprocess.PIPE)
-      u = procs.catStdout()
-      for line in u:
-         sys.stdout.write(line)
-
-      return procs.collect()
+      for f in procs.procs:
+            sys.stdout.writelines(f.stdout)
+      return procs.collect(ignoreErrors=True)
 
    def _local(self, args):
       """This is for slave (remote) instantiations."""
@@ -888,10 +913,83 @@ and the program re-run.
       """Simple file & directory listing."""
       if not args: args = ["/"]
       procs = self._Locations().forAllLocal(["ls"] + args, stdout=subprocess.PIPE)
-      u = Uniq(procs.mergeSorted())
-      for line in u:
-         line = line.strip()[2:]
-         if line: print line
+      ls = {}
+      for p in procs.procs:
+         pkl = p.stdout.read()
+         if not pkl: continue
+
+         try:
+            files = cPickle.loads(pkl)
+         except:
+            print >>sys.stderr, "Error", sys.exc_value, "parsing remote ls results:", pkl
+            return -1
+
+         for f in files:
+            fname = f['name']
+            if not ls.has_key(fname): ls[fname] = []
+            ls[fname] += [f]
+
+      keys = ls.keys()
+      keys.sort()
+      for k in keys:
+         base = ls[k][0]
+         nodes = [base['node']]
+         isdir = base['perms'][0] == 'd'
+         if isdir: base['size'] = 0
+         criteria = ['perms', 'user', 'group', 'size']
+         if not isdir: criteria.append('size')
+         
+
+         for i in ls[k][1:]:
+            if isdir: i['size'] = 0
+
+            # See if this node's instance matches the right criteria to be
+            # collapsed into a single output line
+            match = True
+            for a in criteria:
+               if base[a] != i[a]: 
+                  # Does not match
+                  match = False
+                  break
+
+            if match:
+               # If you specify the same file twice, we don't want
+               # the node number(s) duplicated in the node list
+               if i['node'] not in nodes:
+                  nodes.append(i['node'])
+            else:
+               # No match, so output a line for this instance
+               print self._lsline(i)
+
+         # Update the nodelist for this base instance and print it out
+         base['node'] = nodes
+         print self._lsline(base)
+         
+      return 
+
+   def _lsline(self, attrs):
+      size = "%-.2g" % attrs['size']
+      size = size.replace("e+", "e").replace("e0", "e")
+
+      nodes = attrs['node']
+      if type(nodes) != type([]): nodes = [nodes]
+
+      if len(nodes) > 1:
+         attrs['mtime'] = '-'
+      else:
+         lt = time.localtime(attrs['mtime'])
+         if lt[0] == time.localtime()[0]:
+            attrs['mtime'] = time.strftime("%b %d %H:%M", lt)
+         else:
+            attrs['mtime'] = time.strftime("%b %d  %Y", lt)
+               
+      if len(nodes) == len(self._Locations().locs):
+         nodes = '*'
+      else:
+         nodes = [str(i) for i in nodes]
+         nodes = string.join(nodes,',')
+
+      return "%s %3s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], attrs['size'], attrs['mtime'], attrs['name'])
 
    def rm(self, args):
       """
@@ -932,8 +1030,9 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
    def init(self, args):
       self._Locations().forAll(["mkdir", "-p", "%(SYNCDIR)", "%(ROOTDIR)"], ["/jobs", "/reduce"], subst=True, glob=False).collect()
  
-   def _MapComponent(self, cmd, iglobs, options, reduce=False):
+   def _MapComponent(self, cmd, iglobs, options, reduce=False, parent=None):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
+      if parent: jobdesc += "parent = %s\n" % (parent)
 
       if options.continuous:
          jobdesc += "continuous = True\n"
@@ -961,9 +1060,6 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
 
       # Install the job on each node
       self._Locations().put(jobfilename, "/jobs/").collect()
-
-      # Now make sure there's a scheduler running in each place (or hint existing scheduler)
-      self._Locations().forAllLocal(["sched", "-j", hash]).collect()
 
       return hash
 
@@ -1005,37 +1101,125 @@ directory in the virtual store that it originated in.
       n = None
       for f in args:
          dst = os.path.dirname(f[len(self.Locations.this.rootdir):]) + "/"
-         self.Locations.forAll(["mkdir", "-p"], dst, glob=False)
          
          if options.suffix: 
             ext = os.path.splitext(f)[1]
             n = ext
-         
-         dsts = self.Locations.pick(n)
+
+         # Pick some destinations.  If the algorithm picks this node,
+         # that is reasonable, but is a NOOP
+         dsts = self.Locations.pick(n, selfIsNoop=True)
          #if options.suffix: print >>sys.stderr, "Extension", ext, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
+         dsts.forAll(["mkdir", "-p"], dst, glob=False)
          dsts.put(f, dst, procs=procs)
 
       procs.collect()
 
+   def lsone(self, fname, fs):
+ 
+      # Convert to ls-style human-readable permission mask
+      perms = "?"
+      for kind in "BLK", "CHR", "DIR", "LNK", "SOCK", "REG":
+         if getattr(stat, "S_IS"+kind)(fs.st_mode):
+            perms = kind[0].lower()
+      if perms == "r": perms = "-"
+         
+      for who in "USR", "GRP", "OTH":
+         for what in "R", "W", "X":
+            if fs.st_mode & getattr(stat,"S_I"+what+who):
+               perms=perms+what.lower()
+            else:
+               perms=perms+"-"
+
+      # Construct the dict that is pickled and passed to the client
+      d = {}
+      d['name'] = fname
+      d['node'] = self.Locations.thisnum
+      d['perms'] = perms
+      d['user'] = pwd.getpwuid(fs.st_uid).pw_name
+      d['group'] = grp.getgrgid(fs.st_gid).gr_name
+      d['size'] = fs.st_size
+      d['mtime'] = fs.st_mtime
+      return d
+
    def ls(self, args):
       os.chdir(self.Locations.this.rootdir)  
-      args = [("./" + a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
+      #args = [(a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
       procs = Procs()
-      args = multiglob(args)
+      args = multiglob(["./" + a for a in args])
       if not args: return
-      cmd = ["find"] + args + ["-maxdepth", "1"]
-      procs.Popen(cmd)
-      procs.collect()
+      output = []
+      for apath in args:
+
+         # aname is the virtual name of the file; will be shown to user.
+         # So strip the leading ./ that we added to make it relative
+         aname = apath[2:].rstrip('/')
+
+         s = os.stat(apath)
+         if stat.S_ISDIR(s.st_mode):
+            for f in os.listdir(apath):
+               fpath = apath + "/" + f
+               fname = aname + "/" + f
+               output.append(self.lsone(fname, os.stat(fpath)))
+         else:
+            output.append(self.lsone(aname, s))
+            
+      sys.stdout.write(cPickle.dumps(output))
+      return
+
 
    def sched(self, args):
-      # XXX: Use -j hints
+      sockname = self.Locations.this.rootdir + "/.fmsock"
+      s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+      try:
+         s.connect(sockname)
+         ## Right now this is just for making sure a scheduler is running;
+         ## We don't actually send anything over this socket (yet).
+         #s.write(string.join(args) + "\n")
+         #print >>sys.stderr, "Connected to scheduler"
+         return
+
+      except: 
+         #print >>sys.stderr, "Warning", sys.exc_type, sys.exc_value, "; assuming scheduler not running yet"
+         newname = sockname + "." + str(os.getpid())
+         s.bind(newname)
+         s.listen(1000)
+         os.rename(newname, sockname)
+
+      # If we get here, then we've bound as the (new) server
 
       # For now, the scheduler and FmJob still assume a global Locations var
       global Locations
       Locations = self.Locations
 
       s = JobScheduler(self.Locations.this)
+      f = file(os.devnull)
+      os.dup2(f.fileno(), 0)
+
+      # daemonify
+      if os.fork():
+         return 
+
+      os.setsid()
+      if os.fork():
+         return
+
+      f = file(self.Locations.this.rootdir + "/.schedlog", 'a')
+      os.dup2(f.fileno(), 1)
+      os.dup2(f.fileno(), 2)
+
       s.RunUntilDone()
+
+   def wait(self, args):
+      """Wait for a specified jobid to complete"""
+
+      jobfile = self.Locations.this.rootdir+"/jobs/"+args[0]
+      #print >>sys.stderr, "Waiting on", jobfile
+
+      while os.path.isfile(jobfile):
+         time.sleep(1)
+
 
 def multiglob(globs):
    """Take a list of globs and return a list of all of the files that match any of those globs."""
@@ -1045,41 +1229,8 @@ def multiglob(globs):
    for g in globs:
       ret += glob.glob(g)
    return ret
-  
-class Uniq():
-   def __init__(self, iter):
-      self.iter = iter.__iter__()
 
-   def __iter__(self):
-      self.prev = None
-      self.first = True
-      return self
-
-   def next(self):
-      while True:
-         n = self.iter.next()
-         if self.first or n != self.prev: break
-
-      self.prev = n
-      self.first = False
-      return n
-      
-class FileCat():
-   def __init__(self, fileObjs): 
-      """Take a list of file objects""" 
-      self.files = fileObjs
-
-   def __iter__(self):
-      return self
-
-   def next(self):
-      while self.files:
-         l = self.files[0].readline()
-         if l: return l
-         self.files.pop(0)
-      raise StopIteration
- 
-class SubprocessMergeSorted():
+class SubprocessLs():
    def __init__(self, procs): 
       """Take a list of subprocesses"""
       self.procs = procs
@@ -1115,4 +1266,3 @@ class SubprocessMergeSorted():
       return s 
 
 FmCommands(sys.argv[1:])
-
