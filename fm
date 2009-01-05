@@ -89,10 +89,10 @@ class FmLocations:
             if s == "global": continue
             l = FmLocation()
             l.name = s
-            l.rootdir = self.config_get(s, "rootdir")         
+            l.rootdir = os.path.expanduser(self.config_get(s, "rootdir"))
             l.jobdir = l.rootdir + "/jobs"
             l.hostname = self.config_get(s, "hostname")
-            l.syncdir = self.config_get(s, "syncdir")
+            l.syncdir = os.path.expanduser(self.config_get(s, "syncdir"))
 
             l.fmcmd = os.path.expanduser(self.config_get(s, "fm", "fm"))
             l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'ControlMaster auto' -KAS ~/.ssh/%l-%r@%h:%p", raw=True))
@@ -830,6 +830,10 @@ Kill the specified job(s)
      """Show free space on each node."""
      self._Locations().forAll(["df", "-h"], "/", glob=False).collect()
 
+   def chmod(self, args):
+     """Change permissions on all nodes."""
+     self._Locations().forAll(["chmod", args[0]], args[1:]).collect()
+
    def store(self, args):
       """src... dst
 
@@ -1188,7 +1192,7 @@ directory in the virtual store that it originated in.
 
 
    def sched(self, args):
-      sockname = self.Locations.this.rootdir + "/.fmsock"
+      sockname = self.Locations.this.rootdir + "/.fmsock-" + str(os.getuid())
       s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 
       try:
@@ -1224,7 +1228,7 @@ directory in the virtual store that it originated in.
       if os.fork():
          return
 
-      f = file(self.Locations.this.rootdir + "/.schedlog", 'a')
+      f = file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid()), 'a')
       os.dup2(f.fileno(), 1)
       os.dup2(f.fileno(), 2)
 
