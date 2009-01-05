@@ -1,5 +1,4 @@
-#!/usr/bin/python
-
+#!/usr/bin/python 
 #
 # Public Domain License:
 #
@@ -44,35 +43,43 @@ def mkdirexist(path):
          raise e
 
 class FmLocations():
-   def __init__(self, config=None, locs=[], stdin=False, filename=None):
+   def __init__(self, config=None, locs=[], stdin=False):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
-      self.config = config
 
-      if not filename:
-         filename = os.environ.get('FMCONFIG')
-         #print >>sys.stderr, "Env filename is", filename
+      if config:
+         self.config = config
 
-      if filename:
-         # Read config file from stdin
+      else:
          self.config = ConfigParser.SafeConfigParser()
-         r = self.config.read(filename)
-         if not r:
-            raise Exception("Unable to locate config file")
 
-         #print >>sys.stderr, "Reading config", filename, self.config.sections()
-         os.environ['FMCONFIG'] = filename
+         if stdin:
+            # Read config file from stdin
+            self.config.readfp(sys.stdin)
 
-      elif stdin:
-         # Read config file from stdin
-         self.config = ConfigParser.SafeConfigParser()
-         self.config.readfp(sys.stdin)
+            # Keep a copy of the config around so our children can reference it
+            fd, name = tempfile.mkstemp()
+            os.environ['FMCONFIG'] = name
+            fh = os.fdopen(fd, 'w')
+            self.config.write(fh)
+            fh.close()
 
-         # Keep a copy of the config around so our children can reference it
-         fd, name = tempfile.mkstemp()
-         os.environ['FMCONFIG'] = name
-         fh = os.fdopen(fd, 'w')
-         self.config.write(fh)
-         fh.close()
+         else:
+            filename = os.environ.get('FMCONFIG')
+            #print >>sys.stderr, "Env filename is", filename
+            if not filename:
+               if os.path.isfile("filemap.conf"):
+                  filename = "filemap.conf"
+               else:
+                  filename = "/etc/filemap.conf"
+
+            # Read config file from stdin
+            r = self.config.read(filename)
+            if not r:
+               raise Exception("Unable to locate config file")
+
+            #print >>sys.stderr, "Reading config", filename, self.config.sections()
+            os.environ['FMCONFIG'] = filename
+
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
@@ -81,7 +88,7 @@ class FmLocations():
             if s == "global": continue
             l = FmLocation()
             l.name = s
-            l.rootdir = self.config.get(s, "rootdir")         
+            l.rootdir = self.config_get(s, "rootdir")         
             l.jobdir = l.rootdir + "/jobs"
             l.hostname = self.config_get(s, "hostname")
             l.syncdir = self.config_get(s, "syncdir")
@@ -709,8 +716,7 @@ class FmCommands(CommandSetBase):
 
    def _Locations(self):
       if not self._locs: 
-         f = os.environ.get('FMCONFIG', "filemap.conf")
-         self._locs = FmLocations(filename=f)
+         self._locs = FmLocations()
          #SyncDir = Locations.config.get("global", "syncdir")
       return self._locs
 
