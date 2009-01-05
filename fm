@@ -75,11 +75,12 @@ class FmLocations:
             # Read config file from stdin
             r = self.config.read(filename)
             if not r:
-               raise Exception("Unable to locate config file")
+               raise Exception("Unable to locate config file.  Set FMCONFIG or place filemap.conf in . or /etc")
 
             #print >>sys.stderr, "Reading config", filename, self.config.sections()
             os.environ['FMCONFIG'] = filename
 
+         self.replication = int(self.config_get("global", "replication", "1"))
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
@@ -133,12 +134,11 @@ class FmLocations:
       the current locations."""
 
       #print "pick seed=", seed
-      reps = self.config.getint("global", "replication")
       candidates = range(0, len(self.locs))
       used = []
       if seed: random.seed(seed)
 
-      for i in range(0, reps):
+      for i in range(0, self.replication):
          if not candidates:
             print >>sys.stderr, "Cannot pick %d locations from %d available" % (n, len(self.locs))
             break
@@ -837,10 +837,16 @@ Copy the specified file(s) into the virtual store.
       if len(args) > 1: dst += "/"
 
       procs = Procs()
-      for a in args:
-         self._Locations().pick().put(a, dst+"/", procs=procs)
+      # Iterate over args in batches.
+      # Since hashing may not be even and we want each node to be doing something,
+      # we use 1.5 * NODES / replication as the batch size
+      while args:
+	for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
+	  a = args.pop(0)
+	  if not a: break
+          self._Locations().pick().put(a, dst+"/", procs=procs)
+	procs.collect()
          
-      procs.collect()
 
    def map(self, args):
       """
@@ -998,7 +1004,7 @@ and the program re-run.
          nodes = [str(i) for i in nodes]
          nodes = string.join(nodes,',')
 
-      return "%s %3s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], attrs['size'], attrs['mtime'], attrs['name'])
+      return "%s %3s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], attrs['name'])
 
    def rm(self, args):
       """
