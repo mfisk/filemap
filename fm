@@ -816,7 +816,7 @@ Kill the specified job(s)
 
       tmpdir = tempfile.mkdtemp()
 
-      self._Locations().get(["/jobs/*", tmpdir]).collect()
+      self._Locations().get(["/jobs/*", tmpdir]).collect(ignoreErrors=true)
       fmt = "%-28s %-15s %s"
       print fmt % ("Job ID","Command", "Inputs")
          
@@ -845,11 +845,11 @@ Copy the specified file(s) into the virtual store.
       # Since hashing may not be even and we want each node to be doing something,
       # we use 1.5 * NODES / replication as the batch size
       while args:
-	for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
-	  a = args.pop(0)
-	  if not a: break
-          self._Locations().pick().put(a, dst+"/", procs=procs)
-	procs.collect()
+         for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
+            a = args.pop(0)
+            if not a: break
+            self._Locations().pick().put(a, dst+"/", procs=procs)
+         procs.collect()
          
 
    def map(self, args):
