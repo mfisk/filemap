@@ -85,10 +85,13 @@ class FmLocations():
             l.jobdir = l.rootdir + "/jobs"
             l.hostname = self.config_get(s, "hostname")
             l.syncdir = self.config_get(s, "syncdir")
-            l.fmcmd = self.config_get(s, "fm", "fm")
-            l.sshcmdstr = self.config_get(s, "ssh", "ssh -o 'ControlMaster auto' -KAS ~/.ssh/%l-%r@%h:%p", raw=True)
+
+            l.fmcmd = os.path.expanduser(self.config_get(s, "fm", "fm"))
+            l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'ControlMaster auto' -KAS ~/.ssh/%l-%r@%h:%p", raw=True))
             l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
             l.rsynccmd = shlex.split(self.config_get(s, "rsync", "rsync", raw=True), comments=True)
+            l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
+
             self.locs.append(l)
 
       # Nail open SSH connections for low-latency muxing
