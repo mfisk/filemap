@@ -825,6 +825,10 @@ Kill the specified job(s)
          print fmt % (f, j.cmd, j.inputs)
 
       rm_rf(tmpdir)
+  
+   def df(self, args):
+     """Show free space on each node."""
+     self._Locations().forAll(["df", "-h"], "/", glob=False).collect()
 
    def store(self, args):
       """src... dst
