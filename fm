@@ -42,7 +42,7 @@ def mkdirexist(path):
       else:
          raise e
 
-class FmLocations():
+class FmLocations:
    def __init__(self, config=None, locs=[], stdin=False):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
 
@@ -308,7 +308,7 @@ def parseLocationURL(locurl):
    return u
 
 
-class ErrorFile():
+class ErrorFile:
    """This class implements a few file-like methods so that it can be used
    in place of a real file in some cases.  Whatever is written to this file
    is printed on stderr with a static prefix (like syslog)."""
@@ -321,7 +321,7 @@ class ErrorFile():
 
    def fileno(self): return sys.stderr.fileno()
 
-class Procs():
+class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
@@ -382,7 +382,7 @@ class Procs():
 #   4. We assume out of band replication of the job dir across nodes (via NFS, 
 #      rsync, etc.)
 
-class JobScheduler():
+class JobScheduler:
    """JobScheduler maintains a set of child processes working on a set of jobs."""
 
    def __init__(self, options, numthreads=None):
@@ -534,7 +534,7 @@ class JobScheduler():
 
       del p
      
-class FmJob():
+class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
 
@@ -1239,7 +1239,7 @@ def multiglob(globs):
       ret += glob.glob(g)
    return ret
 
-class SubprocessLs():
+class SubprocessLs:
    def __init__(self, procs): 
       """Take a list of subprocesses"""
       self.procs = procs
