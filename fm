@@ -52,8 +52,7 @@ class FmLocations:
       else:
          self.config = ConfigParser.SafeConfigParser()
 
-         #stdin is set for fm _local instances, but children of _local can just get it from an env variable
-         if stdin and not os.environ.get('FMCONFIG'):
+         if stdin:
             # Read config file from stdin
             self.config.readfp(sys.stdin)
 
@@ -301,23 +300,6 @@ locations of this instance."""
 class FmLocation:
    def __init__(self):
       pass
-
-            
-
-
-def parseLocationURL(locurl):
-   # We define rsync+ssh as a scheme
-   urlparse.uses_netloc.append("file")
-   urlparse.uses_netloc.append("ssh")
-
-   u = urlparse.urlsplit(locurl)
-
-   # Fix-up the results
-   if not u.scheme and not u.netloc and u.path[0] == '/':
-      u = urlparse.urlparse("file://" + u.path)
-
-   return u
-
 
 class ErrorFile:
    """This class implements a few file-like methods so that it can be used
@@ -1118,11 +1100,16 @@ class FmLocalCommands(CommandSetBase):
       (options, cmd) = p.parse_args(args)
 
       if options.nodenum:
+         # If -n is given, then we are a direct slave and 
+         # should get our config on stdin
          os.environ['FMNODENUM'] = options.nodenum
+         self.Locations = FmLocations(stdin=True)
       else:
+         # We are a child of a scheduler and
+         # should pick-up the config from an environment variable
          options.nodenum = os.environ['FMNODENUM']
+         self.Locations = FmLocations()
 
-      self.Locations = FmLocations(stdin=True)
       self.Locations.thisis(int(options.nodenum))
 
       try:
