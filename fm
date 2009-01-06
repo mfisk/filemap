@@ -274,7 +274,6 @@ locations of this instance."""
          s = [i.replace('//','/') for i in s]
 
          cmd = loc.rsynccmd + [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
-         print >>sys.stderr, cmd
 
          procs.Popen(cmd)
 
@@ -412,11 +411,11 @@ class JobScheduler:
       removed = set(self.jobs) - set(jobs)
       recent = set(jobs) - set(self.jobs)
       for j in removed:
-         print "Job", j, "removed"
+         #print "Job", j, "removed"
          del self.jobs[j]
 
       for j in recent:
-         print "Job", j, "added"
+         #print "Job", j, "added"
          try:
             self.jobs[j] = FmJob(self.options.jobdir + "/" + j)
          except:
@@ -934,7 +933,6 @@ and the program re-run.
       self._Locations().forAllLocal(["wait", jobname]).collect()
 
       # Print any stderr files to stderr
-      print >>sys.stderr, "Errglobs", errglobs
       self.get(["-cn"] + errglobs, outfile=sys.stderr)
   
       # Print the results to stdout
