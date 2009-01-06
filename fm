@@ -653,7 +653,7 @@ class FmJob:
       sout.close()
       serr.close()
 
-      print >>sys.stderr, "computeItem", cmd, ">", oname, socket.gethostname(), p.pid
+      #print >>sys.stderr, "computeItem", cmd, ">", oname, socket.gethostname(), p.pid
       return p
 
 class CommandSetBase(object):
