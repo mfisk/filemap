@@ -535,8 +535,10 @@ class JobScheduler:
       print >>p.statfile, status
       p.statfile.close()
       p.statfile = None
-      
-      os.rename(p.outfilename + ".new", p.outfilename)
+     
+      for f in glob(p.outdirname + "/." + p.outbasename + ".*"):
+         os.rename(f, p.outdirname + "/" + os.path.basename(f)[1:])
+
       p.job.running -= 1 
 
       del p
@@ -641,10 +643,16 @@ class FmJob:
       statfile.flush()
 
       obase = options.rootdir + "/" + outfilename
+
+      # Now insert a "." at the beginning of the basename for partial output
+      odirname = os.path.dirname(obase)
+      obasename = os.path.dirname(obase)
+      obase = odirname + "/." + obasename
+
       oname = obase + ".0"
       ename = obase + ".stderr"
-      mkdirexist(os.path.dirname(oname))
-      sout = os.fdopen(os.open(oname + ".new", os.O_CREAT|os.O_WRONLY), "w")
+      mkdirexist(odirname)
+      sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
 
       cmd = self.cmd.replace('%(FM)', options.fmcmd)
@@ -664,8 +672,8 @@ class FmJob:
          return None
 
       p.statfile = statfile
-      p.errfilename = ename
-      p.outfilename = oname
+      p.outdirname = odirname
+      p.outbasename = obasename
       p.job = self
       self.running += 1
       sout.close()
@@ -925,8 +933,11 @@ and the program re-run.
 
       print >>sys.stderr, "Waiting for completion.  Job", jobname
       self._Locations().forAllLocal(["wait", jobname]).collect()
-      print >>sys.stderr, "Looking for errors:", errglobs
+
+      # Print any stderr files to stderr
       self.get(["-cn"] + errglobs, outfile=sys.stderr)
+  
+      # Print the results to stdout
       self.get(["-c"] + iglobs)
 
    def get(self, *args, **kwargs):
