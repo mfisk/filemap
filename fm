@@ -1,5 +1,4 @@
-#!/usr/bin/python
-
+#!/usr/bin/python 
 #
 # Public Domain License:
 #
@@ -43,36 +42,45 @@ def mkdirexist(path):
       else:
          raise e
 
-class FmLocations():
-   def __init__(self, config=None, locs=[], stdin=False, filename=None):
+class FmLocations:
+   def __init__(self, config=None, locs=[], stdin=False):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
-      self.config = config
 
-      if not filename:
-         filename = os.environ.get('FMCONFIG')
-         #print >>sys.stderr, "Env filename is", filename
+      if config:
+         self.config = config
 
-      if filename:
-         # Read config file from stdin
+      else:
          self.config = ConfigParser.SafeConfigParser()
-         r = self.config.read(filename)
-         if not r:
-            raise Exception("Unable to locate config file")
 
-         #print >>sys.stderr, "Reading config", filename, self.config.sections()
-         os.environ['FMCONFIG'] = filename
+         if stdin:
+            # Read config file from stdin
+            self.config.readfp(sys.stdin)
 
-      elif stdin:
-         # Read config file from stdin
-         self.config = ConfigParser.SafeConfigParser()
-         self.config.readfp(sys.stdin)
+            # Keep a copy of the config around so our children can reference it
+            fd, name = tempfile.mkstemp()
+            os.environ['FMCONFIG'] = name
+            fh = os.fdopen(fd, 'w')
+            self.config.write(fh)
+            fh.close()
 
-         # Keep a copy of the config around so our children can reference it
-         fd, name = tempfile.mkstemp()
-         os.environ['FMCONFIG'] = name
-         fh = os.fdopen(fd, 'w')
-         self.config.write(fh)
-         fh.close()
+         else:
+            filename = os.environ.get('FMCONFIG')
+            #print >>sys.stderr, "Env filename is", filename
+            if not filename:
+               if os.path.isfile("filemap.conf"):
+                  filename = "filemap.conf"
+               else:
+                  filename = "/etc/filemap.conf"
+
+            # Read config file from stdin
+            r = self.config.read(filename)
+            if not r:
+               raise Exception("Unable to locate config file.  Set FMCONFIG or place filemap.conf in . or /etc")
+
+            #print >>sys.stderr, "Reading config", filename, self.config.sections()
+            os.environ['FMCONFIG'] = filename
+
+         self.replication = int(self.config_get("global", "replication", "1"))
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
@@ -81,10 +89,10 @@ class FmLocations():
             if s == "global": continue
             l = FmLocation()
             l.name = s
-            l.rootdir = self.config.get(s, "rootdir")         
+            l.rootdir = os.path.expanduser(self.config_get(s, "rootdir"))
             l.jobdir = l.rootdir + "/jobs"
             l.hostname = self.config_get(s, "hostname")
-            l.syncdir = self.config_get(s, "syncdir")
+            l.syncdir = os.path.expanduser(self.config_get(s, "syncdir"))
 
             l.fmcmd = os.path.expanduser(self.config_get(s, "fm", "fm"))
             l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'ControlMaster auto' -KAS ~/.ssh/%l-%r@%h:%p", raw=True))
@@ -126,12 +134,11 @@ class FmLocations():
       the current locations."""
 
       #print "pick seed=", seed
-      reps = self.config.getint("global", "replication")
       candidates = range(0, len(self.locs))
       used = []
       if seed: random.seed(seed)
 
-      for i in range(0, reps):
+      for i in range(0, self.replication):
          if not candidates:
             print >>sys.stderr, "Cannot pick %d locations from %d available" % (n, len(self.locs))
             break
@@ -236,11 +243,15 @@ locations of this instance."""
 
       return procs
 
-   def get(self, args, procs=None):
+   def get(self, args, procs=None, outfile=sys.stdout, relative=True):
       p = optparse.OptionParser()
       p.disable_interspersed_args()
       p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
+      p.add_option("-n", "--name", action="store_true", help="Show file name when catting files")
       (options, args) = p.parse_args(args)
+
+      rsyncflags = "-rptgo"
+      if relative: rsyncflags += "R"
 
       if options.cat:
          assert(len(args) > 0)
@@ -254,7 +265,9 @@ locations of this instance."""
       if not procs: procs = Procs()
 
       for loc in self.locs:
-         s = [loc.rootdir + "/" + f for f in src]
+	 # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
+         # in the path between the rootdir and the relative path
+         s = [loc.rootdir + "/./" + f for f in src]
          #print loc.rootdir, src, s
 
          if loc.hostname:
@@ -265,17 +278,30 @@ locations of this instance."""
                #print >>sys.stderr, "No such file:", src
                continue
 
-         cmd = loc.rsynccmd + ["-Rrptgo", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
+         # Cleanup the path to encourage rsync to get "/./" magic right
+         s = [i.replace('//','/') for i in s]
+
+         cmd = loc.rsynccmd + [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
+         print >>sys.stderr, cmd
 
          procs.Popen(cmd)
 
-      procs.collect()
+      procs.collect(ignoreErrors=True)
 
       if options.cat:
+         empty = True
          for (dirpath, dirnames, filenames) in os.walk(dst):
             for f in filenames:
                fname = os.path.join(dirpath, f)
-               sys.stdout.writelines(file(fname))
+               if os.path.getsize(fname):
+                  if options.name:
+                     relname = fname[len(dst):]
+                     print >>outfile, "=== %s ===" % relname
+                     empty = False
+                  outfile.writelines(file(fname))
+         if options.name and not empty:
+            print >>outfile, "======"
+
          rm_rf(dst)
 
       return procs
@@ -301,7 +327,7 @@ def parseLocationURL(locurl):
    return u
 
 
-class ErrorFile():
+class ErrorFile:
    """This class implements a few file-like methods so that it can be used
    in place of a real file in some cases.  Whatever is written to this file
    is printed on stderr with a static prefix (like syslog)."""
@@ -314,7 +340,7 @@ class ErrorFile():
 
    def fileno(self): return sys.stderr.fileno()
 
-class Procs():
+class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
@@ -375,7 +401,7 @@ class Procs():
 #   4. We assume out of band replication of the job dir across nodes (via NFS, 
 #      rsync, etc.)
 
-class JobScheduler():
+class JobScheduler:
    """JobScheduler maintains a set of child processes working on a set of jobs."""
 
    def __init__(self, options, numthreads=None):
@@ -509,25 +535,15 @@ class JobScheduler():
       print >>p.statfile, status
       p.statfile.close()
       p.statfile = None
-      
-      # Print errors to stderr
-      errs = file(p.errfilename)
-      first = True
-      for line in errs: 
-         if first: 
-            print >>sys.stderr, "== Errors from %s ==" % p.errfilename
-            first = None
-         
-         sys.stderr.write(line)
-      if not first:
-         print >>sys.stderr, "=="
+     
+      for f in glob(p.outdirname + "/." + p.outbasename + ".*"):
+         os.rename(f, p.outdirname + "/" + os.path.basename(f)[1:])
 
-      os.rename(p.outfilename + ".new", p.outfilename)
       p.job.running -= 1 
 
       del p
      
-class FmJob():
+class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
 
@@ -627,10 +643,16 @@ class FmJob():
       statfile.flush()
 
       obase = options.rootdir + "/" + outfilename
+
+      # Now insert a "." at the beginning of the basename for partial output
+      odirname = os.path.dirname(obase)
+      obasename = os.path.dirname(obase)
+      obase = odirname + "/." + obasename
+
       oname = obase + ".0"
       ename = obase + ".stderr"
-      mkdirexist(os.path.dirname(oname))
-      sout = os.fdopen(os.open(oname + ".new", os.O_CREAT|os.O_WRONLY), "w")
+      mkdirexist(odirname)
+      sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
 
       cmd = self.cmd.replace('%(FM)', options.fmcmd)
@@ -650,8 +672,8 @@ class FmJob():
          return None
 
       p.statfile = statfile
-      p.errfilename = ename
-      p.outfilename = oname
+      p.outdirname = odirname
+      p.outbasename = obasename
       p.job = self
       self.running += 1
       sout.close()
@@ -709,9 +731,7 @@ class FmCommands(CommandSetBase):
 
    def _Locations(self):
       if not self._locs: 
-         f = os.environ.get('FMCONFIG', "filemap.conf")
-         self._locs = FmLocations(filename=f)
-         #SyncDir = Locations.config.get("global", "syncdir")
+         self._locs = FmLocations()
       return self._locs
 
    def split(self, args):
@@ -786,7 +806,7 @@ Kill the specified job(s)
          print >>sys.stderr, "Must specify a JobId to kill"
          return False
       args = ["/jobs/" + a for a in args]
-      self._Locations.forAll(["rm"], args).collect()
+      self._Locations().forAll(["rm", "-f"], args).collect()
 
    def mv(self, args):
       """src... dst\nRename a file within the virtual store."""
@@ -810,15 +830,23 @@ Kill the specified job(s)
 
       tmpdir = tempfile.mkdtemp()
 
-      self._Locations().get(["/jobs/*", tmpdir]).collect()
+      self._Locations().get(["/jobs/*", tmpdir], relative=False)
       fmt = "%-28s %-15s %s"
       print fmt % ("Job ID","Command", "Inputs")
-         
+        
       for f in os.listdir(tmpdir):
          j = FmJob(os.path.join(tmpdir, f))
          print fmt % (f, j.cmd, j.inputs)
 
       rm_rf(tmpdir)
+  
+   def df(self, args):
+     """Show free space on each node."""
+     self._Locations().forAll(["df", "-h"], "/", glob=False).collect()
+
+   def chmod(self, args):
+     """Change permissions on all nodes."""
+     self._Locations().forAll(["chmod", args[0]], args[1:]).collect()
 
    def store(self, args):
       """src... dst
@@ -831,10 +859,16 @@ Copy the specified file(s) into the virtual store.
       if len(args) > 1: dst += "/"
 
       procs = Procs()
-      for a in args:
-         self._Locations().pick().put(a, dst+"/", procs=procs)
+      # Iterate over args in batches.
+      # Since hashing may not be even and we want each node to be doing something,
+      # we use 1.5 * NODES / replication as the batch size
+      while args:
+         for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
+            a = args.pop(0)
+            if not a: break
+            self._Locations().pick().put(a, dst+"/", procs=procs)
+         procs.collect()
          
-      procs.collect()
 
    def map(self, args):
       """
@@ -889,18 +923,25 @@ and the program re-run.
 
          # Each component of pipeline uses previous output as input
          if reduce:
+	    errglobs += ["/reduce/" + jobname + ".stderr"]
             iglobs = ["/reduce/" + jobname + ".*[0-9]"]
          else:
+            errglobs = [i + ".d/" + escape(cmd) + ".stderr" for i in iglobs]
             iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
 
       self._Locations().forAllLocal(["sched"]).collect()
 
       print >>sys.stderr, "Waiting for completion.  Job", jobname
       self._Locations().forAllLocal(["wait", jobname]).collect()
+
+      # Print any stderr files to stderr
+      self.get(["-cn"] + errglobs, outfile=sys.stderr)
+  
+      # Print the results to stdout
       self.get(["-c"] + iglobs)
 
-   def get(self, args):
-      return self._Locations().get(args)
+   def get(self, *args, **kwargs):
+      return self._Locations().get(*args, **kwargs)
 
    def cat(self, args):
       procs = self._Locations().forAll(["cat"], args, stdout=subprocess.PIPE)
@@ -992,7 +1033,7 @@ and the program re-run.
          nodes = [str(i) for i in nodes]
          nodes = string.join(nodes,',')
 
-      return "%s %3s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], attrs['size'], attrs['mtime'], attrs['name'])
+      return "%s %3s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], attrs['name'])
 
    def rm(self, args):
       """
@@ -1172,7 +1213,7 @@ directory in the virtual store that it originated in.
 
 
    def sched(self, args):
-      sockname = self.Locations.this.rootdir + "/.fmsock"
+      sockname = self.Locations.this.rootdir + "/.fmsock-" + str(os.getuid())
       s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 
       try:
@@ -1208,7 +1249,7 @@ directory in the virtual store that it originated in.
       if os.fork():
          return
 
-      f = file(self.Locations.this.rootdir + "/.schedlog", 'a')
+      f = file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid()), 'a')
       os.dup2(f.fileno(), 1)
       os.dup2(f.fileno(), 2)
 
@@ -1233,7 +1274,7 @@ def multiglob(globs):
       ret += glob.glob(g)
    return ret
 
-class SubprocessLs():
+class SubprocessLs:
    def __init__(self, procs): 
       """Take a list of subprocesses"""
       self.procs = procs
