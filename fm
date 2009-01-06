@@ -52,7 +52,8 @@ class FmLocations:
       else:
          self.config = ConfigParser.SafeConfigParser()
 
-         if stdin:
+         #stdin is set for fm _local instances, but children of _local can just get it from an env variable
+         if stdin and not os.environ.get('FMCONFIG'):
             # Read config file from stdin
             self.config.readfp(sys.stdin)
 
@@ -903,9 +904,9 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
             # First, re-distribute the data
-            cmd = "%(FM) _local restore -s" 
-            jobname = self._MapComponent(cmd, iglobs, options, parent=jobname)
-            errglobs += [i + ".d/" + escape(cmd) + ".stderr" for i in iglobs]
+            restore = "%(FM) _local restore -s" 
+            jobname = self._MapComponent(restore, iglobs, options, parent=jobname)
+            errglobs += [i + ".d/" + escape(restore) + ".stderr" for i in iglobs]
             # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
 
             # Barrier; Wait for that job (and its parents) to finish:
