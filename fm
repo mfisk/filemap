@@ -536,18 +536,6 @@ class JobScheduler:
       p.statfile.close()
       p.statfile = None
       
-      # Print errors to stderr
-      errs = file(p.errfilename)
-      first = True
-      for line in errs: 
-         if first: 
-            print >>sys.stderr, "== Errors from %s ==" % p.errfilename
-            first = None
-         
-         sys.stderr.write(line)
-      if not first:
-         print >>sys.stderr, "=="
-
       os.rename(p.outfilename + ".new", p.outfilename)
       p.job.running -= 1 
 
