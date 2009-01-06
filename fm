@@ -243,11 +243,15 @@ locations of this instance."""
 
       return procs
 
-   def get(self, args, procs=None):
+   def get(self, args, procs=None, outfile=sys.stdout, relative=True):
       p = optparse.OptionParser()
       p.disable_interspersed_args()
       p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
+      p.add_option("-n", "--name", action="store_true", help="Show file name when catting files")
       (options, args) = p.parse_args(args)
+
+      rsyncflags = "-rptgo"
+      if relative: rsyncflags += "R"
 
       if options.cat:
          assert(len(args) > 0)
@@ -261,7 +265,9 @@ locations of this instance."""
       if not procs: procs = Procs()
 
       for loc in self.locs:
-         s = [loc.rootdir + "/" + f for f in src]
+	 # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
+         # in the path between the rootdir and the relative path
+         s = [loc.rootdir + "/./" + f for f in src]
          #print loc.rootdir, src, s
 
          if loc.hostname:
@@ -272,17 +278,30 @@ locations of this instance."""
                #print >>sys.stderr, "No such file:", src
                continue
 
-         cmd = loc.rsynccmd + ["-Rrptgo", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
+         # Cleanup the path to encourage rsync to get "/./" magic right
+         s = [i.replace('//','/') for i in s]
+
+         cmd = loc.rsynccmd + [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
+         print >>sys.stderr, cmd
 
          procs.Popen(cmd)
 
-      procs.collect()
+      procs.collect(ignoreErrors=True)
 
       if options.cat:
+         empty = True
          for (dirpath, dirnames, filenames) in os.walk(dst):
             for f in filenames:
                fname = os.path.join(dirpath, f)
-               sys.stdout.writelines(file(fname))
+               if os.path.getsize(fname):
+                  if options.name:
+                     relname = fname[len(dst):]
+                     print >>outfile, "=== %s ===" % relname
+                     empty = False
+                  outfile.writelines(file(fname))
+         if options.name and not empty:
+            print >>outfile, "======"
+
          rm_rf(dst)
 
       return procs
@@ -717,7 +736,6 @@ class FmCommands(CommandSetBase):
    def _Locations(self):
       if not self._locs: 
          self._locs = FmLocations()
-         #SyncDir = Locations.config.get("global", "syncdir")
       return self._locs
 
    def split(self, args):
@@ -792,7 +810,7 @@ Kill the specified job(s)
          print >>sys.stderr, "Must specify a JobId to kill"
          return False
       args = ["/jobs/" + a for a in args]
-      self._Locations.forAll(["rm"], args).collect()
+      self._Locations().forAll(["rm", "-f"], args).collect()
 
    def mv(self, args):
       """src... dst\nRename a file within the virtual store."""
@@ -816,10 +834,10 @@ Kill the specified job(s)
 
       tmpdir = tempfile.mkdtemp()
 
-      self._Locations().get(["/jobs/*", tmpdir]).collect(ignoreErrors=true)
+      self._Locations().get(["/jobs/*", tmpdir], relative=False)
       fmt = "%-28s %-15s %s"
       print fmt % ("Job ID","Command", "Inputs")
-         
+        
       for f in os.listdir(tmpdir):
          j = FmJob(os.path.join(tmpdir, f))
          print fmt % (f, j.cmd, j.inputs)
@@ -909,18 +927,22 @@ and the program re-run.
 
          # Each component of pipeline uses previous output as input
          if reduce:
+	    errglobs += ["/reduce/" + jobname + ".stderr"]
             iglobs = ["/reduce/" + jobname + ".*[0-9]"]
          else:
+            errglobs = [i + ".d/" + escape(cmd) + ".stderr" for i in iglobs]
             iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
 
       self._Locations().forAllLocal(["sched"]).collect()
 
       print >>sys.stderr, "Waiting for completion.  Job", jobname
       self._Locations().forAllLocal(["wait", jobname]).collect()
+      print >>sys.stderr, "Looking for errors:", errglobs
+      self.get(["-cn"] + errglobs, outfile=sys.stderr)
       self.get(["-c"] + iglobs)
 
-   def get(self, args):
-      return self._Locations().get(args)
+   def get(self, *args, **kwargs):
+      return self._Locations().get(*args, **kwargs)
 
    def cat(self, args):
       procs = self._Locations().forAll(["cat"], args, stdout=subprocess.PIPE)
