@@ -81,6 +81,8 @@ class FmLocations:
             os.environ['FMCONFIG'] = filename
 
          self.replication = int(self.config_get("global", "replication", "1"))
+         self.umask = int(self.config_get("global", "umask", "0002"))
+         os.umask(self.umask)
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
@@ -168,27 +170,21 @@ locations of this instance."""
 
       return self.forAll(cmd, subst=True, stdout=stdout, stdinstr=fp.getvalue())
 
-   def forAll(self, Cmdv, src=[], dst=[], absolutes=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, stderr=None, call=False, once=False):
+   def forAll(self, Cmdv, src=[], dst=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, stderr=None, call=False, once=False):
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
 
-      if subst:
-         def sub(loc, cmdword, num):
-            return cmdword.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(num)).replace("%(FM)", loc.fmcmd)
-            
       if stdinstr:
          std=subprocess.PIPE
 
       procs = Procs(stdinstr=stdinstr, stdout=stdout, stderr=stderr)
 
-      i = 0
+      nodenum = 0
       for loc in self.locs:
          if subst: 
-            cmd = [sub(loc,n,i) for n in Cmdv]
-            a = [sub(loc,s,i) for s in absolutes]
+            cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(nodenum)).replace("%(FM)", loc.fmcmd) for n in Cmdv]
          else:
             cmd = list(Cmdv)
-            a = absolutes
 
          s = [loc.rootdir + "/" + f for f in src]
          d = [loc.rootdir + "/" + f for f in dst]
@@ -204,21 +200,17 @@ locations of this instance."""
                d = multiglob(d)
                if not d: continue
 
-            if a and glob:
-               a = multiglob(a)
-               if not a: continue
-
-            cmd += s + d + a
+            cmd += s + d 
             
          if trailer:
             cmd += trailer
 
          procs.Popen(cmd, call=call)
 
-         i += 1
+         nodenum += 1
 
          # Stop now if "once" argument was set
-         if once and i: return procs
+         if once and nodenum: return procs
 
       return procs
    
@@ -536,7 +528,7 @@ class JobScheduler:
       p.statfile.close()
       p.statfile = None
      
-      for f in glob(p.outdirname + "/." + p.outbasename + ".*"):
+      for f in glob.glob(p.outdirname + "/." + p.outbasename + ".*"):
          os.rename(f, p.outdirname + "/" + os.path.basename(f)[1:])
 
       p.job.running -= 1 
@@ -646,7 +638,7 @@ class FmJob:
 
       # Now insert a "." at the beginning of the basename for partial output
       odirname = os.path.dirname(obase)
-      obasename = os.path.dirname(obase)
+      obasename = os.path.basename(obase)
       obase = odirname + "/." + obasename
 
       oname = obase + ".0"
@@ -820,10 +812,10 @@ Kill the specified job(s)
  
       return self._Locations().forAll(["mv"], each, dst).collect()
 
-   def mkdir(self, args):
+   def mkdir(self, args, absolutes=[]):
       """Make a directory (or directories) on all nodes.  Has unix "mkdir -p" semantics."""
       # Make sure destination exists
-      self._Locations().forAll(["mkdir", "-p"], args, glob=False).collect()
+      self._Locations().forAll(["mkdir", "-p", "-m", "2775"] + absolutes, args, subst=True, glob=False).collect()
 
    def jobs(self, args):
       """Show all of the jobs still active."""
@@ -844,9 +836,13 @@ Kill the specified job(s)
      """Show free space on each node."""
      self._Locations().forAll(["df", "-h"], "/", glob=False).collect()
 
-   def chmod(self, args):
+   def chmod(self, args, absolutes=[]):
      """Change permissions on all nodes."""
-     self._Locations().forAll(["chmod", args[0]], args[1:]).collect()
+     self._Locations().forAll(["chmod", args[0]] + absolutes, args[1:], subst=True).collect()
+
+   def chgrp(self, args, absolutes=[]):
+     """Change GID on all nodes."""
+     self._Locations().forAll(["chgrp", args[0]] + absolutes, args[1:], subst=True).collect()
 
    def store(self, args):
       """src... dst
@@ -864,8 +860,8 @@ Copy the specified file(s) into the virtual store.
       # we use 1.5 * NODES / replication as the batch size
       while args:
          for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
+	    if not args: break
             a = args.pop(0)
-            if not a: break
             self._Locations().pick().put(a, dst+"/", procs=procs)
          procs.collect()
          
@@ -897,6 +893,7 @@ and the program re-run.
       
       cmds = string.join(cmd).split("|")
       iglobs = options.inputglob
+      errglobs = []
       assert (type(iglobs) == type([]))
 
       jobname = None
@@ -907,7 +904,10 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
             # First, re-distribute the data
-            jobname = self._MapComponent("%(FM) _local restore -s", iglobs, options, parent=jobname)
+            cmd = "%(FM) _local restore -s" 
+            jobname = self._MapComponent(cmd, iglobs, options, parent=jobname)
+            errglobs += [i + ".d/" + escape(cmd) + ".stderr" for i in iglobs]
+            # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
 
             # Barrier; Wait for that job (and its parents) to finish:
             # But first, make sure a scheduler is running
@@ -916,7 +916,6 @@ and the program re-run.
             print >>sys.stderr, "Waiting for distribute to complete before reducing.  Job", jobname
             self._Locations().forAllLocal(["wait", jobname]).collect()
 
-            # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
             reduce = True
 
          jobname = self._MapComponent(cmd, iglobs, options, reduce=reduce, parent=jobname)
@@ -926,7 +925,7 @@ and the program re-run.
 	    errglobs += ["/reduce/" + jobname + ".stderr"]
             iglobs = ["/reduce/" + jobname + ".*[0-9]"]
          else:
-            errglobs = [i + ".d/" + escape(cmd) + ".stderr" for i in iglobs]
+            errglobs += [i + ".d/" + escape(cmd) + ".stderr" for i in iglobs]
             iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
 
       self._Locations().forAllLocal(["sched"]).collect()
@@ -935,6 +934,7 @@ and the program re-run.
       self._Locations().forAllLocal(["wait", jobname]).collect()
 
       # Print any stderr files to stderr
+      print >>sys.stderr, "Errglobs", errglobs
       self.get(["-cn"] + errglobs, outfile=sys.stderr)
   
       # Print the results to stdout
@@ -1072,7 +1072,11 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
       return self._Locations().forAll(["rm", "-f"] + options, args).collect()
 
    def init(self, args):
-      self._Locations().forAll(["mkdir", "-p", "%(SYNCDIR)", "%(ROOTDIR)"], ["/jobs", "/reduce"], subst=True, glob=False).collect()
+      """Create/correct directory structure.  If a groupname is specified, it will be applied to the directories."""
+      self.mkdir(["/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
+      if args:
+         self.chgrp([args[0], "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
+      self.chmod(["g+rwx,g+s", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
  
    def _MapComponent(self, cmd, iglobs, options, reduce=False, parent=None):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
@@ -1100,7 +1104,7 @@ Remove empty directory (or directories).  Normal rmdir flags are passed through.
 
          # Delete sync files so that computation is forced to (re-)execute
          # These files are shared, so our forAll() is set to do only one node (once=True)
-         self._Locations().forAll(["rm", "-f"], absolutes=statfiles, once=True, subst=True).collect()
+         self._Locations().forAll(["rm", "-f"] + statfiles,  once=True, subst=True).collect()
 
       # Install the job on each node
       self._Locations().put(jobfilename, "/jobs/").collect()
@@ -1159,22 +1163,34 @@ directory in the virtual store that it originated in.
 
       procs.collect()
 
+   def lscharmod(self, perms, offset, chr):
+      perms = list(perms)
+      if perms[offset] == "-": 
+           perms[offset] = chr.upper()
+      else:
+           perms[offset] = chr.lower()
+      return string.join(perms, '')
+
    def lsone(self, fname, fs):
- 
       # Convert to ls-style human-readable permission mask
       perms = "?"
-      for kind in "BLK", "CHR", "DIR", "LNK", "SOCK", "REG":
+      for kind in "BLK", "CHR", "DIR", "LNK", "SOCK", "FIFO", "REG":
          if getattr(stat, "S_IS"+kind)(fs.st_mode):
-            perms = kind[0].lower()
+            perms = kind[0].lower().replace("f","p")
       if perms == "r": perms = "-"
          
       for who in "USR", "GRP", "OTH":
          for what in "R", "W", "X":
             if fs.st_mode & getattr(stat,"S_I"+what+who):
-               perms=perms+what.lower()
+               c = what.lower()
             else:
-               perms=perms+"-"
+               c = "-"
+            perms += c
 
+      if stat.S_ISUID & fs.st_mode: perms = self.lscharmod(perms, 3, "s")
+      if stat.S_ISGID & fs.st_mode: perms = self.lscharmod(perms, 6, "s")
+      if stat.S_ISVTX & fs.st_mode: perms = self.lscharmod(perms, 9, "t")
+ 
       # Construct the dict that is pickled and passed to the client
       d = {}
       d['name'] = fname
