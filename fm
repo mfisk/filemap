@@ -405,22 +405,6 @@ class JobScheduler:
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
 
-   def RunUntilDone(self):
-      """Run until all jobs complete."""
-
-      # Run as long as there are jobs (new data may arrive later)
-      while True:
-         while self.RunUntilNoInput():
-            break
-
-         if not len(self.jobs): 
-            return
-
-         # If we get here, then we ran out of stuff to do, so wait a bit before trying again
-         #print >>sys.stderr, "Nothing to do, waiting for work"
-
-         time.sleep(1)
-
    def RunOnce(self):
          """Try to launch a work item and return True on success (None->nothing to do)"""
 
@@ -450,7 +434,7 @@ class JobScheduler:
       #print >>sys.stderr, "Job", job, "done"
       os.unlink(self.options.jobdir + "/" + job)
 
-   def RunUntilNoInput(self):
+   def RunUntilDone(self):
       """Run until there is no more input on it.  Return True iff we did something"""
 
       didSomething = False
@@ -459,16 +443,13 @@ class JobScheduler:
       while True:
          if self.freethreads:
             self.ReadJobDir()  
+            if not len(self.procs) and not len(self.jobs):
+               # Doing nothing and no more jobs to run
+               return didSomething
             if self.RunOnce():
                didSomething = True
             else:
                # Nothing to do right now
-
-               if not len(self.procs): 
-                  # Nothing still running, so return
-                  #print >>sys.stderr, "RunOnce() not true; no running procs"
-                  return didSomething 
-
                # Don't return because we're still working,
                # but wait before we look for more work to do.
                #print >>sys.stderr, "Wait for completion (and/or more work)"
