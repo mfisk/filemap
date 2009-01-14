@@ -256,11 +256,14 @@ locations of this instance."""
 
       if not procs: procs = Procs()
 
+
       for loc in self.locs:
 	 # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
          # in the path between the rootdir and the relative path
          s = [loc.rootdir + "/./" + f for f in src]
          #print loc.rootdir, src, s
+
+         s.append("/etc/hosts") # Need a noop for rsync
 
          if loc.hostname:
             s = [loc.hostname + ":" + string.join(s)]
@@ -273,7 +276,16 @@ locations of this instance."""
          # Cleanup the path to encourage rsync to get "/./" magic right
          s = [i.replace('//','/') for i in s]
 
-         cmd = loc.rsynccmd + [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
+         # rsync complains when we specify a glob that doesn't match on the far end.
+         # So execute the remote rsync under bash with the 'nullglob' shopt set so that 
+         # an unmatched glob is excluded.
+         # But if we expanded the list of sources to an empty string, then rsync treats it as .
+         # which can lead to a recursive get of ., which is bad.
+         # So we include /etc/hosts artifically in the list of files to get
+         # and then use --exclude to not actually transfer it
+         cmd = loc.rsynccmd + ['--exclude', 'hosts', "--rsync-path=bash -O nullglob -c 'rsync $@' --"]
+
+         cmd += [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
 
          procs.Popen(cmd)
 
