@@ -629,6 +629,8 @@ class FmJob:
       return None # Nothing to do
 
    def computeItem(self, inputs, outfilename, options):
+      """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
+
       if type(inputs) != type([]):
          inputs = [inputs]
 
