@@ -140,7 +140,7 @@ class FmLocations:
             l.syncdir = os.path.expanduser(self.config_get(s, "syncdir"))
 
             l.fmcmd = os.path.expanduser(self.config_get(s, "fm", "fm"))
-            l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'ControlMaster auto' -KAS ~/.ssh/%l-%r@%h:%p", raw=True))
+            l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'GSSAPIDelegateCredentials yes' -A", raw=True))
             l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
             l.rsynccmd = shlex.split(self.config_get(s, "rsync", "rsync", raw=True), comments=True)
             l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
