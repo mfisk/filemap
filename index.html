@@ -27,7 +27,7 @@
     .download { float: right; }
     .code { border: 1px solid #000; background: #eee; color: #000; padding: 0.5em; text-indent: -2em; padding-left: 2.5em}
     .code p { text-align: left; margin: 0px; }
-    p { max-width: 500px; text-align: justify; text-justify: newspaper; }
+    p { max-width: 500px; line-height: 1.3; text-align: justify; text-justify: newspaper; }
     hr { border: 0; width: 80%; border-bottom: 1px solid #aaa}
 	</style>
 	
@@ -40,18 +40,26 @@
     <h1>FileMap: 
       <span class="small">File-Based Map-Reduce</small></h1>
 
-<p>
+<p>FileMap is a lightweight system for applying Unix-style file processing tools to large amounts of data stored in files.  It provides full <a href="http://wikipedia.org/Map_reduce">map-reduce</a> functionality without requiring that you switch your processing to any particular language or runtime environment, install any special software, or have root on your storage and processing nodes.
 
-FileMap is a lightweight system for applying Unix-style file processing tools to large amounts of data stored in files.  It provides full map-reduce functionality without requiring that you switch your processing to any particular language or runtime environment, install any special software, or have root on your storage and processing nodes.
+<h2>Features</h2>
 
-
+<ul>
+<li>Automatic caching and reuse of intermediate results
+<li>Data replication
+<li>No head or control node
+<li>No installation or privileged user acess required
+<li><i><a href="http://wiki.github.com/mfisk/filemap">...more...</a></i>
+</ul>
 
 <h2>Usage</h2>
-<div class="code">$ fm store *.txt /etext/
+
+<p><i>Example:</i>
+Compute word frequencies in a text corpus.  FileMap stores the files across a set of machines and executes the pipeline in parallel.  Word list are divided up across the nodes and tallied in parallel:
+<div class="code" width="80%">$ fm store *.txt /etext/
 <p>$ fm map -i "/etext/*" "sed -f words.sed | fm split -n 9 |> sort | uniq -c"
 </div>
 
-<p>Compute word frequencies in a text corpus.  FileMap stores the files across a set of machines and executes the pipeline in parallel.  Word list are divided up across the nodes and tallied in parallel.
 
 <p>Read more about <a href="http://wiki.github.com/mfisk/filemap/Examples">this example</a> and FileMap in the <a href="http://wiki.github.com/mfisk/filemap">Wiki</a>.
 
@@ -72,7 +80,7 @@ FileMap is a lightweight system for applying Unix-style file processing tools to
 
     You can <a href="http://github.com/mfisk/filemap">browse the source</a>, clone it with <a href="http://git-scm.org/">Git</a>, and publish changes at <a href="http://github.com/mfisk/filemap">GitHub</a>.
 
-    <p><img src="feed-icon-14x14.png"><a href="http://github.com/feeds/mfisk/commits/filemap/master">Changelog</a>
+    <p><img src="feed-icon-14x14.png"> <a href="http://github.com/feeds/mfisk/commits/filemap/master">Changelog</a>
 
     <h2>Reporting Problems</h2>
      
