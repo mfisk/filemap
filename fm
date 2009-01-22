@@ -989,10 +989,10 @@ and the program re-run.
          errstr = ''
          for k in errcodes.keys():
             if not errstr: 
-               errstr = "%d processes returned %d; " % (errcodes[k], k)
+               errstr = "%d processes returned %d" % (errcodes[k], k)
             else:
-               errstr += "%d x %d; " % (errcodes[k], k)
-         print >>sys.stderr, "%s%gu+%gs CPU seconds." % (errstr, utime, stime)
+               errstr += "; %d x %d" % (errcodes[k], k)
+         print >>sys.stderr, errstr, "in %gu+%gs CPU seconds." % (utime, stime)
   
       # Print the results to stdout
       self.get(["-c"] + iglobs)
