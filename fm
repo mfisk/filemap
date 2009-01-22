@@ -974,8 +974,7 @@ and the program re-run.
          syncdir = None
          print >>sys.stderr, "No global syncdir, cannot check exit statuses"
 
-      nonzeros = 0
-      zeros = 0
+      errcodes = {}
       if syncdir:
          utime = stime = 0.0
          statglobs = [syncdir + f for f in eglobs]
@@ -983,13 +982,17 @@ and the program re-run.
             f = file(f)
             line = f.readlines()[1]
             stats = line.split()
-            if int(stats[0]): 
-               nonzeros += 1
-            else:
-               zeros += 1
+            ec = os.WEXITSTATUS(int(stats[0]))
+            errcodes[ec] = errcodes.get(ec, 0) + 1
             utime += float(stats[1])
             stime += float(stats[2])
-         print >>sys.stderr, "%d/%d processes returned errors in %gu+%gs CPU seconds." % (nonzeros, nonzeros+zeros, utime, stime)
+         errstr = ''
+         for k in errcodes.keys():
+            if not errstr: 
+               errstr = "%d processes returned %d; " % (errcodes[k], k)
+            else:
+               errstr += "%d x %d; " % (errcodes[k], k)
+         print >>sys.stderr, "%s%gu+%gs CPU seconds." % (errstr, utime, stime)
   
       # Print the results to stdout
       self.get(["-c"] + iglobs)
