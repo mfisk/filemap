@@ -969,6 +969,7 @@ and the program re-run.
       # Check exit codes
       try:
          syncdir = self._Locations().config.get("global", "syncdir")
+         syncdir = os.path.expanduser(syncdir)
       except:
          syncdir = None
          print >>sys.stderr, "No global syncdir, cannot check exit statuses"
