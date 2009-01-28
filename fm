@@ -18,7 +18,7 @@
 
 import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, sha, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex
 
-EchoCommands = False
+Verbose = 0
 
 nonalphanumre = re.compile('\W')
 
@@ -258,13 +258,13 @@ locations of this instance."""
       return procs
    
    def put(self, src, dst, procs=None):
-      if not procs: procs = Procs()
-
       s = multiglob([src])
 
       if not s:
          print >>sys.stderr, "No such file:", src
          return procs
+
+      if not procs: procs = Procs()
 
       for loc in self.locs:
          d = loc.rootdir + "/" + dst
@@ -299,7 +299,6 @@ locations of this instance."""
          src = args[:-1]
 
       if not procs: procs = Procs()
-
 
       for loc in self.locs:
 	 # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
@@ -374,22 +373,18 @@ class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
-   procs = []
-
    def __init__(self, stdinstr=None, stdout=None, stderr=None, stdin=None):
       self.stdout = stdout
       self.stderr = stderr
       self.stdin = stdin
       self.stdinstr = stdinstr
+      self.procs = []
 
       if stdinstr:
          self.stdin = subprocess.PIPE
 
-   def Popen(self, lst, prefix=None, call=False):
-      if call:
-         if EchoCommands: print >>sys.stderr, lst
-         subprocess.call(lst)
-         return 
+   def Popen(self, lst, prefix=None, call=False, tag=None):
+      if not tag: tag = string.join(lst)
 
       if prefix == None: prefix = len(self.procs)
       if self.stderr:
@@ -397,8 +392,10 @@ class Procs:
       else:
          err = ErrorFile(prefix)
 
-      if EchoCommands: print >>sys.stderr, lst
+      if Verbose > 2: print >>sys.stderr, lst
       r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=err)
+      r.tag = tag
+      r.start = time.time()
       self.procs.append(r)
 
       if self.stdinstr:
@@ -406,11 +403,20 @@ class Procs:
          r.stdin.close()
 
    def collect(self, ignoreErrors=False):
-      errors = 0
       total = len(self.procs)
-      for p in self.procs:
-         if p.wait(): errors += 1
-
+      errors = 0
+      #print >>sys.stderr, "Need to collect", total, [x.pid for x in self.procs]
+      while total:
+         pid, status = os.waitpid(-1, 0)
+         total += -1
+         if status: errors += 1 
+         if Verbose > 1:
+            for p in self.procs:
+               if p.pid == pid:
+                  print >>sys.stderr, "Process %s returned %d in %gs" % (p.tag, status, time.time() - p.start)
+                  break
+      self.procs = []
+         
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
          sys.exit(-1)
@@ -545,13 +551,21 @@ class JobScheduler:
 
    def finalize(self, p, status, utime, stime):
       #print >>sys.stderr, "Job completed", status
-      print >>p.statfile, status, utime, stime
-      p.statfile.close()
-      p.statfile = None
-     
-      for f in glob.glob(p.outdirname + "/." + p.outbasename + ".*"):
-         os.rename(f, p.outdirname + "/" + os.path.basename(f)[1:])
+      print >>p.syncfile, status, utime, stime
+      p.syncfile = None
 
+      f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
+
+      print >>f, socket.gethostname(), os.getpid()
+      print >>f, status, utime, stime
+      f.close()
+   
+      dst = p.outdirname + "/" + p.outbasename 
+      if os.path.exists(dst): 
+          rm_rf(dst)
+          # By removing this dst, we're invalidating any previously derived data, but our redo-if-newer-than logic will handle the compute.
+
+      os.rename(p.outdirname + "/." + p.outbasename, dst)
       p.job.running -= 1 
 
       del p
@@ -636,26 +650,42 @@ class FmJob:
       if type(inputs) != type([]):
          inputs = [inputs]
 
-      statfilename = options.syncdir + "/" + outfilename
-      mkdirexist(os.path.dirname(statfilename))
+      syncfilename = options.syncdir + "/" + outfilename + "/status"
+      mkdirexist(os.path.dirname(syncfilename))
       try:
-         statfile = os.fdopen(os.open(statfilename, os.O_CREAT|os.O_EXCL|os.O_WRONLY), "w")
+         syncfile = os.fdopen(os.open(syncfilename, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY), "w")
       except OSError, e:
          if e.errno == errno.EEXIST:
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
-            # this file.
-            #print >>sys.stderr, "Did not win", statfilename
-            return None
+            # this file --- unless in the inputs are newer than the outputs
+            lasttime = os.path.getmtime(syncfilename)
+            redo = False
+            for i in inputs:
+               if os.path.getmtime(i) > lasttime:
+                  redo = True
+                  break
+
+            if not redo:
+               return None
+               
+            # Nuke the syncfile
+            try:
+               os.unlink(syncfilename)
+               syncfile = os.fdopen(os.open(syncfilename, os.O_CREAT|os.O_EXCL|os.O_WRONLY), "w")
+            except:
+               # Somebody else was doing this at the same time, let them have it
+               return None
+            
          else:
             traceback.print_exc()
                #XXX: re-raise
             raise "Error"
 
-      # Now we hold the "lock" the statfile, so proceed...
+      # Now we hold the "lock" on the syncfile, so proceed...
 
-      print >>statfile, socket.gethostname(), os.getpid()
-      statfile.flush()
+      print >>syncfile, socket.gethostname(), os.getpid()
+      syncfile.flush()
 
       obase = options.rootdir + "/" + outfilename
 
@@ -664,9 +694,9 @@ class FmJob:
       obasename = os.path.basename(obase)
       obase = odirname + "/." + obasename
 
-      oname = obase + ".0"
-      ename = obase + ".stderr"
-      mkdirexist(odirname)
+      oname = obase + "/0"
+      ename = obase + "/stderr"
+      mkdirexist(obase)
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
 
@@ -678,15 +708,14 @@ class FmJob:
          cmd[iidx:iidx] = inputs
       else:
          cmd = cmd.split() + inputs
-
-      os.environ['FMOUTPUT'] = obase
+      
       try:
-         p = subprocess.Popen(cmd, stdout=sout, stderr=serr)
+         p = subprocess.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
       except:
          print >>sys.stderr, "Error", sys.exc_value, "executing", cmd
          return None
 
-      p.statfile = statfile
+      p.syncfile = syncfile
       p.outdirname = odirname
       p.outbasename = obasename
       p.job = self
@@ -694,7 +723,7 @@ class FmJob:
       sout.close()
       serr.close()
 
-      #print >>sys.stderr, "computeItem", cmd, ">", oname, socket.gethostname(), p.pid
+      print >>sys.stderr, "computeItem", cmd, socket.gethostname(), p.pid
       return p
 
 class CommandSetBase(object):
@@ -764,18 +793,11 @@ The root of the output file names must be specified either on the
 command line or in the FMOUTPUT environment variable (which is set for
 all programs running as FM jobs).  
 """
-      p = MethodOptionParser(fixed="infile outfile")
+      p = MethodOptionParser(fixed="infile")
       p.add_option("-n", "--nways", help="Number of output files to use")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
       (options, args) = p.parse_args(args)
       options.nways = int(options.nways)
-
-      ofile = os.environ.get('FMOUTPUT')
-      if not ofile:
-         if len(args) < 2:
-            print >>sys.stderr, "Output filename must be specified in FMOUTPUT environment variable or command-line argument."
-            return False
-         ofile = args[-1]
 
       assert(len(args))
       infile = args[0]
@@ -793,7 +815,7 @@ all programs running as FM jobs).
 
       files = []
       for i in range(0, options.nways):
-         fname = ofile + "." + str(i+1)
+         fname = str(i+1)
          files.append(file(fname, "w"))
 
       for line in file(infile):
@@ -921,9 +943,9 @@ and the program re-run.
       (options, cmd) = p.parse_args(args)
       
       cmds = string.join(cmd).split("|")
-      iglobs = options.inputglob
-      eglobs = []
-      assert (type(iglobs) == type([]))
+      inglobs = options.inputglob
+      outglobs = []
+      assert (type(inglobs) == type([]))
 
       jobname = None
       for cmd in cmds:
@@ -934,9 +956,9 @@ and the program re-run.
 
             # First, re-distribute the data
             restore = "%(FM) _local restore -s" 
-            jobname = self._MapComponent(restore, iglobs, options, parent=jobname)
-            eglobs += [i + ".d/" + escape(restore) for i in iglobs]
-            # There is no change to the iglobs directory since restore puts files in the same virtual path they started in
+            jobname = self._MapComponent(restore, inglobs, options, parent=jobname)
+            outglobs += [i + ".d/" + escape(restore) for i in inglobs]
+            # There is no change to the inglobs directory since restore puts files in the same virtual path they started in
 
             # Barrier; Wait for that job (and its parents) to finish:
             # But first, make sure a scheduler is running
@@ -947,15 +969,15 @@ and the program re-run.
 
             reduce = True
 
-         jobname = self._MapComponent(cmd, iglobs, options, reduce=reduce, parent=jobname)
+         jobname = self._MapComponent(cmd, inglobs, options, reduce=reduce, parent=jobname)
 
          # Each component of pipeline uses previous output as input
          if reduce:
-	    eglobs += ["/reduce/" + jobname]
-            iglobs = ["/reduce/" + jobname + ".*[0-9]"]
+	    outglobs += ["/reduce/" + jobname]
+            inglobs = ["/reduce/" + jobname + "/[0-9]*"]
          else:
-            eglobs += [i + ".d/" + escape(cmd) for i in iglobs]
-            iglobs = [i + ".d/" + escape(cmd) + ".*[0-9]" for i in iglobs]
+            outglobs += [i + ".d/" + escape(cmd) for i in inglobs]
+            inglobs = [i + ".d/" + escape(cmd) + "/[0-9]*" for i in inglobs]
 
       self._Locations().forAllLocal(["sched"]).collect()
 
@@ -963,39 +985,42 @@ and the program re-run.
       self._Locations().forAllLocal(["wait", jobname]).collect()
 
       # Print any stderr files to stderr
-      errglobs = [f + ".stderr" for f in eglobs]
+      errglobs = [f + "/stderr" for f in outglobs]
       self.get(["-cn"] + errglobs, outfile=sys.stderr)
 
-      # Check exit codes
-      try:
-         syncdir = self._Locations().config.get("global", "syncdir")
-         syncdir = os.path.expanduser(syncdir)
-      except:
-         syncdir = None
-         print >>sys.stderr, "No global syncdir, cannot check exit statuses"
+      # Get the status files
+      statglobs = [f + "/status" for f in outglobs]
+      loc = tempfile.mkdtemp()
+      self.get(statglobs + [loc])
 
+      # Tally up info from status files
+      utime = stime = 0.0
       errcodes = {}
-      if syncdir:
-         utime = stime = 0.0
-         statglobs = [syncdir + f for f in eglobs]
-         for f in multiglob(statglobs):
-            f = file(f)
+      for (dirpath, dirnames, filenames) in os.walk(loc):
+         for f in filenames:
+            fname = os.path.join(dirpath, f)
+            #print >>sys.stderr, "status", fname
+            f = file(fname)
             line = f.readlines()[1]
             stats = line.split()
             ec = os.WEXITSTATUS(int(stats[0]))
             errcodes[ec] = errcodes.get(ec, 0) + 1
             utime += float(stats[1])
             stime += float(stats[2])
-         errstr = ''
-         for k in errcodes.keys():
-            if not errstr: 
-               errstr = "%d processes returned %d" % (errcodes[k], k)
-            else:
-               errstr += "; %d x %d" % (errcodes[k], k)
-         print >>sys.stderr, errstr, "in %gu+%gs CPU seconds." % (utime, stime)
+      rm_rf(loc)
+
+      # Print out summary info
+      errstr = ''
+      for k in errcodes.keys():
+         if not errstr: 
+            errstr = "%d processes returned %d" % (errcodes[k], k)
+         else:
+            errstr += "; %d x %d" % (errcodes[k], k)
+      if not errstr: errstr = 'No processes ran'
+      print >>sys.stderr, errstr, "in %gu+%gs CPU seconds." % (utime, stime)
   
       # Print the results to stdout
-      self.get(["-c"] + iglobs)
+      self.get(["-c"] + inglobs)
 
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
@@ -1123,8 +1148,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          self.chgrp([args[0], "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwx,g+s", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
  
-   def _MapComponent(self, cmd, iglobs, options, reduce=False, parent=None):
-      jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(iglobs))
+   def _MapComponent(self, cmd, inglobs, options, reduce=False, parent=None):
+      jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
       if parent: jobdesc += "parent = %s\n" % (parent)
 
       if options.continuous:
@@ -1143,13 +1168,16 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
       if options.fresh:
          if reduce:
-            statfiles = ["%(SYNCDIR)/reduce/" + hash + ".*[0-9]"]
+            syncfiles = ["%(SYNCDIR)/reduce/" + hash + "/[0-9]*"]
          else:
-            statfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) for g in iglobs] 
+            syncfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) + "/status" for g in inglobs] 
 
          # Delete sync files so that computation is forced to (re-)execute
          # These files are shared, so our forAll() is set to do only one node (once=True)
-         self._Locations().forAll(["rm", "-f"] + statfiles,  once=True, subst=True).collect()
+         self._Locations().forAll(["rm", "-f"] + syncfiles,  once=True, subst=True).collect()
+
+         # Only force the first stage of the pipeline.  Out-of-date checks will handle downstream.
+         options.fresh = False
 
       # Install the job on each node
       self._Locations().put(jobfilename, "/jobs/").collect()
@@ -1189,6 +1217,7 @@ function of the file's suffix so that similarly split files will be
 stored on the same nodes.  Also file will be stored into the same
 directory in the virtual store that it originated in.
 """
+
 
       p = MethodOptionParser()
       p.disable_interspersed_args()
@@ -1327,9 +1356,10 @@ directory in the virtual store that it originated in.
       jobfile = self.Locations.this.rootdir+"/jobs/"+args[0]
       #print >>sys.stderr, "Waiting on", jobfile
 
+      delay = 0.001
       while os.path.isfile(jobfile):
          time.sleep(1)
-
+         if delay < 1: delay *= 2
 
 def multiglob(globs):
    """Take a list of globs and return a list of all of the files that match any of those globs."""
