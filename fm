@@ -305,7 +305,7 @@ locations of this instance."""
       if not procs: procs = Procs()
 
       for loc in self.locs:
-	 # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
+         # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
          # in the path between the rootdir and the relative path
          s = [loc.rootdir + "/./" + f for f in src]
          #print loc.rootdir, src, s
@@ -926,7 +926,7 @@ Copy the specified file(s) into the virtual store.
       # we use 1.5 * NODES / replication as the batch size
       while args:
          for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
-	    if not args: break
+            if not args: break
             a = args.pop(0)
             self._Locations().pick().put(a, dst+"/", procs=procs)
          procs.collect()
@@ -985,7 +985,7 @@ and the program re-run.
 
          # Each component of pipeline uses previous output as input
          if reduce:
-	    outglobs += ["/reduce/" + jobname + ".[0-9]*/[0-9]*"]
+            outglobs += ["/reduce/" + jobname + ".[0-9]*/[0-9]*"]
             inglobs = ["/reduce/" + jobname + ".[0-9]*/[0-9]*"]
          else:
             outglobs += [i + ".d/" + escape(cmd) for i in inglobs]
