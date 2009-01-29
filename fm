@@ -139,7 +139,9 @@ class FmLocations:
             l.hostname = self.config_get(s, "hostname")
             l.syncdir = os.path.expanduser(self.config_get(s, "syncdir"))
 
-            l.fmcmd = os.path.expanduser(self.config_get(s, "fm", "fm"))
+            pythoncmd = os.path.expanduser(self.config_get(s, "python", "python"))
+            l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(s, "fm", l.rootdir + "/sys/fm"))]
+
             l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'GSSAPIDelegateCredentials yes' -A", raw=True))
             l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
             l.rsynccmd = shlex.split(self.config_get(s, "rsync", "rsync", raw=True), comments=True)
@@ -207,7 +209,7 @@ locations of this instance."""
    def forAllLocal(self, cmd, stdout=None):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
 
-      cmd = ["%(FM)", "_local", "-n", "%(NODENUM)"] + cmd
+      cmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
       fp = cStringIO.StringIO()
       self.config.write(fp)
 
@@ -225,7 +227,7 @@ locations of this instance."""
       nodenum = 0
       for loc in self.locs:
          if subst: 
-            cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(nodenum)).replace("%(FM)", loc.fmcmd) for n in Cmdv]
+            cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(nodenum)) for n in Cmdv]
          else:
             cmd = list(Cmdv)
 
@@ -248,6 +250,8 @@ locations of this instance."""
          if trailer:
             cmd += trailer
 
+         if cmd[0] == "fm":
+            cmd = loc.fmcmd + cmd[1:]
          procs.Popen(cmd, call=call)
 
          nodenum += 1
@@ -703,7 +707,7 @@ class FmJob:
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY), "w")
 
-      cmd = self.cmd.replace('%(FM)', options.fmcmd)
+      cmd = self.cmd
 
       if '%(input)' in cmd:
          cmd = cmd.split()
@@ -711,7 +715,10 @@ class FmJob:
          cmd[iidx:iidx] = inputs
       else:
          cmd = cmd.split() + inputs
-      
+     
+      if cmd[0] == "fm":
+         cmd = options.fmcmd + cmd[1:]
+ 
       try:
          p = subprocess.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
       except:
@@ -960,7 +967,7 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
             # First, re-distribute the data
-            restore = "%(FM) _local restore -s" 
+            restore = "fm _local restore -s" 
             jobname = self._MapComponent(restore, inglobs, options, parent=jobname)
             outglobs += [i + ".d/" + escape(restore) for i in inglobs]
             # There is no change to the inglobs directory since restore puts files in the same virtual path they started in
@@ -1148,10 +1155,11 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
  If a groupname is specified, it will be applied to the directories."""
       (options, args) = MethodOptionParser(fixed="[group]").parse_args(args)
 
-      self.mkdir(["/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
+      self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       if args:
-         self.chgrp([args[0], "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
+         self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwx,g+s", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
+      self._Locations().put(__file__, "/sys/fm").collect()
  
    def _MapComponent(self, cmd, inglobs, options, reduce=False, parent=None):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
