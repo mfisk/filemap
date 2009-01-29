@@ -43,7 +43,7 @@ def mkdirexist(path):
          raise e
 
 class MethodOptionParser(optparse.OptionParser):
-   """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of jsut [options]."""
+   """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
 
    def __init__(self, *args, **kwargs):
       if not kwargs.has_key('epilog'):
@@ -411,10 +411,13 @@ class Procs:
          total += -1
          if status: errors += 1 
          if Verbose > 1:
+            found = False
             for p in self.procs:
                if p.pid == pid:
                   print >>sys.stderr, "Process %s returned %d in %gs" % (p.tag, status, time.time() - p.start)
+                  found = True
                   break
+            if not found: print >>sys.stderr, "Unknown child %d returned" % (pid)
       self.procs = []
          
       if not ignoreErrors and errors:
@@ -662,7 +665,7 @@ class FmJob:
             lasttime = os.path.getmtime(syncfilename)
             redo = False
             for i in inputs:
-               if (not os.path.exists(i)) or (os.path.getmtime(i) > lasttime):
+               if os.path.getmtime(i) > lasttime:
                   redo = True
                   break
 
@@ -773,7 +776,9 @@ their doc strings."""
       method(self, args[1:])
 
 class FmCommands(CommandSetBase):
-   _locs = None
+   def __init__(self, *args):
+      self._locs = None
+      CommandSetBase.__init__(self, *args)
 
    def _Locations(self):
       if not self._locs: 
@@ -1230,7 +1235,7 @@ directory in the virtual store that it originated in.
          dst = os.path.dirname(f[len(self.Locations.this.rootdir):]) + "/"
          
          if options.suffix: 
-            ext = os.path.splitext(f)[1]
+            ext = os.path.basename(f)
             n = ext
 
          # Pick some destinations.  If the algorithm picks this node,
