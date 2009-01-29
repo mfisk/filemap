@@ -598,12 +598,12 @@ class FmJob:
       inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
 
       if self.reduce:
-         exts = [os.path.splitext(i)[1] for i in inputs]
+         exts = [os.path.basename(i) for i in inputs]
          exts = list(set(exts))  # Get unique extensions
 
          for ext in exts:
             # Don't process .d directories as named inputs (feedback loop)
-            if ext == ".d": continue
+            if ext[-2:] == ".d": continue
 
             # Apply all of the files with the same extension,
             # but only if that extension belongs on this node.
@@ -619,7 +619,7 @@ class FmJob:
                if i[-xlen:] == ext:
                   files.append(i)
 
-            outfilename = "/reduce/" + self.jobname + ext
+            outfilename = "/reduce/" + self.jobname + "." + ext
 
             p = self.computeItem(files, outfilename, options)
             if p: 
@@ -662,7 +662,7 @@ class FmJob:
             lasttime = os.path.getmtime(syncfilename)
             redo = False
             for i in inputs:
-               if os.path.getmtime(i) > lasttime:
+               if (not os.path.exists(i)) or (os.path.getmtime(i) > lasttime):
                   redo = True
                   break
 
@@ -723,7 +723,7 @@ class FmJob:
       sout.close()
       serr.close()
 
-      print >>sys.stderr, "computeItem", cmd, socket.gethostname(), p.pid
+      #print >>sys.stderr, "computeItem", cmd, socket.gethostname(), p.pid
       return p
 
 class CommandSetBase(object):
@@ -973,8 +973,8 @@ and the program re-run.
 
          # Each component of pipeline uses previous output as input
          if reduce:
-	    outglobs += ["/reduce/" + jobname]
-            inglobs = ["/reduce/" + jobname + "/[0-9]*"]
+	    outglobs += ["/reduce/" + jobname + ".[0-9]*/[0-9]*"]
+            inglobs = ["/reduce/" + jobname + ".[0-9]*/[0-9]*"]
          else:
             outglobs += [i + ".d/" + escape(cmd) for i in inglobs]
             inglobs = [i + ".d/" + escape(cmd) + "/[0-9]*" for i in inglobs]
