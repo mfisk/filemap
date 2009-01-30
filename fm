@@ -52,7 +52,7 @@ class MethodOptionParser(optparse.OptionParser):
          pself = caller.f_locals['self']
          method = pself.__class__.__dict__[pmethod]
          kwargs['prog'] = pmethod
-         kwargs['epilog'] = method.__doc__
+         self.Epilog = method.__doc__
 
       if kwargs.has_key('fixed'):
          self.fixed = kwargs['fixed']
@@ -82,8 +82,15 @@ class MethodOptionParser(optparse.OptionParser):
          if flags: options += "[-" + flags + "] "
          
          self.usage = "%prog " + options + self.fixed
+
       return optparse.OptionParser.get_usage(self)
 
+   def print_help(self):
+      r = optparse.OptionParser.print_help(self)
+       
+      print
+      print self.Epilog
+      return r
 
 class FmLocations:
    def __init__(self, config=None, locs=[], stdin=False):
