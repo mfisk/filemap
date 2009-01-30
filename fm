@@ -42,6 +42,40 @@ def mkdirexist(path):
       else:
          raise e
 
+def rsyncDeWildcard(pth):
+   """Take a path, potentially including wildcards, and reduce to rsync args that can't expand."""
+   pth = pth.replace('//', '/').replace('/./','/')
+
+   includes = [pth]
+
+   # Reduce pth to a non-wildcard path
+   while '*' in pth or '?' in pth:
+      pth = os.path.dirname(pth)
+      includes.append(pth + "/")
+
+   # Include all parents of the path
+   x = pth
+   while True:
+      dir = os.path.dirname(x)
+      if dir == x: break
+      x = dir
+      includes.append(x + "/")
+
+   return (includes, [pth])
+
+def rsyncSimplify(lst):
+   includes = []
+   paths = []
+   for l in lst:
+         [newi, newp] = rsyncDeWildcard(l)
+         includes += newi
+         paths += newp
+      
+   includes = ["--include=" + x for x in includes] 
+   includes.append("--exclude=*")
+   return [includes, paths]
+  
+      
 class MethodOptionParser(optparse.OptionParser):
    """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
 
@@ -318,7 +352,7 @@ locations of this instance."""
          s = [loc.rootdir + "/./" + f for f in src]
          #print loc.rootdir, src, s
 
-         s.append("/etc/hosts") # Need a noop for rsync
+         [includes, s] = rsyncSimplify(s)
 
          if loc.hostname:
             s = [loc.hostname + ":" + string.join(s)]
@@ -340,6 +374,7 @@ locations of this instance."""
          # and then use --exclude to not actually transfer it
          cmd = loc.rsynccmd + ['--exclude', 'hosts', "--rsync-path=bash -O nullglob -c 'rsync $@' --"]
 
+         cmd += includes
          cmd += [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
 
          procs.Popen(cmd)
