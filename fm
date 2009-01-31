@@ -22,6 +22,10 @@ Verbose = 0
 
 nonalphanumre = re.compile('\W')
 
+def verbosity(option, opt_str, value, parser):
+   global Verbose
+   Verbose += 1
+
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
@@ -433,7 +437,7 @@ class Procs:
       else:
          err = ErrorFile(prefix)
 
-      if Verbose > 2: print >>sys.stderr, lst
+      if Verbose > 1: print >>sys.stderr, lst
       r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=err)
       r.tag = tag
       r.start = time.time()
@@ -451,7 +455,7 @@ class Procs:
          pid, status = os.waitpid(-1, 0)
          total += -1
          if status: errors += 1 
-         if Verbose > 1:
+         if Verbose > 0:
             found = False
             for p in self.procs:
                if p.pid == pid:
@@ -814,14 +818,15 @@ their doc strings."""
          usage += "   %-8s - %s\n" % (cmd, docstr)
       return usage
 
-   def __init__(self, args):
-      p = optparse.OptionParser()
-      p.disable_interspersed_args()
-      p.set_usage("""%prog command args...\n""" + self.__usage())
-      (options, args) = p.parse_args(args)
+   def __init__(self, args, extraOptions=lambda x: x):
+      optParser = optparse.OptionParser()
+      optParser.disable_interspersed_args()
+      optParser.set_usage("""%prog command args...\n""" + self.__usage())
+      extraOptions(optParser)
+      (self._options, args) = optParser.parse_args(args)
    
       if not args: 
-         p.print_help()
+         optParser.print_help()
          sys.exit(1)
 
       try:
@@ -829,7 +834,7 @@ their doc strings."""
 
       except:
          print >>sys.stderr, "Unknown command ", args[0]
-         p.print_help()
+         optParser.print_help()
          sys.exit(1)
 
       method(self, args[1:])
@@ -837,7 +842,8 @@ their doc strings."""
 class FmCommands(CommandSetBase):
    def __init__(self, *args):
       self._locs = None
-      CommandSetBase.__init__(self, *args)
+      x = lambda p: p.add_option("-v", "--verbose", action="callback", callback=verbosity, help="Increase verbosity (can be used multiple times)")
+      CommandSetBase.__init__(self, *args, **{'extraOptions': x})
 
    def _Locations(self):
       if not self._locs: 
@@ -1258,7 +1264,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
 class FmLocalCommands(CommandSetBase):
    def __init__(self, args):
-      p = optparse.OptionParser()
+      p = MethodOptionParser()
       p.disable_interspersed_args()
       p.add_option("-n", "--nodenum", help="Id number of this node")
       (options, cmd) = p.parse_args(args)
