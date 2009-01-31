@@ -764,6 +764,9 @@ class FmJob:
      
       if cmd[0] == "fm":
          cmd = options.fmcmd + cmd[1:]
+
+      for c in cmd:
+         cmd = [os.path.expanduser(c) for c in cmd]
  
       try:
          p = subprocess.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
