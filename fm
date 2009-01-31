@@ -1,5 +1,7 @@
 #!/usr/bin/python 
 #
+# FileMap - http://mfisk.github.com/filemap
+#
 # Public Domain License:
 #
 # This program was prepared by Los Alamos National Security, LLC at
@@ -90,7 +92,7 @@ class MethodOptionParser(optparse.OptionParser):
          pself = caller.f_locals['self']
          method = pself.__class__.__dict__[pmethod]
          kwargs['prog'] = pmethod
-         self.Epilog = method.__doc__
+         self.Epilog = method.__doc__ or ""
 
       if kwargs.has_key('fixed'):
          self.fixed = kwargs['fixed']
