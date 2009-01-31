@@ -24,10 +24,6 @@ Verbose = 0
 
 nonalphanumre = re.compile('\W')
 
-def verbosity(option, opt_str, value, parser):
-   global Verbose
-   Verbose += 1
-
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
@@ -803,7 +799,7 @@ class CommandSetBase(object):
    def __method(self, mname):
       return self.__class__.__dict__[mname]
 
-   def __usage(self):
+   def _usage(self):
       """Return a multi-line usage string based on the defined methods and
 their doc strings."""
 
@@ -820,12 +816,12 @@ their doc strings."""
          usage += "   %-8s - %s\n" % (cmd, docstr)
       return usage
 
-   def __init__(self, args, extraOptions=lambda x: x):
-      optParser = optparse.OptionParser()
-      optParser.disable_interspersed_args()
-      optParser.set_usage("""%prog command args...\n""" + self.__usage())
-      extraOptions(optParser)
-      (self._options, args) = optParser.parse_args(args)
+   def __init__(self, args, optParser=None):
+      if not optParser:  
+         optParser = MethodOptionParser()
+         optParser.set_usage("""%prog command args...\n""" + self._usage())
+         optParser.disable_interspersed_args()
+      (options, args) = optParser.parse_args(args)
    
       if not args: 
          optParser.print_help()
@@ -841,11 +837,30 @@ their doc strings."""
 
       method(self, args[1:])
 
+   def _optionHook(self, optParser):
+      pass
+
 class FmCommands(CommandSetBase):
-   def __init__(self, *args):
+   def __init__(self, args):
+      """FileMap is a file-based map-reduce system.  
+You can think of it is parallel and distributed xargs or make.  
+It features replicated storage and intermediate result caching.
+
+http://mfisk.github.com/filemap
+"""
+
       self._locs = None
-      x = lambda p: p.add_option("-v", "--verbose", action="callback", callback=verbosity, help="Increase verbosity (can be used multiple times)")
-      CommandSetBase.__init__(self, *args, **{'extraOptions': x})
+      p = MethodOptionParser()
+      p.set_usage("""fm command args...\n""" + self._usage())
+      p.add_option("-v", "--verbose", action="count", help="Increase verbosity (can be used multiple times)")
+      p.disable_interspersed_args()
+      (options, args) = p.parse_args(args)
+
+      if options.verbose:
+         global Verbose
+         Verbose += options.verbose
+
+      CommandSetBase.__init__(self, args, p)
 
    def _Locations(self):
       if not self._locs: 
@@ -1266,10 +1281,12 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
 class FmLocalCommands(CommandSetBase):
    def __init__(self, args):
+      self._locs = None
       p = MethodOptionParser()
-      p.disable_interspersed_args()
+      p.set_usage("""fm _local command args...\n""" + self._usage())
       p.add_option("-n", "--nodenum", help="Id number of this node")
-      (options, cmd) = p.parse_args(args)
+      p.disable_interspersed_args()
+      (options, args) = p.parse_args(args)
 
       if options.nodenum:
          # If -n is given, then we are a direct slave and 
@@ -1285,7 +1302,7 @@ class FmLocalCommands(CommandSetBase):
       self.Locations.thisis(int(options.nodenum))
 
       try:
-         CommandSetBase.__init__(self, cmd)
+         CommandSetBase.__init__(self, args, p)
       except:
          traceback.print_exc()
 
