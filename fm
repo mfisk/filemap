@@ -576,7 +576,24 @@ class JobScheduler:
             opts = os.WNOHANG
 
          before = os.times()
-         (pid, status) = os.waitpid(-1, opts) 
+         pid = None
+
+         try:
+            (pid, status) = os.waitpid(-1, opts) 
+         except OSError, e:
+            if e.errno == errno.ECHILD:
+               # If we're, here its probably because in python 2.4, subprocess reaps other children
+               # whenever making a new one.  So one of the children we thought was running had already
+               # been waitpidded.  http://bugs.python.org/issue1731717
+               # So, poll on each of our children to find the one to finalize:
+               for p in self.procs:
+                  status = p.poll()
+                  if status: 
+                     pid = p.pid
+                     break      
+            else:
+               raise e
+
          if pid:
             after = os.times()
             #print "Process", pid, "exited with status", status
