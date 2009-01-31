@@ -1011,6 +1011,8 @@ and the program re-run.
       outglobs = []
       assert (type(inglobs) == type([]))
 
+      tmpdir = tempfile.mkdtemp() + "/"
+
       jobname = None
       for cmd in cmds:
          reduce = False
@@ -1020,12 +1022,15 @@ and the program re-run.
 
             # First, re-distribute the data
             restore = "fm _local restore -s" 
-            jobname = self._MapComponent(restore, inglobs, options, parent=jobname)
+            jobname = self._MapComponent(restore, inglobs, options, parent=jobname, tmpdir=tmpdir)
             outglobs += [i + ".d/" + escape(restore) for i in inglobs]
             # There is no change to the inglobs directory since restore puts files in the same virtual path they started in
 
             # Barrier; Wait for that job (and its parents) to finish:
-            # But first, make sure a scheduler is running
+            ## Install the jobs on each node
+            self._Locations().put(tmpdir + "*", "/jobs/").collect()
+
+            ## But first, make sure a scheduler is running
             self._Locations().forAllLocal(["sched"]).collect()
 
             print >>sys.stderr, "Waiting for distribute to complete before reducing.  Job", jobname
@@ -1033,7 +1038,7 @@ and the program re-run.
 
             reduce = True
 
-         jobname = self._MapComponent(cmd, inglobs, options, reduce=reduce, parent=jobname)
+         jobname = self._MapComponent(cmd, inglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir)
 
          # Each component of pipeline uses previous output as input
          if reduce:
@@ -1043,7 +1048,12 @@ and the program re-run.
             outglobs += [i + ".d/" + escape(cmd) for i in inglobs]
             inglobs = [i + ".d/" + escape(cmd) + "/[0-9]*" for i in inglobs]
 
+      # Install the jobs on each node
+      self._Locations().put(tmpdir + "*", "/jobs/").collect()
+
       self._Locations().forAllLocal(["sched"]).collect()
+
+      rm_rf(tmpdir)
 
       print >>sys.stderr, "Waiting for completion.  Job", jobname
       self._Locations().forAllLocal(["wait", jobname]).collect()
@@ -1213,7 +1223,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       self.chmod(["g+rwx,g+s", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
       self._Locations().put(__file__, "/sys/fm").collect()
  
-   def _MapComponent(self, cmd, inglobs, options, reduce=False, parent=None):
+   def _MapComponent(self, cmd, inglobs, options, reduce=False, parent=None, tmpdir="/tmp/"):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
       if parent: jobdesc += "parent = %s\n" % (parent)
 
@@ -1226,7 +1236,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       hash = sha.sha(jobdesc).digest()
       hash = base64.b64encode(hash, '+_')  # Normal b64 but / is _
       hash = hash.rstrip('\n\r =')
-      jobfilename = "/tmp/" + hash
+      jobfilename = tmpdir + hash
       jobfile = open(jobfilename, "w")
       jobfile.write(jobdesc)
       jobfile.close()
@@ -1243,9 +1253,6 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
          # Only force the first stage of the pipeline.  Out-of-date checks will handle downstream.
          options.fresh = False
-
-      # Install the job on each node
-      self._Locations().put(jobfilename, "/jobs/").collect()
 
       return hash
 
