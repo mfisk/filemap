@@ -733,9 +733,7 @@ class FmJob:
                return None
             
          else:
-            traceback.print_exc()
-               #XXX: re-raise
-            raise "Error"
+            raise e
 
       # Now we hold the "lock" on the syncfile, so proceed...
 
