@@ -562,10 +562,7 @@ class JobScheduler:
                time.sleep(sleep)
                sleep *= 10
                if sleep > 1: sleep = 1  # Max out at 1 sec sleep
-
-               self.CollectChildren() # Won't block
-         else:
-            self.CollectChildren() # Will block
+         self.CollectChildren() # Will block
 
    def CollectChildren(self): 
       # This is a loop in case multiple children are exited
