@@ -121,7 +121,8 @@ class MethodOptionParser(optparse.OptionParser):
 
    def print_help(self):
       r = optparse.OptionParser.print_help(self)
-       
+      
+      # For python < 2.5, we have to print our own epilog 
       print
       print self.Epilog
       return r
@@ -350,8 +351,13 @@ locations of this instance."""
          # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
          # in the path between the rootdir and the relative path
          s = [loc.rootdir + "/./" + f for f in src]
+
+         # Cleanup the path to encourage rsync to get "/./" magic right
+         s = [i.replace('//','/') for i in s]
+
          #print loc.rootdir, src, s
 
+         # Take the specified paths/globs and turn them into a list of simple (non-glob) paths and --include/exclude options
          [includes, s] = rsyncSimplify(s)
 
          if loc.hostname:
@@ -361,9 +367,6 @@ locations of this instance."""
             if not s:
                #print >>sys.stderr, "No such file:", src
                continue
-
-         # Cleanup the path to encourage rsync to get "/./" magic right
-         s = [i.replace('//','/') for i in s]
 
          cmd = loc.rsynccmd + includes
          cmd += [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
@@ -761,7 +764,7 @@ class FmJob:
          cmd[iidx:iidx] = inputs
       else:
          cmd = cmd.split() + inputs
-     
+    
       if cmd[0] == "fm":
          cmd = options.fmcmd + cmd[1:]
 
