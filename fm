@@ -42,7 +42,7 @@ def mkdirexist(path):
       if e.errno == errno.EEXIST:
          pass
       else:
-         raise e
+         raise
 
 def rsyncDeWildcard(pth):
    """Take a path, potentially including wildcards, and reduce to rsync args that can't expand."""
@@ -597,7 +597,7 @@ class JobScheduler:
                      pid = p.pid
                      break      
             else:
-               raise e
+               raise
 
          if pid:
             after = os.times()
@@ -738,7 +738,7 @@ class FmJob:
                return None
             
          else:
-            raise e
+            raise
 
       # Now we hold the "lock" on the syncfile, so proceed...
 
