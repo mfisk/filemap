@@ -1279,6 +1279,81 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
       return hash
 
+class SchedLock():
+   def __init__(self, rootdir):
+      self.lockname = rootdir + "/.fmschedlock-" + str(os.getuid())
+
+   def checkpid(self):
+      # Check for running
+      try:
+         f = file(self.lockname)
+      except:
+         return False
+
+      pid = f.read().strip()
+      if not pid: 
+         print >>sys.stderr, "Warning, ignoring empty lockfile", self.lockname
+         return False
+      pid = int(pid)
+
+      try:
+          # This will do nothing, but make sure the proc is running and ours
+          os.kill(pid, 0)
+
+          # If we got here, then the process exists, so give up
+          return pid
+      except OSError, e:
+          if e.errno == errno.ESRCH:
+             # process not running
+             return None
+
+          else:
+             # Some other unexpected error
+             raise
+      
+   def lock(self):
+      try:
+         lockfile = os.fdopen(os.open(self.lockname, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY), "w")
+         lockfile.write(str(os.getpid()))
+         lockfile.close()
+         return True
+
+      except OSError, e:
+         if e.errno == errno.EEXIST:
+            # Check for running
+            if self.checkpid():
+               return False
+            else:
+               # Stale, so Steal
+               tmp = self.lockname + "-" + str(os.getpid())
+               try:
+                  os.unlink(self.lockname)
+               except:
+                  # Somebody beat us
+                  return False
+               
+               # XXX race here if 2 procs competing to steal and 1 unlinks and recreates before 2nd unlinks
+               time.sleep(1)
+
+               f = file(tmp, "w")
+               f.write(str(os.getpid()))
+               f.close()
+               try:
+                  os.rename(tmp, self.lockname)
+                  return True
+               except OSError, e:
+                  if e.errno == errno.EEXIST:
+                     # Somebody beat us
+                     return False
+                  else:
+                     raise
+         else:
+            raise
+
+   def unlock(self):
+      #XXX: doesn't check that we still hold the lock
+      os.unlink(self.lockname)
+      
 class FmLocalCommands(CommandSetBase):
    def __init__(self, args):
       self._locs = None
@@ -1403,33 +1478,12 @@ directory in the virtual store that it originated in.
       sys.stdout.write(cPickle.dumps(output))
       return
 
-
    def sched(self, args):
-      sockname = self.Locations.this.rootdir + "/.fmsock-" + str(os.getuid())
-      s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      """Start a scheduler for this node."""
 
-      try:
-         s.connect(sockname)
-         ## Right now this is just for making sure a scheduler is running;
-         ## We don't actually send anything over this socket (yet).
-         #s.write(string.join(args) + "\n")
-         #print >>sys.stderr, "Connected to scheduler"
-         return
-
-      except: 
-         #print >>sys.stderr, "Warning", sys.exc_type, sys.exc_value, "; assuming scheduler not running yet"
-         newname = sockname + "." + str(os.getpid())
-         s.bind(newname)
-         s.listen(1000) #XXX: We need to harvest these in the scheduler loop
-         os.rename(newname, sockname)
-
-      # If we get here, then we've bound as the (new) server
-
-      # For now, the scheduler and FmJob still assume a global Locations var
-      global Locations
-      Locations = self.Locations
-
+      sl = SchedLock(self.Locations.this.rootdir)
       s = JobScheduler(self.Locations.this)
+
       f = file(os.devnull)
       os.dup2(f.fileno(), 0)
 
@@ -1445,7 +1499,21 @@ directory in the virtual store that it originated in.
       os.dup2(f.fileno(), 1)
       os.dup2(f.fileno(), 2)
 
-      s.RunUntilDone()
+      # For now, the scheduler and FmJob still assume a global Locations var
+      global Locations
+      Locations = self.Locations
+
+      if not sl.lock(): 
+         # Somebody else running
+         return 
+
+      try:
+         s.RunUntilDone()
+      except:
+         # Try very hard not leave a stale lockfile
+         sl.unlock()
+         raise
+      sl.unlock()
 
    def wait(self, args):
       """Wait for a specified jobid to complete"""
@@ -1453,8 +1521,18 @@ directory in the virtual store that it originated in.
       jobfile = self.Locations.this.rootdir+"/jobs/"+args[0]
       #print >>sys.stderr, "Waiting on", jobfile
 
+      sl = SchedLock(self.Locations.this.rootdir)
+
       delay = 0.001
       while os.path.isfile(jobfile):
+         # Make sure scheduler is running
+         if not sl.checkpid():
+            print >>sys.stderr, "Error: scheduler exited while job still running.  Dumping log:"
+            sys.stderr.writelines(file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid())))
+            return -1
+
+         # Wait 
+         # XXX: use famd
          time.sleep(1)
          if delay < 1: delay *= 2
 
