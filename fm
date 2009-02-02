@@ -1404,12 +1404,11 @@ stored on the same nodes.  Also file will be stored into the same
 directory in the virtual store that it originated in.
 """
 
-
       p = MethodOptionParser()
       p.disable_interspersed_args()
       p.add_option("-s", "--suffix", action="store_true", help="Store based on file's suffix")
       (options, args) = p.parse_args(args)
-   
+
       procs = Procs()
       n = None
       for f in args:
