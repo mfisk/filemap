@@ -248,7 +248,9 @@ locations of this instance."""
       used = self.pickn(seed)
       if selfIsNoop and self.thisnum in used: 
          used.remove(self.thisnum)
-      return FmLocations(self.config, [self.locs[i] for i in used])
+      picked = FmLocations(self.config, [self.locs[i] for i in used])
+      picked.this = self.this
+      return picked
          
    def forAllLocal(self, cmd, stdout=None):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
@@ -306,7 +308,17 @@ locations of this instance."""
 
       return procs
    
-   def put(self, src, dst, procs=None):
+   def put(self, src, dst, relative=False, procs=None):
+      if relative:
+         # Make src path be relative root local rootdir and place in corresponding path under remote rootdir 
+         rsynccmd = self.this.rsynccmd + ["-Rv"]
+         root = self.this.rootdir
+         os.chdir(root)
+         assert(src[:len(root)] == root)
+         src = src[len(root):].lstrip("/")
+      else:
+         rsynccmd = self.this.rsynccmd
+
       s = multiglob([src])
 
       if not s:
@@ -316,12 +328,15 @@ locations of this instance."""
       if not procs: procs = Procs()
 
       for loc in self.locs:
-         d = loc.rootdir + "/" + dst
+         if relative:
+            d = loc.rootdir + "/"
+         else:
+            d = loc.rootdir + "/" + dst
 
          if loc.hostname:
             d = loc.hostname + ":" + d
 
-         cmd = loc.rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
+         cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
 
          procs.Popen(cmd)
 
@@ -1409,8 +1424,9 @@ directory in the virtual store that it originated in.
          # that is reasonable, but is a NOOP
          dsts = self.Locations.pick(n, selfIsNoop=True)
          #if options.suffix: print >>sys.stderr, "Extension", ext, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
-         dsts.forAll(["mkdir", "-p"], dst, glob=False)
-         dsts.put(f, dst, procs=procs)
+
+         # Store with relative=True to make parent directories
+         dsts.put(f, dst, relative=True, procs=procs)
 
       procs.collect()
 
