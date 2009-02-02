@@ -176,34 +176,33 @@ class FmLocations:
       if not locs:
          for s in self.config.sections():
             if s == "global": continue
-            l = FmLocation()
-            l.name = s
-            l.rootdir = os.path.expanduser(self.config_get(s, "rootdir"))
-            l.jobdir = l.rootdir + "/jobs"
-            l.hostname = self.config_get(s, "hostname")
-            l.syncdir = os.path.expanduser(self.config_get(s, "syncdir"))
-
-            pythoncmd = os.path.expanduser(self.config_get(s, "python", "python"))
-            l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(s, "fm", l.rootdir + "/sys/fm"))]
-
-            l.sshcmdstr = os.path.expanduser(self.config_get(s, "ssh", "ssh -o 'GSSAPIDelegateCredentials yes' -A", raw=True))
-            l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
-            l.rsynccmd = shlex.split(self.config_get(s, "rsync", "rsync", raw=True), comments=True)
-            l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
-
+            l = self.parseLocation(s)
             self.locs.append(l)
 
-      # Nail open SSH connections for low-latency muxing
-      try:
-         for l in self.locs:
-            if l.hostname:
-               #print "Setting-up persistent SSH connection to", l.hostname
-               #subprocess.check_call(l.sshcmd + ["-o", "ControlMaster auto", "-fN", l.hostname], stdin=None)
-               pass
-      except:
-         traceback.print_exc()
-         print >>sys.stderr, """Warning, unable to use "ssh -o 'ControlMaster auto' -fN"; Will do without."""
+      # Use global config values by default (thisis() can override later)
+      self.this = self.parseLocation("global")
 
+   def parseLocation(self, stanza):
+      l = FmLocation()
+      l.name = stanza
+
+      l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o 'GSSAPIDelegateCredentials yes' -A", raw=True))
+      l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
+
+      l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync", raw=True), comments=True)
+      l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
+
+      if l.name != "global": 
+         l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
+         l.hostname = self.config_get(stanza, "hostname")
+         l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir"))
+         l.jobdir = l.rootdir + "/jobs"
+
+         pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
+         l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
+
+      return l
+   
    def config_get(self, section, key, defval=None, raw=False):
       if self.config.has_option(section, key):
          return self.config.get(section, key, raw=raw)
