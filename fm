@@ -48,15 +48,17 @@ def rsyncDeWildcard(pth):
    """Take a path, potentially including wildcards, and reduce to rsync args that can't expand."""
    pth = pth.replace('//', '/').replace('/./','/')
 
-   includes = [pth]
+   origpath = pth
 
    # Reduce pth to a non-wildcard path
    while '*' in pth or '?' in pth:
-      pth = os.path.dirname(pth)
-      includes.append(pth + "/")
+      pth = os.path.dirname(pth) + "/"
 
-   # Include all parents of the path
-   x = pth
+   # Find the wildcard portion of the original path and make it a glob
+   includes = [origpath[len(pth):].lstrip("/")]
+
+   # Include all parents of the wildcard pattern
+   x = includes[0]
    while True:
       dir = os.path.dirname(x)
       if dir == x: break
@@ -385,7 +387,7 @@ locations of this instance."""
                continue
 
          cmd = loc.rsynccmd + includes
-         cmd += [rsyncflags, "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
+         cmd += [rsyncflags, "--prune-empty-dirs", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
 
          procs.Popen(cmd)
 
@@ -790,14 +792,16 @@ class FmJob:
       try:
          p = subprocess.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
       except:
-         print >>sys.stderr, "Error", sys.exc_value, "executing", cmd
-         return None
+         p = None
+         print >>serr, "Error", sys.exc_value, "executing", cmd
 
-      p.syncfile = syncfile
-      p.outdirname = odirname
-      p.outbasename = obasename
-      p.job = self
-      self.running += 1
+      if p:
+         p.syncfile = syncfile
+         p.outdirname = odirname
+         p.outbasename = obasename
+         p.job = self
+         self.running += 1
+
       sout.close()
       serr.close()
 
@@ -1178,6 +1182,7 @@ and the program re-run.
          base = ls[k][0]
          nodes = [base['node']]
          isdir = (base['perms'][0] == 'd')
+         islnk = (base['perms'][0] == 'l')
          criteria = ['perms', 'user', 'group', 'size']
          if isdir: base['size'] = 0
          if not isdir: criteria.append('size')
@@ -1445,7 +1450,7 @@ directory in the virtual store that it originated in.
           d['user'] = '?'
           d['group'] = '?'
           d['size'] = -1
-          d['mtime'] = '?'
+          d['mtime'] = 0
           d['perms'] = '----------'
 
           # No stat structure
@@ -1506,7 +1511,7 @@ directory in the virtual store that it originated in.
                fname = aname + "/" + f
                s = None
                try:
-                  s = os.stat(fpath)
+                  s = os.lstat(fpath)
                except:
                   pass
 
