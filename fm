@@ -200,7 +200,7 @@ class FmLocations:
       if l.name != "global": 
          l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
          l.hostname = self.config_get(stanza, "hostname")
-         l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir"))
+         l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
          l.jobdir = l.rootdir + "/jobs"
 
          pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
@@ -608,12 +608,12 @@ class JobScheduler:
             if e.errno == errno.ECHILD:
                # If we're, here its probably because in python 2.4, subprocess reaps other children
                # whenever making a new one.  So one of the children we thought was running had already
-               # been waitpidded.  http://bugs.python.org/issue1731717
+               # been waitpidded.  http://bugs.python.org/issue1731717
                # So, poll on each of our children to find the one to finalize:
                for p in self.procs:
-                  status = p.poll()
+                  status = self.procs[p].poll()
                   if status: 
-                     pid = p.pid
+                     pid = self.procs[p].pid
                      break      
             else:
                raise
@@ -717,7 +717,7 @@ class FmJob:
 
          relativename = i[len(options.rootdir):]
          outfilename = relativename + ".d/" + escape(self.cmd)
-         
+        
          p = self.computeItem(i, outfilename, options)
          if p: return p
 
@@ -738,12 +738,17 @@ class FmJob:
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
             # this file --- unless in the inputs are newer than the outputs
-            lasttime = os.path.getmtime(syncfilename)
-            redo = False
-            for i in inputs:
-               if os.path.getmtime(i) > lasttime:
-                  redo = True
-                  break
+            try:
+               lasttime = os.path.getmtime(syncfilename)
+               redo = False
+               for i in inputs:
+                  if os.path.getmtime(i) > lasttime:
+                     redo = True
+                     break
+            except: 
+               traceback.print_exc()
+               print >>sys.stderr, "Skipping file", outfilename
+               return None
 
             if not redo:
                return None
@@ -1300,7 +1305,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
       return hash
 
-class SchedLock():
+class SchedLock:
    def __init__(self, rootdir):
       self.lockname = rootdir + "/.fmschedlock-" + str(os.getuid())
 
