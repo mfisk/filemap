@@ -1000,12 +1000,13 @@ all programs running as FM jobs).
  
       self._Locations().forAll(["mv"], each, dst).collect()
 
-   def mkdir(self, args, absolutes=[]):
+   def mkdir(self, args, absolutes=[], async=False):
       """Make a directory (or directories) on all nodes.  
 Has unix "mkdir -p" semantics."""
       (options, args) = MethodOptionParser(fixed="dir...").parse_args(args)
       # Make sure destination exists
-      self._Locations().forAll(["mkdir", "-p", "-m", "2775"] + absolutes, args, subst=True, glob=False).collect()
+      p = self._Locations().forAll(["mkdir", "-p", "-m", "2775"] + absolutes, args, subst=True, glob=False)
+      if not async: p.collect()
 
    def jobs(self, args):
       """Show all of the jobs still active."""
@@ -1054,19 +1055,17 @@ Copy the specified file(s) into the virtual store.
 
       procs = Procs()
 
-      tups=[]
-
       # Convert directory arguments to lists of files
       for a in args:
          if os.path.isdir(a):
              for root,dirs,files in os.walk(a):
-                self.mkdir([os.path.join(dst,root[1:])])
+                #self.mkdir([os.path.join(dst,root[1:])], procs=procs, async=True)
                 for f in files:
                    fp = os.path.join(root, f)
                    #print "os.path.join(dst,root)+/=",  os.path.join(dst,root[1:])+"/"
                    #print "fp =", fp
                    dstpath = os.path.join(dst, root[1:]) + "/"
-                   self._Locations().pick().put(fp, dstpath, procs=procs)
+                   self._Locations().pick().put(fp, dstpath, procs=procs, mkdir=True)
          else:
             self._Locations().pick().put(a, dst+"/", procs=procs)
             
