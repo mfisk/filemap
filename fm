@@ -458,11 +458,12 @@ class ErrorFile:
 
    def __init__(self, prefix):
       self.prefix = prefix
+      self.fd = os.dup(sys.stderr.fileno())
 
    def write(self, buf):
       print >> sys.stderr, prefix, ":", buf
 
-   def fileno(self): return sys.stderr.fileno()
+   def fileno(self): return self.fd
 
 class Procs:
    """This class is used to launch some number of child processes and reap them.
