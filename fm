@@ -24,6 +24,33 @@ Verbose = 0
 
 nonalphanumre = re.compile('\W')
 
+def BuggyWaitPid(procs, opts):
+         try:
+            (pid, status) = os.waitpid(-1, opts) 
+            p = procs[pid]
+            del procs[pid]
+            p.status = status
+            return p
+
+         except OSError, e:
+            if e.errno == errno.ECHILD:
+               # If we're, here its probably because in python 2.4, subprocess reaps other children
+               # whenever making a new one.  So one of the children we thought was running had already
+               # been waitpidded.  http://bugs.python.org/issue1731717
+               # So, poll on each of our children to find the one to finalize:
+               for pid in procs:
+                  status = procs[pid].poll()
+                  if status: 
+                     p = procs[pid]
+                     del procs[pid]
+                     p.status = status
+                     return p
+
+               #print >>sys.stderr, "Unexpected: no child"
+               raise
+            else:
+               raise
+      
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
@@ -602,41 +629,28 @@ class JobScheduler:
          before = os.times()
          pid = None
 
-         try:
-            (pid, status) = os.waitpid(-1, opts) 
-         except OSError, e:
-            if e.errno == errno.ECHILD:
-               # If we're, here its probably because in python 2.4, subprocess reaps other children
-               # whenever making a new one.  So one of the children we thought was running had already
-               # been waitpidded.  http://bugs.python.org/issue1731717
-               # So, poll on each of our children to find the one to finalize:
-               for p in self.procs:
-                  status = self.procs[p].poll()
-                  if status: 
-                     pid = self.procs[p].pid
-                     break      
-            else:
-               raise
+         
+         p = BuggyWaitpid(self.procs, opts)
 
-         if pid:
+         if p:
             after = os.times()
-            #print "Process", pid, "exited with status", status
-            self.finalize(self.procs[pid], status, after[2]-before[2], after[3]-before[3])
-            del self.procs[pid]
+            if Verbose:
+               print "Process", p.pid, "exited with status", p.status, "\n", p.stderr.read()
+            self.finalize(p, after[2]-before[2], after[3]-before[3])
             self.freethreads += 1
          else:
             # No children pending, so return
             return
 
-   def finalize(self, p, status, utime, stime):
-      #print >>sys.stderr, "Job completed", status
-      print >>p.syncfile, status, utime, stime
+   def finalize(self, p, utime, stime):
+      #print >>sys.stderr, "Job completed", p.status
+      print >>p.syncfile, p.status, utime, stime
       p.syncfile = None
 
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
 
       print >>f, socket.gethostname(), os.getpid()
-      print >>f, status, utime, stime
+      print >>f, p.status, utime, stime
       f.close()
    
       dst = p.outdirname + "/" + p.outbasename 
