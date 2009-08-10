@@ -453,20 +453,6 @@ class FmLocation:
    def __init__(self):
       pass
 
-class ErrorFile:
-   """This class implements a few file-like methods so that it can be used
-   in place of a real file in some cases.  Whatever is written to this file
-   is printed on stderr with a static prefix (like syslog)."""
-
-   def __init__(self, prefix):
-      self.prefix = prefix
-      self.fd = os.dup(sys.stderr.fileno())
-
-   def write(self, buf):
-      print >> sys.stderr, prefix, ":", buf
-
-   def fileno(self): return self.fd
-
 class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
