@@ -1013,7 +1013,7 @@ all programs running as FM jobs).
       each = args[:-1]
       if len(each) > 1: dst += "/"
  
-      return self._Locations().forAll(["mv"], each, dst).collect()
+      self._Locations().forAll(["mv"], each, dst).collect()
 
    def mkdir(self, args, absolutes=[]):
       """Make a directory (or directories) on all nodes.  
@@ -1304,7 +1304,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       else:
          options = []
 
-      return self._Locations().forAll(["rm", "-f"] + options, args).collect()
+      self._Locations().forAll(["rm", "-f"] + options, args).collect()
 
 
    def init(self, args):
