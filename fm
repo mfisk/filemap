@@ -25,6 +25,8 @@ Verbose = 0
 nonalphanumre = re.compile('\W')
 
 def BuggyWaitPid(procs, opts):
+         """Check for a completed child, remove them from the procs dictionary and return them."""
+
          try:
             (pid, status) = os.waitpid(-1, opts) 
             p = procs[pid]
@@ -40,7 +42,7 @@ def BuggyWaitPid(procs, opts):
                # So, poll on each of our children to find the one to finalize:
                for pid in procs:
                   status = procs[pid].poll()
-                  if status: 
+                  if status != None: 
                      p = procs[pid]
                      del procs[pid]
                      p.status = status
@@ -499,6 +501,8 @@ class Procs:
 
 
    def collect(self, ignoreErrors=False):
+      """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
+
       results = []
       total = len(self.procs)
       errors = 0
