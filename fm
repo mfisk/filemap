@@ -1043,10 +1043,10 @@ Has unix "mkdir -p" semantics."""
       (options, args) = MethodOptionParser(fixed="").parse_args(args)
       self._Locations().forAll(["df", "-h"], "/", glob=False).collect()
 
-   def chmod(self, args, absolutes=[]):
+   def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
       (options, args) = MethodOptionParser(fixed="mode files...").parse_args(args)
-      self._Locations().forAll(["chmod", args[0]] + absolutes, args[1:], subst=True).collect()
+      self._Locations().forAll(["chmod", args[0]] + absolutes, args[1:], subst=True).collect(ignoreErrors=ignoreErrors)
 
    def chgrp(self, args, absolutes=[]):
       """Change GID on files in the cloud."""
@@ -1068,16 +1068,24 @@ Copy the specified file(s) into the virtual store.
       if len(args) > 1: dst += "/"
 
       procs = Procs()
-      # Iterate over args in batches.
-      # Since hashing may not be even and we want each node to be doing something,
-      # we use 1.5 * NODES / replication as the batch size
-      while args:
-         for i in range(0, int(1.5 * len(self._Locations().locs) / self._Locations().replication)):
-            if not args: break
-            a = args.pop(0)
+
+      tups=[]
+
+      # Convert directory arguments to lists of files
+      for a in args:
+         if os.path.isdir(a):
+             for root,dirs,files in os.walk(a):
+                self.mkdir([os.path.join(dst,root[1:])])
+                for f in files:
+                   fp = os.path.join(root, f)
+                   #print "os.path.join(dst,root)+/=",  os.path.join(dst,root[1:])+"/"
+                   #print "fp =", fp
+                   dstpath = os.path.join(dst, root[1:]) + "/"
+                   self._Locations().pick().put(fp, dstpath, procs=procs)
+         else:
             self._Locations().pick().put(a, dst+"/", procs=procs)
-         procs.collect()
-         
+            
+      procs.collect()
 
    def map(self, args):
       """Launch a computation on a set of input files in the cloud.
@@ -1214,8 +1222,9 @@ and the program re-run.
 
       if not args: args = ["/"]
       procs = self._Locations().forAllLocal(["ls"] + args, stdout=subprocess.PIPE)
+      status, ps = procs.collect()
       ls = {}
-      for p in procs.procs:
+      for p in ps:
          pkl = p.stdout.read()
          if not pkl: continue
 
@@ -1263,6 +1272,7 @@ and the program re-run.
                print self._lsline(i)
 
          # Update the nodelist for this base instance and print it out
+         nodes.sort()
          base['node'] = nodes
          print self._lsline(base)
          
@@ -1315,7 +1325,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       if args:
          self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
-      self.chmod(["g+rwx,g+s", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"])
+      self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
       self._Locations().put(__file__, "/sys/fm").collect()
  
    def _MapComponent(self, cmd, inglobs, options, reduce=False, parent=None, tmpdir="/tmp/"):
@@ -1655,7 +1665,7 @@ class SubprocessLs:
 
    def next(self):
       smallest = None
-      for i in range(0, len(self.procs)):
+      for i in self.procs:
            # Job slot is set to None after that job terminates
            if not self.procs[i]: continue
 
