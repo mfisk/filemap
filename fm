@@ -345,7 +345,7 @@ locations of this instance."""
 
       return procs
    
-   def put(self, src, dst, relative=False, procs=None):
+   def put(self, src, dst, relative=False, mkdir=False, procs=None):
       if relative:
          # Make src path be relative root local rootdir and place in corresponding path under remote rootdir 
          rsynccmd = self.this.rsynccmd + ["-Rv"]
@@ -353,6 +353,8 @@ locations of this instance."""
          os.chdir(root)
          assert(src[:len(root)] == root)
          src = src[len(root):].lstrip("/")
+      elif mkdir:
+         rsynccmd = self.this.rsynccmd + ["-Rv"]
       else:
          rsynccmd = self.this.rsynccmd
 
