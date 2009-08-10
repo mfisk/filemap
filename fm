@@ -1253,7 +1253,8 @@ and the program re-run.
          criteria = ['perms', 'user', 'group', 'size']
          if isdir: base['size'] = 0
          if not isdir: criteria.append('size')
-         
+        
+         # Look for duplicates from other nodes 
          for i in ls[k][1:]:
             if isdir: i['size'] = 0
 
