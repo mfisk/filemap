@@ -218,6 +218,8 @@ class FmLocations:
       l = FmLocation()
       l.name = stanza
 
+      qbyhost = self.config.has_option("global", "queuebyhost")
+
       l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o 'GSSAPIDelegateCredentials yes' -A", raw=True))
       l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
 
@@ -229,6 +231,10 @@ class FmLocations:
          l.hostname = self.config_get(stanza, "hostname")
          l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
          l.jobdir = l.rootdir + "/jobs"
+         if qbyhost:
+            l.qname = l.hostname
+         else:
+            l.qname = l.name
 
          pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
          l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
@@ -330,7 +336,7 @@ locations of this instance."""
          if trailer:
             cmd += trailer
 
-         procs.Popen(cmd, call=call)
+         procs.Popen(cmd, call=call, queue=loc.qname)
 
          nodenum += 1
 
@@ -369,7 +375,7 @@ locations of this instance."""
 
          cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
 
-         procs.Popen(cmd)
+         procs.Popen(cmd, queue=loc.qname)
 
       return procs
 
@@ -419,7 +425,7 @@ locations of this instance."""
          cmd = loc.rsynccmd + includes
          cmd += [rsyncflags, "--prune-empty-dirs", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
 
-         procs.Popen(cmd)
+         procs.Popen(cmd, queue=loc.qname)
 
       procs.collect(ignoreErrors=True)
 
@@ -464,56 +470,81 @@ class Procs:
 
    def __init__(self, stdinstr=None, stdout=None, stderr=None, stdin=None):
       self.stdout = stdout
-      self.stderr = stderr
       self.stdin = stdin
+      self.stderr = stderr
       self.stdinstr = stdinstr
-      self.procs = []
+
+      if not self.stderr: 
+         self.stderr = subprocess.PIPE
 
       if stdinstr:
          self.stdin = subprocess.PIPE
 
-   def Popen(self, lst, prefix=None, call=False, tag=None):
+      self.procs = {}
+      self.queues = {}
+
+
+
+   def Popen(self, lst, prefix=None, call=False, tag=None, queue=None):
       if not tag: tag = string.join(lst)
 
-      if prefix == None: prefix = len(self.procs)
-      if self.stderr:
-         err = self.stderr
+      if self.queues.has_key(queue):
+         # Will process later
+         #if Verbose: print >>sys.stderr, "Queueing", tag, "to", len(self.queues[queue])
+         self.queues[queue].append([lst, prefix, call, tag])
+         return
       else:
-         err = ErrorFile(prefix)
+         # No queue, means we can run now, but create an empty queue to block subsequuent tasks         
+         self.queues[queue] = []
+         self.PopenNow(lst, prefix, call, tag, queue)
 
+
+   def PopenNow(self, lst, prefix=None, call=False, tag=None, queue=None):
       if Verbose > 1: print >>sys.stderr, lst
-      r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=err)
+      r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=self.stderr)
       r.tag = tag
       r.start = time.time()
-      self.procs.append(r)
+      r.queue = queue
+      self.procs[r.pid] = r
 
       if self.stdinstr:
          r.stdin.write(self.stdinstr)
          r.stdin.close()
 
+
    def collect(self, ignoreErrors=False):
+      results = []
       total = len(self.procs)
       errors = 0
-      #print >>sys.stderr, "Need to collect", total, [x.pid for x in self.procs]
-      while total:
-         pid, status = os.waitpid(-1, 0)
-         total += -1
-         if status: errors += 1 
+      #print >>sys.stderr, "Need to collect", total, [self.procs[x].pid for x in self.procs]
+      while self.procs:
+         p = BuggyWaitPid(self.procs, 0)
+         results.append(p)
+         if p.status: errors += 1 
          if Verbose > 0:
-            found = False
-            for p in self.procs:
-               if p.pid == pid:
-                  print >>sys.stderr, "Process %s returned %d in %gs" % (p.tag, status, time.time() - p.start)
-                  found = True
-                  break
-            if not found: print >>sys.stderr, "Unknown child %d returned" % (pid)
-      self.procs = []
+            print >>sys.stderr, "Process %s returned %d in %gs" % (p.tag, p.status, time.time() - p.start)
+            err = p.stderr.read()
+            if err: print >>sys.stderr, err
+ 
+         #Wake-up anything on this queue
+         if self.queues[p.queue]:
+            nxt = self.queues[p.queue].pop(0)
+            #if not self.queues[p.queue]: 
+               # If nothing left on queue, remove it so we won't block
+               #print "remove queue"
+               #del self.queues[p.queue]
+            #if Verbose: print >>sys.stderr, "Waking", nxt
+            nxt.append(p.queue)
+            self.PopenNow(*nxt)
+
+      for q in self.queues: assert(not self.queues[q])
+      self.procs = {}
          
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
          sys.exit(-1)
 
-      return (errors == 0)
+      return (errors == 0), results
 
 # The design is as follows:
 #   1. Jobs are submitted in an uncoordinated manner, so they have unique
