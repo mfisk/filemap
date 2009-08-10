@@ -472,8 +472,6 @@ class Procs:
       self.procs = {}
       self.queues = {}
 
-
-
    def Popen(self, lst, prefix=None, call=False, tag=None, queue=None):
       if not tag: tag = string.join(lst)
 
@@ -487,14 +485,13 @@ class Procs:
          self.queues[queue] = []
          self.PopenNow(lst, prefix, call, tag, queue)
 
-
    def PopenNow(self, lst, prefix=None, call=False, tag=None, queue=None):
-      if Verbose > 1: print >>sys.stderr, lst
       r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=self.stderr)
       r.tag = tag
       r.start = time.time()
       r.queue = queue
       self.procs[r.pid] = r
+      if Verbose > 1: print >>sys.stderr, r.pid, lst
 
       if self.stdinstr:
          r.stdin.write(self.stdinstr)
@@ -511,7 +508,7 @@ class Procs:
          results.append(p)
          if p.status: errors += 1 
          if Verbose > 0:
-            print >>sys.stderr, "Process %s returned %d in %gs" % (p.tag, p.status, time.time() - p.start)
+            print >>sys.stderr, "Process %d %s returned %d in %gs" % (p.pid, p.tag, p.status, time.time() - p.start)
             err = p.stderr.read()
             if err: print >>sys.stderr, err
  
