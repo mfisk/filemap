@@ -532,6 +532,7 @@ class Procs:
          if Verbose > 0:
             print >>sys.stderr, "Process %d %s returned %d in %gs" % (p.pid, p.tag, p.status, time.time() - p.start)
             err = p.stderr.read()
+            p.stderr.close()
             if err: print >>sys.stderr, err
  
          #Wake-up anything on this queue
@@ -675,6 +676,7 @@ class JobScheduler:
             after = os.times()
             if Verbose:
                print "Process", p.pid, "exited with status", p.status, "\n", p.stderr.read()
+            p.stderr.close()
             self.finalize(p, after[2]-before[2], after[3]-before[3])
             self.freethreads += 1
          else:
@@ -1232,6 +1234,7 @@ and the program re-run.
       ls = {}
       for p in ps:
          pkl = p.stdout.read()
+         p.stdout.close()
          if not pkl: continue
 
          try:
