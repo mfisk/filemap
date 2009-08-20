@@ -165,7 +165,7 @@ class FmLocations:
             self.config.readfp(sys.stdin)
 
             # Keep a copy of the config around so our children can reference it
-            fd, name = tempfile.mkstemp()
+            fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-")
             os.environ['FMCONFIG'] = name
             fh = os.fdopen(fd, 'w')
             self.config.write(fh)
@@ -384,7 +384,7 @@ locations of this instance."""
 
       if options.cat:
          assert(len(args) > 0)
-         dst = tempfile.mkdtemp() + "/"
+         dst = tempfile.mkdtemp(prefix="tmp-fm-get-") + "/"
          src = args
       else:
          assert(len(args) > 1)
@@ -1044,7 +1044,7 @@ Has unix "mkdir -p" semantics."""
       """Show all of the jobs still active."""
       (options, args) = MethodOptionParser(fixed="").parse_args(args)
 
-      tmpdir = tempfile.mkdtemp()
+      tmpdir = tempfile.mkdtemp(prefix='tmp-fm-jobs-')
 
       self._Locations().get(["/jobs/*", tmpdir], relative=False)
       fmt = "%-28s %-15s %s"
@@ -1133,7 +1133,7 @@ and the program re-run.
       outglobs = []
       assert (type(inglobs) == type([]))
 
-      tmpdir = tempfile.mkdtemp() + "/"
+      tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
       jobname = None
       for cmd in cmds:
@@ -1186,7 +1186,7 @@ and the program re-run.
 
       # Get the status files
       statglobs = [f + "/status" for f in outglobs]
-      loc = tempfile.mkdtemp()
+      loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
       self.get(statglobs + [loc])
 
       # Tally up info from status files
