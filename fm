@@ -1087,8 +1087,10 @@ Copy the specified file(s) into the virtual store.
 
       procs = Procs()
 
-      # Convert directory arguments to lists of files
+      # We always specify a seed when calling pick() so there is stability in which nodes work is mapped to.
+      # It's nice if they go to nodes that might have already received the store in a previous execution.
       for a in args:
+         # Convert directory arguments to lists of files
          if os.path.isdir(a):
              for root,dirs,files in os.walk(a):
                 #self.mkdir([os.path.join(dst,root[1:])], procs=procs, async=True)
@@ -1096,10 +1098,11 @@ Copy the specified file(s) into the virtual store.
                    fp = os.path.join(root, f)
                    #print "os.path.join(dst,root)+/=",  os.path.join(dst,root[1:])+"/"
                    #print "fp =", fp
-                   dstpath = os.path.join(dst, root[1:]) + "/"
-                   self._Locations().pick().put(fp, dstpath, procs=procs, mkdir=True)
+                   dstfile = os.path.join(dst, root[1:]) + "/" + os.path.basename(fp)
+                   self._Locations().pick(seed=dstfile).put(fp, dstfile, procs=procs, mkdir=True)
          else:
-            self._Locations().pick().put(a, dst+"/", procs=procs)
+            dstfile = dst + "/" + os.path.basename(a)
+            self._Locations().pick(seed=dstfile).put(a, dstfile, procs=procs)
             
       procs.collect()
 
