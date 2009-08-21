@@ -24,6 +24,12 @@ Verbose = 0
 
 nonalphanumre = re.compile('\W')
 
+def hash(s):
+   h = sha.sha(jobdesc).digest()
+   h = base64.b64encode(h, '+_')  # Normal b64 but / is _
+   h = h.rstrip('\n\r =')
+   return h
+
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
@@ -1380,17 +1386,15 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       if reduce:
          jobdesc += "reduce = True\n"
 
-      hash = sha.sha(jobdesc).digest()
-      hash = base64.b64encode(hash, '+_')  # Normal b64 but / is _
-      hash = hash.rstrip('\n\r =')
-      jobfilename = tmpdir + hash
+      h = hash(jobdesc)
+      jobfilename = tmpdir + h
       jobfile = open(jobfilename, "w")
       jobfile.write(jobdesc)
       jobfile.close()
 
       if options.fresh:
          if reduce:
-            syncfiles = ["%(SYNCDIR)/reduce/" + hash + "/[0-9]*"]
+            syncfiles = ["%(SYNCDIR)/reduce/" + h + "/[0-9]*"]
          else:
             syncfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) + "/status" for g in inglobs] 
 
@@ -1401,7 +1405,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          # Only force the first stage of the pipeline.  Out-of-date checks will handle downstream.
          options.fresh = False
 
-      return hash
+      return h
 
 class SchedLock:
    def __init__(self, rootdir):
