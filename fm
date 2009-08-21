@@ -589,6 +589,7 @@ class Procs:
          pollopts = 0
          waitopts = os.WNOHANG
 
+      # Check for completed children
       try:
          (pid, status) = os.waitpid(-1, os.WNOHANG) 
          if pid:
@@ -611,27 +612,23 @@ class Procs:
             #print >>sys.stderr, "Unexpected: no child"
             raise
 
-         # Look for children that may be blocking on writes to stdout, or that have finished
-         try:
-            print "block", block, "on", len(self.pids)
-            l = self.poll.poll(pollopts)
-         except select.error, e:
-            if e[0] == errno.EINTR:
-               return None
-            else:
-               raise
+      # Look for children that may be blocking on writes to stdout, or that have finished
+      try:
+         l = self.poll.poll(pollopts)
+      except select.error, e:
+         if e[0] == errno.EINTR:
+            return None
          else:
-            for fd,event in l:
-               p = self.fd2proc[fd]
-
-               if event & select.POLLIN: 
-                  s = p.stdout.read()
-                  p.stdoutbuf.write(s)
-
-      if self.doneq:
-         return self.doneq.pop(0)
+            raise
       else:
-         return None
+         for fd,event in l:
+            p = self.fd2proc[fd]
+
+            if event & select.POLLIN: 
+               s = p.stdout.read()
+               p.stdoutbuf.write(s)
+
+      return None
 
 # The design is as follows:
 #   1. Jobs are submitted in an uncoordinated manner, so they have unique
