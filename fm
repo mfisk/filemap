@@ -473,11 +473,10 @@ class Procs:
       self.queues = {}
       self.poll = select.poll()
       self.fd2proc = {}
-      self.doneq = []
       self.pids = {}
    
    def isempty(self):
-      return (not (self.pids or self.doneq))
+      return (not self.pids)
 
    def Popen(self, cmdv, **kwargs):
       kwargs['cmdv'] = cmdv
@@ -573,9 +572,6 @@ class Procs:
 
    def waitpid(self, block=False):
       """Check for a completed child, remove them from the procs dictionary and return them."""
-
-      if self.doneq:
-         return self.doneq.pop(0)
 
       while not self.isempty(): 
          r = self.checkwait(block=block)
