@@ -30,6 +30,17 @@ def hash(s):
    h = h.rstrip('\n\r =')
    return h
 
+def isremote(hname):
+   if not hname: return False
+
+   me = socket.gethostname()
+   me = me.split('.')[0]
+   hname = hname.split('.')[0]
+   if me == hname:
+      return False
+   else:
+      return True
+
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
@@ -315,7 +326,7 @@ locations of this instance."""
 
          if cmd[0] == "fm":
             cmd = loc.fmcmd + cmd[1:]
-         if loc.hostname:
+         if isremote(loc.hostname):
             cmd = loc.sshcmd + [loc.hostname] + cmd + s + d
 
          else:
@@ -368,7 +379,7 @@ locations of this instance."""
          else:
             d = loc.rootdir + "/" + dst
 
-         if loc.hostname:
+         if isremote(loc.hostname):
             d = loc.hostname + ":" + d
 
          cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
@@ -412,7 +423,7 @@ locations of this instance."""
          # Take the specified paths/globs and turn them into a list of simple (non-glob) paths and --include/exclude options
          [includes, s] = rsyncSimplify(s)
 
-         if loc.hostname:
+         if isremote(loc.hostname):
             s = [loc.hostname + ":" + string.join(s)]
          else:
             s = multiglob(s)
