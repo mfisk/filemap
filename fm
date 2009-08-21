@@ -159,6 +159,8 @@ class MethodOptionParser(optparse.OptionParser):
 class FmLocations:
    def __init__(self, config=None, locs=[], stdin=False):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
+      self.procs = Procs()
+      self.cleanup = None
 
       if config:
          self.config = config
@@ -294,14 +296,12 @@ locations of this instance."""
 
       return self.forAll(cmd, subst=True, stdout=stdout, stdinstr=fp.getvalue())
 
-   def forAll(self, Cmdv, src=[], dst=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, stderr=None, call=False, once=False):
+   def forAll(self, Cmdv, src=[], dst=[], subst=False, trailer=None, glob=True, stdinstr=None, stdout=None, call=False, once=False):
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
 
       if stdinstr:
-         std=subprocess.PIPE
-
-      procs = Procs(stdinstr=stdinstr, stdout=stdout, stderr=stderr)
+         stdin = subprocess.PIPE
 
       nodenum = 0
       for loc in self.locs:
@@ -332,14 +332,14 @@ locations of this instance."""
          if trailer:
             cmd += trailer
 
-         procs.Popen(cmd, call=call, queue=loc.qname)
+         self.procs.Popen(cmd, call=call, stdinstr=stdinstr, stdout=stdout, queue=loc.qname)
 
          nodenum += 1
 
          # Stop now if "once" argument was set
-         if once and nodenum: return procs
+         if once and nodenum: return self.procs
 
-      return procs
+      return self.procs
    
    def put(self, src, dst, relative=False, mkdir=False, procs=None):
       if relative:
@@ -453,68 +453,66 @@ class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
-   def __init__(self, stdinstr=None, stdout=None, stderr=None, stdin=None):
-      self.stdout = stdout
-      self.stdin = stdin
-      self.stderr = stderr
-      self.stdinstr = stdinstr
-
-      if not self.stderr: 
-         self.stderr = subprocess.PIPE
-
-      if stdinstr:
-         self.stdin = subprocess.PIPE
-      else:
-         self.stdin = file('/dev/null','w')
-
-      self.procs = {}
+   def __init__(self):
       self.queues = {}
       self.poll = select.poll()
       self.fd2proc = {}
       self.doneq = []
+      self.pids = {}
    
    def isempty(self):
-      return (not (self.procs or self.doneq))
+      return (not (self.pids or self.doneq))
 
-   def Popen(self, lst, prefix=None, call=False, tag=None, queue=None):
-      if not tag: tag = string.join(lst)
+   def Popen(self, cmdv, **kwargs):
+      kwargs['cmdv'] = cmdv
+      queue = kwargs.get('queue')
+      if not kwargs.has_key('tag'): kwargs['tag'] = string.join(cmdv)
 
-      if self.queues.has_key(queue):
+      if self.queues.get(kwargs['queue']):
          # Will process later
          #if Verbose: print >>sys.stderr, "Queueing", tag, "to", len(self.queues[queue])
-         self.queues[queue].append([lst, prefix, call, tag])
+         self.queues[queue].append(kwargs)
          return
       else:
          # No queue, means we can run now, but create an empty queue to block subsequuent tasks         
          self.queues[queue] = []
-         self.PopenNow(lst, prefix, call, tag, queue)
+         self.PopenNow(**kwargs)
 
-   def PopenNow(self, lst, prefix=None, call=False, tag=None, queue=None):
-      r = subprocess.Popen(lst, stdin=self.stdin, stdout=self.stdout, stderr=self.stderr)
-      self.poll.register(r.stdout, select.POLLIN|select.POLLERR|select.POLLHUP) #XXX: add stderr too
-      self.fd2proc[r.stdout.fileno()] = r
+   def PopenNow(self, cmdv=[], prefix=None, call=False, tag=None, queue=None, stdout=None, stdinstr=None):
+      if stdinstr:
+         stdin = subprocess.PIPE
+      else:
+         stdin = file('/dev/null','w')
+
+      r = subprocess.Popen(cmdv, stdin=stdin, stdout=stdout, stderr=subprocess.PIPE)
+      if r.stdout: 
+         self.poll.register(r.stdout, select.POLLIN) 
+         #XXX: register stderr too
+         self.fd2proc[r.stdout.fileno()] = r
+
       r.tag = tag
       r.start = time.time()
       r.queue = queue
       r.stdoutbuf = cStringIO.StringIO()
-      self.procs[r.pid] = r
-      if Verbose > 1: print >>sys.stderr, r.pid, lst
+      self.pids[r.pid] = r
+      if Verbose > 1: print >>sys.stderr, r.pid, cmdv
 
-      if self.stdinstr:
-         r.stdin.write(self.stdinstr)
+      if stdinstr:
+         r.stdin.write(stdinstr)
          r.stdin.close()
-
 
    def collect(self, ignoreErrors=False):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
 
       results = []
-      total = len(self.procs)
       errors = 0
-      #print >>sys.stderr, "Need to collect", total, [self.procs[x].pid for x in self.procs]
-      while not self.isempty():
-         p = self.wait(True)
+      total = 0
+      while True:
+         p = self.waitpid(True)
+         if not p: break
+
          results.append(p)
+         total += 1
          if p.status: errors += 1 
          if Verbose > 0:
             print >>sys.stderr, "Process %d %s returned %d in %gs" % (p.pid, p.tag, p.status, time.time() - p.start)
@@ -530,60 +528,89 @@ class Procs:
                #print "remove queue"
                #del self.queues[p.queue]
             #if Verbose: print >>sys.stderr, "Waking", nxt
-            nxt.append(p.queue)
-            self.PopenNow(*nxt)
+            self.PopenNow(**kwargs)
 
-      for q in self.queues: assert(not self.queues[q])
-      self.procs = {}
-      self.poll = select.poll()
+      for k,v in self.queues.items():
+         assert(not v)
+      assert(not self.pids)
+      self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
          
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
          sys.exit(-1)
 
+            
       return (errors == 0), results
 
    def finalize(self, p):
-      self.poll.unregister(p.stdout)
-      if p.stdout >= 0:
+      if p.stdout != None:
+         self.poll.unregister(p.stdout)
          del self.fd2proc[p.stdout.fileno()]
-      del self.procs[p.pid]
+         p.stdoutbuf.write(p.stdout.read())
+         p.stdout = p.stdoutbuf
+         p.stdout.seek(0)
 
-      p.stdoutbuf.write(p.stdout.read())
-      p.stdout = p.stdoutbuf
-      p.stdout.seek(0)
+      del self.pids[p.pid]
 
-      self.doneq.append(p)
+      return p
 
-   def wait(self, block=False):
+
+   def waitpid(self, block=False):
       """Check for a completed child, remove them from the procs dictionary and return them."""
 
       if self.doneq:
          return self.doneq.pop(0)
-  
+
+      while not self.isempty(): 
+         r = self.checkwait(block=block)
+         if r: return r
+
+   def checkwait(self, block=False):
       if block: 
          pollopts = -1
+         waitopts = 0
       else:
          pollopts = 0
+         waitopts = os.WNOHANG
 
-      ret = None
+      try:
+         (pid, status) = os.waitpid(-1, os.WNOHANG) 
+         if pid:
+            p = self.pids[pid]
+            p.status = status
+            return self.finalize(p)
 
-      while block and self.procs:
-         # Look for children that may be blocking on writes to stdout
-         for fd,event in self.poll.poll(pollopts):
-            p = self.fd2proc[fd]
+      except OSError, e:
+         if e.errno == errno.ECHILD:
+            # If we're here its probably because in python 2.4, subprocess reaps other children
+            # whenever making a new one.  So one of the children we thought was running had already
+            # been waitpidded.  http://bugs.python.org/issue1731717
+            # So, poll on each of our children to find the one to finalize:
+            for p in self.pids.values():
+               status = p.poll()
+               if status != None: 
+                  p.status = status
+                  return self.finalize(p)    
 
-            if event & select.POLLIN: # Don't want POLLIN|POLLHUP because then it's done
-               s = p.stdout.read()
-               p.stdoutbuf.write(s)
+            #print >>sys.stderr, "Unexpected: no child"
+            raise
 
-            if event & select.POLLHUP:
-               # XXX: Wait could be bad here if the child closed stdout but will still run for a while
-               p.status = p.wait()
+         # Look for children that may be blocking on writes to stdout, or that have finished
+         try:
+            print "block", block, "on", len(self.pids)
+            l = self.poll.poll(pollopts)
+         except select.error, e:
+            if e[0] == errno.EINTR:
+               return None
+            else:
+               raise
+         else:
+            for fd,event in l:
+               p = self.fd2proc[fd]
 
-               self.finalize(p)
-
-      print len(self.doneq)
+               if event & select.POLLIN: 
+                  s = p.stdout.read()
+                  p.stdoutbuf.write(s)
 
       if self.doneq:
          return self.doneq.pop(0)
@@ -703,8 +730,7 @@ class JobScheduler:
          before = os.times()
          pid = None
 
-         
-         p = self.procs.wait(block=block)
+         p = self.procs.waitpid(block=block)
 
          if p:
             after = os.times()
@@ -1119,11 +1145,8 @@ Copy the specified file(s) into the virtual store.
          # Convert directory arguments to lists of files
          if os.path.isdir(a):
              for root,dirs,files in os.walk(a):
-                #self.mkdir([os.path.join(dst,root[1:])], procs=procs, async=True)
                 for f in files:
                    fp = os.path.join(root, f)
-                   #print "os.path.join(dst,root)+/=",  os.path.join(dst,root[1:])+"/"
-                   #print "fp =", fp
                    dstfile = os.path.join(dst, root[1:]) + "/" + os.path.basename(fp)
                    self._Locations().pick(seed=dstfile).put(fp, dstfile, procs=procs, mkdir=True)
          else:
@@ -1253,7 +1276,7 @@ and the program re-run.
       (options, args) = MethodOptionParser(fixed="files...").parse_args(args)
 
       procs = self._Locations().forAll(["cat"], args, stdout=subprocess.PIPE)
-      for f in procs.procs:
+      for f in procs.pids.values():
             sys.stdout.writelines(f.stdout)
       return procs.collect(ignoreErrors=True)
 
@@ -1370,12 +1393,12 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
  If a groupname is specified, it will be applied to the directories."""
       (options, args) = MethodOptionParser(fixed="[group]").parse_args(args)
 
-      self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
+      self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"], async=True)
       if args:
          self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
       self._Locations().put(__file__, "/sys/fm").collect()
- 
+
    def _MapComponent(self, cmd, inglobs, options, reduce=False, parent=None, tmpdir="/tmp/"):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
       if parent: jobdesc += "parent = %s\n" % (parent)
