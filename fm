@@ -185,6 +185,7 @@ class FmLocations:
 
             # Keep a copy of the config around so our children can reference it
             fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-")
+            self.cleanup = name
             os.environ['FMCONFIG'] = name
             fh = os.fdopen(fd, 'w')
             self.config.write(fh)
@@ -221,6 +222,10 @@ class FmLocations:
 
       # Use global config values by default (thisis() can override later)
       self.this = self.parseLocation("global")
+
+   def __del__(self):
+      if self.cleanup:
+         os.unlink(self.cleanup)
 
    def parseLocation(self, stanza):
       l = FmLocation()
