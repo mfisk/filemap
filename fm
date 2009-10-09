@@ -483,19 +483,6 @@ class Procs:
       self.pids = {}
       self.numpolling = 0
 
-   def ChildHandler(self, signum, stack):
-      # Do nothing, but this will make sure poll() gets interrupted
-      print >>sys.stderr, "Handgling"
-      pid = True
-      while pid:
-         (pid, status) = os.waitpid(0, os.WNOHANG) 
-         print >>sys.stderr, "handling", pid
-         if pid:
-            p = self.pids[pid]
-            p.status = status
-      print >>sys.stderr, "Handgling done"
-      return True
-   
    def isempty(self):
       return (not self.pids)
 
