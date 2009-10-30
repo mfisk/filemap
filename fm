@@ -367,13 +367,13 @@ locations of this instance."""
    def put(self, src, dst, relative=False, mkdir=False, procs=None):
       if relative:
          # Make src path be relative root local rootdir and place in corresponding path under remote rootdir 
-         rsynccmd = self.this.rsynccmd + ["-Rv"]
+         rsynccmd = self.this.rsynccmd + ["-R"]
          root = self.this.rootdir
          os.chdir(root)
          assert(src[:len(root)] == root)
          src = src[len(root):].lstrip("/")
       elif mkdir:
-         rsynccmd = self.this.rsynccmd + ["-Rv"]
+         rsynccmd = self.this.rsynccmd + ["-R"]
       else:
          rsynccmd = self.this.rsynccmd
 
@@ -491,9 +491,9 @@ class Procs:
       queue = kwargs.get('queue')
       if not kwargs.has_key('tag'): kwargs['tag'] = string.join(cmdv)
 
-      if queue and self.queues.get(queue):
+      if queue and self.queues.get(queue) != None:
          # Will process later
-         #if Verbose: print >>sys.stderr, "Queueing", tag, "to", len(self.queues[queue])
+         if Verbose > 1: print >>sys.stderr, "Queueing", cmdv, "to", queue, len(self.queues[queue])
          self.queues[queue].append(kwargs)
          return
       else:
@@ -523,7 +523,7 @@ class Procs:
       r.queue = queue
       r.stdoutbuf = cStringIO.StringIO()
       self.pids[r.pid] = r
-      if Verbose > 1: print >>sys.stderr, r.pid, cmdv
+      if Verbose > 1: print >>sys.stderr, r.pid, cmdv, r.queue
 
       if stdinstr:
          r.stdin.write(stdinstr)
@@ -553,12 +553,12 @@ class Procs:
  
          #Wake-up anything on this queue
          if self.queues[p.queue]:
-            nxt = self.queues[p.queue].pop(0)
+            kwargs = self.queues[p.queue].pop(0)
             #if not self.queues[p.queue]: 
                # If nothing left on queue, remove it so we won't block
                #print "remove queue"
                #del self.queues[p.queue]
-            #if Verbose: print >>sys.stderr, "Waking", nxt
+            #if Verbose: print >>sys.stderr, "Waking", kwargs
             self.PopenNow(**kwargs)
 
       for k,v in self.queues.items():
@@ -1199,8 +1199,9 @@ Copy the specified file(s) into the virtual store.
              for root,dirs,files in os.walk(a):
                 for f in files:
                    fp = os.path.join(root, f)
-                   dstfile = os.path.join(dst, root[1:]) + "/" + os.path.basename(fp)
-                   self._Locations().pick(seed=dstfile).put(fp, dstfile, procs=procs, mkdir=True)
+                   dstfile = os.path.join(dst, root[0:]) + "/" + os.path.basename(fp)
+                   # Build up dstfile for pick(), but since we're doing mkdir=True, just send dst to put()
+                   self._Locations().pick(seed=dstfile).put(fp, dst, procs=procs, mkdir=True)
          else:
             dstfile = dst + "/" + os.path.basename(a)
             self._Locations().pick(seed=dstfile).put(a, dstfile, procs=procs)
