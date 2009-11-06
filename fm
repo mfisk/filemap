@@ -491,7 +491,7 @@ class Procs:
       queue = kwargs.get('queue')
       if not kwargs.has_key('tag'): kwargs['tag'] = string.join(cmdv)
 
-      if queue and self.queues.get(queue) != None:
+      if queue and self.queues.get(queue):
          # Will process later
          if Verbose > 1: print >>sys.stderr, "Queueing", cmdv, "to", queue, len(self.queues[queue])
          self.queues[queue].append(kwargs)
@@ -531,6 +531,17 @@ class Procs:
 
       return r
 
+   def wakeup(self, qname): 
+         #Wake-up anything on this queue
+         if self.queues[qname]:
+            kwargs = self.queues[qname].pop(0)
+            #if not self.queues[qname]: 
+               # If nothing left on queue, remove it so we won't block
+               #print "remove queue"
+               #del self.queues[qname]
+            if Verbose > 1: print >>sys.stderr, "Waking", kwargs
+            self.PopenNow(**kwargs)
+
    def collect(self, ignoreErrors=False):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
 
@@ -539,7 +550,7 @@ class Procs:
       total = 0
       while True:
          p = self.waitpid(True)
-         if not p: break
+         if p == None: break
 
          results.append(p)
          total += 1
@@ -550,16 +561,6 @@ class Procs:
                err = p.stderr.read()
                p.stderr.close()
                if err: print >>sys.stderr, err
- 
-         #Wake-up anything on this queue
-         if self.queues[p.queue]:
-            kwargs = self.queues[p.queue].pop(0)
-            #if not self.queues[p.queue]: 
-               # If nothing left on queue, remove it so we won't block
-               #print "remove queue"
-               #del self.queues[p.queue]
-            #if Verbose: print >>sys.stderr, "Waking", kwargs
-            self.PopenNow(**kwargs)
 
       for k,v in self.queues.items():
          assert(not v)
@@ -595,6 +596,8 @@ class Procs:
 
       del self.pids[p.pid]
 
+      self.wakeup(p.queue)
+     
       return p
 
 
@@ -795,7 +798,7 @@ class JobScheduler:
             self.finalize(p)
 
    def finalize(self, p):
-      print >>p.syncfile, p.status, p.utime, p.stime
+      print >>p.syncfile, p.status, p.utime, p.stime, p.queue
       p.syncfile = None
 
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
