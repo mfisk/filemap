@@ -604,7 +604,7 @@ class Procs:
    def waitpid(self, block=False):
       """Check for any completed child, remove them from the procs dictionary and return them."""
 
-      while not self.isempty(): 
+      while block and not self.isempty(): 
          r = self.checkwait(block=block)
          if r: return r
 
@@ -621,7 +621,7 @@ class Procs:
             # In this case, waitpid() is superfluous, so don't block on it, but
             # block on poll()
             waitopts = os.WNOHANG
-            pollopts = None # Block
+            pollopts = -1 # Block
          elif self.numpolling:
             # In this case we have to bounce back between waitpid() and poll()
             # We don't want to have a complete busy loop, so we give poll a small timeout.
