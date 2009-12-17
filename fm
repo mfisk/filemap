@@ -953,17 +953,28 @@ class FmJob:
       cmd = self.cmd
 
       if '%(input)' in cmd:
-         cmd = cmd.split()
-         iidx = cmd.index('%(input)')
-         cmd[iidx:iidx] = inputs
+         cmd = shlex.split(cmd)
+         try:
+             # In this case, %(input) is just an argument and can be expanded
+             iidx = cmd.index('%(input)')
+             cmd[iidx:iidx+1] = inputs
+         except ValueError:
+             # If we're here, then when know %(input) is in some argument to
+             # something else.  We must find it and replace it with some nice
+             # spaces.
+             for i in range(len(cmd)):
+                 if not '%(input)' in cmd[i]:
+                    continue
+                 cmd[i] = cmd[i].replace('%(input)',' '.join(inputs),1)
+                 break
       else:
-         cmd = cmd.split() + inputs
+         #cmd = cmd.split() + inputs
+         cmd = shlex.split(cmd) + inputs
     
       if cmd[0] == "fm":
          cmd = options.fmcmd + cmd[1:]
 
-      for c in cmd:
-         cmd = [os.path.expanduser(c) for c in cmd]
+      cmd = [os.path.expanduser(c) for c in cmd]
  
       try:
          p = procs.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
