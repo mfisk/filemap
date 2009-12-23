@@ -826,7 +826,7 @@ class JobScheduler:
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
 
       print >>f, socket.gethostname(), os.getpid()
-      print >>f, p.status, p.utime, p.stime
+      print >>f, p.status, p.utime, p.stime, p.inputsize
       f.close()
    
       dst = p.outdirname + "/" + p.outbasename 
@@ -1007,6 +1007,9 @@ class FmJob:
 
       assert(p)
       #print >>sys.stderr, "JOB RUNNING", self.jobname, p, procs.pids
+      p.inputsize = 0
+      for i in inputs:
+         p.inputsize += os.path.getsize(i)
       p.syncfile = syncfile
       p.outdirname = odirname
       p.outbasename = obasename
@@ -1303,12 +1306,16 @@ and the program re-run.
       # Install the jobs on each node
       self._Locations().put(tmpdir + "*", "/jobs/").collect()
 
+      wallclock = time.time()
+
       self._Locations().forAllLocal(["sched"]).collect()
 
       rm_rf(tmpdir)
 
       print >>sys.stderr, "Waiting for completion.  Job", jobname
       self._Locations().forAllLocal(["wait", jobname]).collect()
+
+      wallclock = time.time() - wallclock
 
       # Print any stderr files to stderr
       errglobs = [f + "/stderr" for f in outglobs]
@@ -1321,6 +1328,7 @@ and the program re-run.
 
       # Tally up info from status files
       utime = stime = 0.0
+      bytes = 0
       errcodes = {}
       for (dirpath, dirnames, filenames) in os.walk(loc):
          for f in filenames:
@@ -1333,6 +1341,7 @@ and the program re-run.
             errcodes[ec] = errcodes.get(ec, 0) + 1
             utime += float(stats[1])
             stime += float(stats[2])
+            bytes += float(stats[3])
       rm_rf(loc)
 
       # Print out summary info
@@ -1343,7 +1352,8 @@ and the program re-run.
          else:
             errstr += "; %d x %d" % (errcodes[k], k)
       if not errstr: errstr = 'No processes ran'
-      print >>sys.stderr, errstr, "in %gu+%gs CPU seconds." % (utime, stime)
+      MB = bytes/(2**20)
+      print >>sys.stderr, errstr, "in %gu+%gs CPU seconds, %g real seconds, %g MB, %g MB/s." % (utime, stime, wallclock, MB, bytes/wallclock/(2**20))
   
       # Print the results to stdout
       self.get(["-c"] + inglobs)
