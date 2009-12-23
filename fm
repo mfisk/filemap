@@ -1267,6 +1267,7 @@ and the program re-run.
       p.add_option("-i", "--inputglob", action="append", help="Glob of input files (in root)")
       p.add_option("-c", "--continuous", action="store_true", help="Continue to look for new input files to arrive")
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
+      p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
       (options, cmd) = p.parse_args(args)
       
       cmds = string.join(cmd).split("|")
@@ -1354,9 +1355,10 @@ and the program re-run.
       if not errstr: errstr = 'No processes ran'
       MB = bytes/(2**20)
       print >>sys.stderr, errstr, "in %gu+%gs CPU seconds, %g real seconds, %g MB, %g MB/s." % (utime, stime, wallclock, MB, bytes/wallclock/(2**20))
-  
-      # Print the results to stdout
-      self.get(["-c"] + inglobs)
+ 
+      if not options.quiet: 
+         # Print the results to stdout
+         self.get(["-c"] + inglobs)
 
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
