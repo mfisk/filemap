@@ -1807,18 +1807,19 @@ directory in the virtual store that it originated in.
 
       sl = SchedLock(self.Locations.this.rootdir)
 
-      delay = 0.001
+      delay = 0.1
       while os.path.isfile(jobfile):
          # Make sure scheduler is running
-         if not sl.checkpid():
+         if not sl.checkpid() and os.path.isfile(jobfile):
             print >>sys.stderr, "Error: scheduler exited while job still running.  Dumping log:"
             sys.stderr.writelines(file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid())))
             return -1
 
          # Wait 
          # XXX: use famd
-         time.sleep(1)
-         if delay < 1: delay *= 2
+         time.sleep(delay)
+         delay *= 2
+         if delay > 1: delay = 1
 
 def multiglob(globs):
    """Take a list of globs and return a list of all of the files that match any of those globs."""
