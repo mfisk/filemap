@@ -1535,6 +1535,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       return h, newinglobs
 
 class SchedLock:
+   """Traditional daemon-style lock as a file containing the pid of the holder"""
    def __init__(self, rootdir):
       self.lockname = rootdir + "/.fmschedlock-" + str(os.getuid())
 
