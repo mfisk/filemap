@@ -522,8 +522,8 @@ class Procs:
          #XXX: register stderr too
 
       r.tag = tag
-      r.start = time.time()
       r.starttimes = os.times()
+      r.start = time.time()
       r.queue = queue
       r.stdoutbuf = cStringIO.StringIO()
       self.pids[r.pid] = r
@@ -581,11 +581,11 @@ class Procs:
 
          if stddev > 0:
             for p in results:
-               deviations = abs(p.time-mean) / stddev
-               if deviations > 2:
+               deviations = (p.time - mean) / stddev
+               if deviations > 1:
                   print >>sys.stderr, "Node %s slow by %g standard deviations" % (p.queue, deviations)
 
-         print >>sys.stderr, "Average time %gs, stddev %gs" % (mean, stddev)
+            print >>sys.stderr, "Average time %gs, stddev %gs" % (mean, stddev)
 
         
       for k,v in self.queues.items():
@@ -609,9 +609,9 @@ class Procs:
    def finalize(self, p):
       # Record compute time
       after = os.times()
+      p.time = time.time() - p.start
       p.utime = after[2] - p.starttimes[2]
       p.stime = after[3] - p.starttimes[3]
-      p.time = time.time() - p.start
       del p.starttimes
       del p.start
 
@@ -829,13 +829,13 @@ class JobScheduler:
             self.finalize(p)
 
    def finalize(self, p):
-      print >>p.syncfile, p.status, p.utime, p.stime, p.queue
+      print >>p.syncfile, p.status, p.time, p.utime, p.stime, p.queue, p.inputsize
       p.syncfile = None
 
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
 
       print >>f, socket.gethostname(), os.getpid()
-      print >>f, p.status, p.utime, p.stime, p.inputsize
+      print >>f, p.status, p.time, p.utime, p.stime, p.queue, p.inputsize
       f.close()
    
       dst = p.outdirname + "/" + p.outbasename 
@@ -1317,9 +1317,9 @@ and the program re-run.
       # Install the jobs on each node
       self._Locations().put(tmpdir + "*", "/jobs/").collect()
 
-      wallclock = time.time()
-
       self._Locations().forAllLocal(["sched"]).collect()
+
+      wallclock = time.time()
 
       rm_rf(tmpdir)
 
@@ -1338,21 +1338,21 @@ and the program re-run.
       self.get(statglobs + [loc])
 
       # Tally up info from status files
-      utime = stime = 0.0
+      wtime = utime = stime = 0.0
       bytes = 0
       errcodes = {}
       for (dirpath, dirnames, filenames) in os.walk(loc):
          for f in filenames:
             fname = os.path.join(dirpath, f)
-            #print >>sys.stderr, "status", fname
             f = file(fname)
             line = f.readlines()[1]
             stats = line.split()
             ec = os.WEXITSTATUS(int(stats[0]))
             errcodes[ec] = errcodes.get(ec, 0) + 1
-            utime += float(stats[1])
-            stime += float(stats[2])
-            bytes += float(stats[3])
+            wtime += float(stats[1])
+            utime += float(stats[2])
+            stime += float(stats[3])
+            bytes += float(stats[5])
       rm_rf(loc)
 
       # Print out summary info
@@ -1364,7 +1364,11 @@ and the program re-run.
             errstr += "; %d x %d" % (errcodes[k], k)
       if not errstr: errstr = 'No processes ran'
       MB = bytes/(2**20)
-      print >>sys.stderr, errstr, "in %gu+%gs CPU seconds, %g real seconds, %g MB, %g MB/s." % (utime, stime, wallclock, MB, bytes/wallclock/(2**20))
+      nodes = self._Locations().processes()
+      assert(wallclock)
+      if nodes and wallclock:
+         print >>sys.stderr, errstr, "in %g seconds, %.0f%% User, %.0f%% System, %.0f%% Wait, %.0f%% Idle, %.1fx CPU scaling, %g MB/s" \
+            % (wallclock, 100*utime/nodes/wallclock, 100*stime/nodes/wallclock, 100*(wtime - stime - utime)/nodes/wallclock, 100*(1 - wtime/nodes/wallclock), (stime+utime)/wallclock, MB/wallclock)
  
       if not options.quiet: 
          # Print the results to stdout
