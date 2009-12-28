@@ -546,7 +546,7 @@ class Procs:
             if Verbose > 2: print >>sys.stderr, "Waking", kwargs
             self.PopenNow(**kwargs)
 
-   def collect(self, ignoreErrors=False):
+   def collect(self, ignoreErrors=False, labelPrint=False):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
 
       results = []
@@ -564,7 +564,7 @@ class Procs:
             if p.stderr:
                err = p.stderr.read()
                p.stderr.close()
-               if err: print >>sys.stderr, err
+               if err: print >>sys.stderr, p.queue + ":", err
 
       if Verbose > 0:
          mean = 0.0
@@ -597,6 +597,11 @@ class Procs:
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
          sys.exit(-1)
+
+      if labelPrint:
+         for f in results:
+            for line in f.stdout:
+               sys.stdout.write(f.queue + ": " + line)
 
             
       return (errors == 0), results
@@ -1206,7 +1211,8 @@ Has unix "mkdir -p" semantics."""
    def df(self, args):
       """Show free space on each node."""
       (options, args) = MethodOptionParser(fixed="").parse_args(args)
-      self._Locations().forAll(["df", "-h"], "/", glob=False).collect()
+
+      self._Locations().forAll(["df", "-h"], ["/"]).collect(labelPrint=True)
 
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
@@ -1367,6 +1373,12 @@ and the program re-run.
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
       return self._Locations().get(*args, **kwargs)
+
+   def run(self, args):
+      """Run a command on each node and print results."""
+      (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
+  
+      self._Locations().forAll(args).collect(labelPrint=True)
 
    def cat(self, args):
       """Concatenate one or more files to stdout."""
