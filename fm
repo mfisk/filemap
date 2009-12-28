@@ -252,6 +252,7 @@ class FmLocations:
 
          pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
          l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
+         l.processes = int(self.config_get(stanza, "processes", "1"))
 
       return l
    
@@ -467,6 +468,9 @@ locations of this instance."""
          rm_rf(dst)
 
       return procs
+
+   def processes(self):
+      return sum(i.processes for i in self.locs)
          
 class FmLocation:
    def __init__(self):
@@ -735,7 +739,7 @@ class JobScheduler:
 
       self.freethreads = numthreads 
       if not self.freethreads:
-         self.freethreads = 1 #XXX: Use configfile setting
+         self.freethreads = self.options.processes
 
    def ReadJobDir(self):
       """Check for new/removed jobs"""
