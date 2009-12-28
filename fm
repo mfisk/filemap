@@ -1279,7 +1279,11 @@ and the program re-run.
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
       p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
       (options, cmd) = p.parse_args(args)
-      
+
+      if not options.inputglob:
+         print >>sys.stderr, "Error: -i or --inputglob must be specified"
+         return None
+
       cmds = string.join(cmd).split("|")
       inglobs = options.inputglob
       outglobs = []
