@@ -684,10 +684,14 @@ class Procs:
 
       # Check for completed children.
       try:
+         # Waiting register's child's CPU times, so measure right before and after
+         starttimes = os.times()
+
          (pid, status) = os.waitpid(0, waitopts) 
          if pid:
             p = self.pids[pid]
             p.status = status
+            p.starttimes = starttimes
             return self.finalize(p)
 
       except OSError, e:
@@ -700,6 +704,8 @@ class Procs:
                # First look for things reaped by the signal handler
                if p.__dict__.has_key('error'): return self.finalize(p)
 
+               # Since the chils is already reaped, we'll probably measure no CPU time for it. oh well
+               starttimes = os.times()
                status = p.poll()
                if status != None: 
                   p.status = status
