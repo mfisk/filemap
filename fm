@@ -482,7 +482,7 @@ class Procs:
       self.poll = select.poll()
       self.fd2proc = {}
       self.pids = {}
-      self.numpolling = 0
+      self.numprocspolling = 0
 
    def isempty(self):
       return (not self.pids)
