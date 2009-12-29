@@ -115,6 +115,25 @@ def close_list(seq):
          result.append(item)
    return result
 
+def coallesce(outputs, labels):
+   """Take a list of multi-line strings and an equally long list of labels and return a string summarizing which labels had what output."""
+   assert(len(outputs) == len(labels))
+   sameas = {}
+   result = ""
+
+   for i in range(0, len(outputs)):
+      if outputs[i]:
+         header = ""
+         header = labels[i]
+         for j in range(i+1, len(outputs)):
+            if outputs[j] and outputs[i].getvalue() == outputs[j].getvalue():
+               header += "," + labels[j]
+               outputs[j] = None
+         header += ": "
+         for line in outputs[i]:
+            result += header + line
+
+   return result
  
 class MethodOptionParser(optparse.OptionParser):
    """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
@@ -308,13 +327,13 @@ locations of this instance."""
    def forAllLocal(self, cmd):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
 
-      cmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
+      lcmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
       fp = cStringIO.StringIO()
       self.config.write(fp)
 
-      return self.forAll(cmd, subst=True, stdinstr=fp.getvalue())
+      return self.forAll(lcmd, subst=True, stdinstr=fp.getvalue(), tag=string.join(cmd))
 
-   def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False):
+   def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
 
@@ -356,7 +375,7 @@ locations of this instance."""
          if trailer:
             cmd += trailer
 
-         self.procs.Popen(cmd, call=call, stdinstr=stdinstr, queue=loc.qname)
+         self.procs.Popen(cmd, call=call, stdinstr=stdinstr, queue=loc.qname, tag=tag)
 
          nodenum += 1
 
@@ -394,7 +413,7 @@ locations of this instance."""
 
          cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
 
-         procs.Popen(cmd, queue=loc.qname)
+         procs.Popen(cmd, queue=loc.qname, tag="put %s %s" % (src, dst))
 
       return procs
 
@@ -444,7 +463,7 @@ locations of this instance."""
          cmd = loc.rsynccmd + includes
          cmd += [rsyncflags, "--prune-empty-dirs", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
 
-         procs.Popen(cmd, queue=loc.qname)
+         procs.Popen(cmd, queue=loc.qname, tag="get %s" % (string.join(args)))
 
       procs.collect()
 
@@ -490,11 +509,11 @@ class Procs:
    def Popen(self, cmdv, **kwargs):
       kwargs['cmdv'] = cmdv
       queue = kwargs.get('queue')
-      if not kwargs.has_key('tag'): kwargs['tag'] = string.join(cmdv)
+      if not kwargs.get('tag'): kwargs['tag'] = string.join(cmdv)
 
       if queue and self.queues.get(queue):
          # Will process later
-         if Verbose > 2: print >>sys.stderr, "Queueing", cmdv, "to", queue, len(self.queues[queue])
+         if Verbose > 2: print >>sys.stderr, "Queueing", tag, "to", queue, len(self.queues[queue])
          self.queues[queue].append(kwargs)
          return
       else:
@@ -562,9 +581,11 @@ class Procs:
          total += 1
          if p.status: errors += 1 
          if Verbose > 1:
-            print >>sys.stderr, "%s: Process %d %s returned %d in %gs" % (p.queue, p.pid, p.tag, p.status, p.time)
+            ec = os.WEXITSTATUS(p.status)
+            print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
 
       if Verbose > 0:
+         print >>sys.stderr, "--- Report for", results[0].tag
          mean = 0.0
          for p in results:
             mean += p.time
@@ -580,32 +601,29 @@ class Procs:
          if stddev > 0:
             for p in results:
                deviations = (p.time - mean) / stddev
-               if deviations > 1:
+               if deviations > 2:
                   print >>sys.stderr, "Node %s slow by %g standard deviations" % (p.queue, deviations)
 
-            print >>sys.stderr, "Average time %gs, stddev %gs" % (mean, stddev)
+            print >>sys.stderr, "Average time %gs, stddev %gs, for %s" % (mean, stddev, p.tag)
 
-        
       for k,v in self.queues.items():
          assert(not v)
       assert(not self.pids)
       assert(self.numprocspolling == 0)
       self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
          
-      if labelPrint or not ignoreErrors:
-         for f in results:
-            if f.stdout and labelPrint:
-               for line in f.stdout:
-                  sys.stdout.write(f.queue + ": " + line)
-
-            if f.stderr and not ignoreErrors:
-               for line in f.stderr:
-                  sys.stderr.write(f.queue + ": " + line)
-
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
-         return (errors == 0), results
             
+      if labelPrint or not ignoreErrors:
+         if labelPrint:
+            sys.stderr.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
+         if not ignoreErrors:
+            sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
+
+      if Verbose > 0:
+         print >>sys.stderr, "---"
+
       return (errors == 0), results
 
    def finalize(self, p):
@@ -1350,7 +1368,7 @@ and the program re-run.
 
       # Print any stderr files to stderr
 
-      # Get the status files
+      # Get the output files
       outputglobs = [f + "/stderr" for f in outglobs]
       outputglobs += [f + "/status" for f in outglobs]
       if not options.quiet:
@@ -1358,7 +1376,7 @@ and the program re-run.
       loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
       self.get(outputglobs + [loc])
 
-      # Tally up info from status files
+      # Process the output files
       wtime = utime = stime = 0.0
       bytes = 0
       errcodes = {}
@@ -1368,6 +1386,7 @@ and the program re-run.
             fh = file(fname)
 
             if f == "status":
+               # Tally up info from status files
                line = fh.readlines()[1]
                stats = line.split()
                ec = os.WEXITSTATUS(int(stats[0]))
