@@ -233,7 +233,7 @@ class FmLocations:
 
       qbyhost = self.config.has_option("global", "queuebyhost")
 
-      l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o GSSAPIDelegateCredentials=yes -Ax", raw=True))
+      l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o GSSAPIDelegateCredentials=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -Ax", raw=True))
       l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
 
       l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync", raw=True), comments=True)
