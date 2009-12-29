@@ -446,7 +446,7 @@ locations of this instance."""
 
          procs.Popen(cmd, queue=loc.qname)
 
-      procs.collect(ignoreErrors=True)
+      procs.collect()
 
       if options.cat:
          empty = True
@@ -502,7 +502,7 @@ class Procs:
          self.queues[queue] = []
          return self.PopenNow(**kwargs)
 
-   def PopenNow(self, cmdv=[], prefix=None, stderr=None, stdout=subprocess.PIPE, call=False, tag=None, queue=None, stdinstr=None, cwd=None):
+   def PopenNow(self, cmdv=[], prefix=None, stderr=subprocess.PIPE, stdout=subprocess.PIPE, call=False, tag=None, queue=None, stdinstr=None, cwd=None):
       # Note, we prefer to have a stdout so that poll() can tell when it closes and then reap the child
 
       if stdinstr:
@@ -512,17 +512,22 @@ class Procs:
 
       r = subprocess.Popen(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd)
 
-      if r.stdout:
-         self.poll.register(r.stdout, select.POLLIN|select.POLLHUP|select.POLLERR) 
-         self.numpolling += 1
-         self.fd2proc[r.stdout.fileno()] = r
-         #XXX: register stderr too
+      if r.stderr or r.stdout:
+         self.numprocspolling += 1
+
+         if r.stdout:
+            self.poll.register(r.stdout, select.POLLIN|select.POLLHUP|select.POLLERR) 
+            self.fd2proc[r.stdout.fileno()] = r
+            r.stdoutbuf = cStringIO.StringIO()
+   
+         if r.stderr:
+            self.poll.register(r.stderr, select.POLLIN|select.POLLHUP|select.POLLERR) 
+            self.fd2proc[r.stderr.fileno()] = r
+            r.stderrbuf = cStringIO.StringIO()
 
       r.tag = tag
-      r.starttimes = os.times()
       r.start = time.time()
       r.queue = queue
-      r.stdoutbuf = cStringIO.StringIO()
       self.pids[r.pid] = r
       if Verbose > 2: print >>sys.stderr, r.pid, cmdv, r.queue
 
@@ -557,11 +562,7 @@ class Procs:
          total += 1
          if p.status: errors += 1 
          if Verbose > 1:
-            print >>sys.stderr, "Process %d %s returned %d in %gs" % (p.pid, p.tag, p.status, p.time)
-            if p.stderr:
-               err = p.stderr.read()
-               p.stderr.close()
-               if err: print >>sys.stderr, p.queue + ":", err
+            print >>sys.stderr, "%s: Process %d %s returned %d in %gs" % (p.queue, p.pid, p.tag, p.status, p.time)
 
       if Verbose > 0:
          mean = 0.0
@@ -588,18 +589,22 @@ class Procs:
       for k,v in self.queues.items():
          assert(not v)
       assert(not self.pids)
-      assert(self.numpolling == 0)
+      assert(self.numprocspolling == 0)
       self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
          
+      if labelPrint or not ignoreErrors:
+         for f in results:
+            if f.stdout and labelPrint:
+               for line in f.stdout:
+                  sys.stdout.write(f.queue + ": " + line)
+
+            if f.stderr and not ignoreErrors:
+               for line in f.stderr:
+                  sys.stderr.write(f.queue + ": " + line)
+
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
-         sys.exit(-1)
-
-      if labelPrint:
-         for f in results:
-            for line in f.stdout:
-               sys.stdout.write(f.queue + ": " + line)
-
+         return (errors == 0), results
             
       return (errors == 0), results
 
@@ -612,15 +617,24 @@ class Procs:
       del p.starttimes
       del p.start
 
-      # Finish building the stdout buffer
+      # Finish building the output buffers
       if p.stdout != None:
          self.poll.unregister(p.stdout)
-         self.numpolling -= 1
          #print >>sys.stderr, "finalized", p.pid, p.stdout.fileno()
          del self.fd2proc[p.stdout.fileno()]
          p.stdoutbuf.write(p.stdout.read())
          p.stdout = p.stdoutbuf
          p.stdout.seek(0)
+
+      if p.stderr != None:
+         self.poll.unregister(p.stderr)
+         del self.fd2proc[p.stderr.fileno()]
+         p.stderrbuf.write(p.stderr.read())
+         p.stderr = p.stderrbuf
+         p.stderr.seek(0)
+
+      if p.stderr or p.stdout:
+         self.numprocspolling -= 1
 
       del self.pids[p.pid]
 
@@ -645,12 +659,12 @@ class Procs:
          # But we may have children that have no shared fd with us and that can only be reaped with waitpid().
          # So we need to figure out which case it is to determine where we can actually block.
 
-         if self.numpolling == len(self.pids):
+         if self.numprocspolling == len(self.pids):
             # In this case, waitpid() is superfluous, so don't block on it, but
             # block on poll()
             waitopts = os.WNOHANG
             pollopts = -1 # Block
-         elif self.numpolling:
+         elif self.numprocspolling:
             # In this case we have to bounce back between waitpid() and poll()
             # We don't want to have a complete busy loop, so we give poll a small timeout.
             # This creates some potential latency, but this is not a expected case
@@ -712,8 +726,13 @@ class Procs:
             p = self.fd2proc[fd]
 
             if event & select.POLLIN: 
-               s = p.stdout.read()
-               p.stdoutbuf.write(s)
+               if fd == p.stdout.fileno():
+                  s = p.stdout.read()
+                  p.stdoutbuf.write(s)
+               else:
+                  assert(fd == p.stderr.fileno())
+                  s = p.stderr.read()
+                  p.stderrbuf.write(s)
 
       return None
 
