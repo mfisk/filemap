@@ -1402,7 +1402,7 @@ and the program re-run.
       """Run a command on each node and print results."""
       (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
   
-      self._Locations().forAll(args).collect(labelPrint=True)
+      self._Locations().forAll(args, subst=True).collect(labelPrint=True)
 
    def cat(self, args):
       """Concatenate one or more files to stdout."""
