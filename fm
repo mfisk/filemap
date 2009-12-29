@@ -314,7 +314,7 @@ locations of this instance."""
 
       return self.forAll(cmd, subst=True, stdinstr=fp.getvalue())
 
-   def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, once=False):
+   def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False):
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
 
@@ -359,9 +359,6 @@ locations of this instance."""
          self.procs.Popen(cmd, call=call, stdinstr=stdinstr, queue=loc.qname)
 
          nodenum += 1
-
-         # Stop now if "once" argument was set
-         if once and nodenum: return self.procs
 
       return self.procs
    
@@ -1547,8 +1544,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
             syncfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) + "/status" for g in inglobs] 
 
          # Delete sync files so that computation is forced to (re-)execute
-         # These files are shared, so our forAll() is set to do only one node (once=True)
-         self._Locations().forAll(["rm", "-f"], syncfiles, absolute=True, once=True, subst=True).collect()
+         # These files are shared, so we pick a minimum number of nodes to do this on
+         self._Locations().pick().forAll(["rm", "-f"], syncfiles, absolute=True, subst=True).collect()
 
          # Also delete previous output so that it doesn't keep getting used
          # (In the case of replication, a node may not replace the old output with new output
