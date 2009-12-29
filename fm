@@ -1329,9 +1329,6 @@ and the program re-run.
             ## Install the jobs on each node
             self._Locations().put(tmpdir + "*", "/jobs/").collect()
 
-            ## But first, make sure a scheduler is running
-            self._Locations().forAllLocal(["sched"]).collect()
-
             print >>sys.stderr, "Waiting for distribute to complete before reducing.  Job", jobname
             self._Locations().forAllLocal(["wait", jobname]).collect()
 
@@ -1343,11 +1340,8 @@ and the program re-run.
       # Install the jobs on each node
       self._Locations().put(tmpdir + "*", "/jobs/").collect()
 
-      self._Locations().forAllLocal(["sched"]).collect()
-
-      wallclock = time.time()
-
       rm_rf(tmpdir)
+      wallclock = time.time()
 
       print >>sys.stderr, "Waiting for completion.  Job", jobname
       self._Locations().forAllLocal(["wait", jobname]).collect()
@@ -1809,7 +1803,7 @@ directory in the virtual store that it originated in.
       sys.stdout.write(cPickle.dumps(output))
       return
 
-   def sched(self, args):
+   def sched(self, args=[]):
       """Start a scheduler for this node."""
 
       sl = SchedLock(self.Locations.this.rootdir)
@@ -1820,6 +1814,7 @@ directory in the virtual store that it originated in.
 
       # daemonify
       if not os.fork():
+         # Middle-child
          os.setsid()
          if not os.fork():
             # Child
@@ -1844,12 +1839,17 @@ directory in the virtual store that it originated in.
                raise
             sl.unlock()
             return
+         else:
+            self.Locations.cleanup = None #Don't cleanup in parent; child will
+
+         sys.exit(0) # Children should just exit now
 
       self.Locations.cleanup = None #Don't cleanup in parent; child will
 
 
    def wait(self, args):
-      """Wait for a specified jobid to complete"""
+      """Wait for a specified jobid to complete (and make sure scheduler is running)"""
+      self.sched()
 
       jobfile = self.Locations.this.rootdir+"/jobs/"+args[0]
       #print >>sys.stderr, "Waiting on", jobfile
