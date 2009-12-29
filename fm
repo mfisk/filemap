@@ -1349,13 +1349,14 @@ and the program re-run.
       wallclock = time.time() - wallclock
 
       # Print any stderr files to stderr
-      errglobs = [f + "/stderr" for f in outglobs]
-      self.get(["-cn"] + errglobs, outfile=sys.stderr)
 
       # Get the status files
-      statglobs = [f + "/status" for f in outglobs]
+      outputglobs = [f + "/stderr" for f in outglobs]
+      outputglobs += [f + "/status" for f in outglobs]
+      if not options.quiet:
+         outputglobs += inglobs
       loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
-      self.get(statglobs + [loc])
+      self.get(outputglobs + [loc])
 
       # Tally up info from status files
       wtime = utime = stime = 0.0
@@ -1364,15 +1365,26 @@ and the program re-run.
       for (dirpath, dirnames, filenames) in os.walk(loc):
          for f in filenames:
             fname = os.path.join(dirpath, f)
-            f = file(fname)
-            line = f.readlines()[1]
-            stats = line.split()
-            ec = os.WEXITSTATUS(int(stats[0]))
-            errcodes[ec] = errcodes.get(ec, 0) + 1
-            wtime += float(stats[1])
-            utime += float(stats[2])
-            stime += float(stats[3])
-            bytes += float(stats[5])
+            fh = file(fname)
+
+            if f == "status":
+               line = fh.readlines()[1]
+               stats = line.split()
+               ec = os.WEXITSTATUS(int(stats[0]))
+               errcodes[ec] = errcodes.get(ec, 0) + 1
+               wtime += float(stats[1])
+               utime += float(stats[2])
+               stime += float(stats[3])
+               bytes += float(stats[5])
+            elif f == "stderr":
+               # Do nothing if empty
+               if os.path.getsize(fname):
+                  print >>sys.stderr, '===', fname, '==='
+                  sys.stderr.writelines(fh)
+                  print >>sys.stderr, '====='
+            elif f == "0":
+               sys.stdout.writelines(fh)
+               
       rm_rf(loc)
 
       # Print out summary info
@@ -1390,10 +1402,6 @@ and the program re-run.
          print >>sys.stderr, errstr, "in %g seconds, %.0f%% User, %.0f%% System, %.0f%% Wait, %.0f%% Idle, %.1fx CPU scaling, %g MB/s" \
             % (wallclock, 100*utime/nodes/wallclock, 100*stime/nodes/wallclock, 100*(wtime - stime - utime)/nodes/wallclock, 100*(1 - wtime/nodes/wallclock), (stime+utime)/wallclock, MB/wallclock)
  
-      if not options.quiet: 
-         # Print the results to stdout
-         self.get(["-c"] + inglobs)
-
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
       return self._Locations().get(*args, **kwargs)
