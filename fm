@@ -1088,15 +1088,15 @@ their doc strings."""
    
       if not args: 
          optParser.print_help()
-         sys.exit(1)
+         exit(1)
 
       try:
          method = self.__method(args[0])
 
       except:
-         print >>sys.stderr, "Unknown command ", args[0]
+         print >>sys.stderr, "Unknown command", args[0]
          optParser.print_help()
-         sys.exit(1)
+         exit(1)
 
       method(self, args[1:])
 
@@ -1674,10 +1674,7 @@ class FmLocalCommands(CommandSetBase):
 
       self.Locations.thisis(int(options.nodenum))
 
-      try:
-         CommandSetBase.__init__(self, args, p)
-      except:
-         traceback.print_exc()
+      CommandSetBase.__init__(self, args, p)
 
    def restore(self, args):
       """[-s] files...
@@ -1842,7 +1839,7 @@ directory in the virtual store that it originated in.
          else:
             self.Locations.cleanup = None #Don't cleanup in parent; child will
 
-         sys.exit(0) # Children should just exit now
+         exit(0) # Children should just exit now
 
       self.Locations.cleanup = None #Don't cleanup in parent; child will
 
