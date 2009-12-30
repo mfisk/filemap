@@ -1905,12 +1905,18 @@ directory in the virtual store that it originated in.
       sl = SchedLock(self.Locations.this.rootdir)
 
       delay = 0.1
+      # When the jobfile is gone (or if the scheduler dies prematurely), we're done
       while os.path.isfile(jobfile):
          # Make sure scheduler is running
-         if not sl.checkpid() and os.path.isfile(jobfile):
-            print >>sys.stderr, "Error: scheduler exited while job still running.  Dumping log:"
-            sys.stderr.writelines(file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid())))
-            return -1
+         if not sl.checkpid():
+            # Could have just finished, so make sure jobfile didn't just get deleted
+            if os.path.isfile(jobfile):
+               # Delay and check again in case the scheduler was just starting
+               time.sleep(2)
+               if not sl.checkpid() and os.path.isfile(jobfile):
+                  print >>sys.stderr, "Error: scheduler exited while job still running.  Dumping log:"
+                  sys.stderr.writelines(file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid())))
+                  return -1
 
          # Wait 
          # XXX: use famd
