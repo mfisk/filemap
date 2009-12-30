@@ -571,6 +571,7 @@ class Procs:
 
    def collect(self, ignoreErrors=False, labelPrint=False):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
+      if not labelPrint and Verbose > 0: labelPrint=True
 
       results = []
       errors = 0
@@ -586,8 +587,11 @@ class Procs:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
 
+      tag = "for " + results[0].tag #XXX not al tags identical
+
       if Verbose > 0:
-         print >>sys.stderr, "--- Report for", results[0].tag #XXX not al tags identical
+         print >>sys.stderr, "--- Report", tag
+         tag = ""
          mean = 0.0
          for p in results:
             mean += p.time
@@ -606,7 +610,7 @@ class Procs:
                if deviations > 2:
                   print >>sys.stderr, "Node %s slow by %g standard deviations" % (p.queue, deviations)
 
-            print >>sys.stderr, "Average time %gs, stddev %gs, for %s" % (mean, stddev, p.tag)
+            print >>sys.stderr, "Average time %gs, stddev %gs %s" % (mean, stddev, tag)
 
       for k,v in self.queues.items():
          assert(not v)
@@ -615,12 +619,12 @@ class Procs:
       self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
          
       if not ignoreErrors and errors:
-         print >>sys.stderr, "Error, %d/%d subprocess(es) returned error" % (errors, total)
+         print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
             
       if labelPrint or not ignoreErrors:
          if labelPrint:
             sys.stderr.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
-         if not ignoreErrors:
+         if labelPrint and not ignoreErrors:
             sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
 
       if Verbose > 0:
