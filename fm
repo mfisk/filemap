@@ -334,10 +334,10 @@ locations of this instance."""
       return self.forAll(lcmd, subst=True, stdinstr=fp.getvalue(), tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
-      if not tag: tag = string.join(Cmdv + src + dst)
-
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
+
+      if not tag: tag = string.join(Cmdv + src + dst)
 
       if stdinstr:
          stdin = subprocess.PIPE
