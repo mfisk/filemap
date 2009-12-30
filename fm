@@ -869,13 +869,22 @@ class JobScheduler:
             self.finalize(p)
 
    def finalize(self, p):
-      print >>p.syncfile, p.status, p.time, p.utime, p.stime, p.queue, p.inputsize
+      stats = {}
+      stats['status'] = p.status
+      stats['time'] = p.time
+      stats['utime'] = p.utime
+      stats['stime'] = p.stime
+      stats['inputsize'] = p.inputsize
+      stats['nodename'] = self.options.name
+      stats['hostname'] = socket.gethostname()
+      stats['schedpid'] = os.getpid()
+
+      cPickle.dump(stats, p.syncfile)
+      p.syncfile.close()
       p.syncfile = None
 
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
-
-      print >>f, socket.gethostname(), os.getpid()
-      print >>f, p.status, p.time, p.utime, p.stime, p.queue, p.inputsize
+      cPickle.dump(stats, f)
       f.close()
    
       dst = p.outdirname + "/" + p.outbasename 
@@ -1377,9 +1386,13 @@ and the program re-run.
       self.get(outputglobs + [loc])
 
       # Process the output files
-      wtime = utime = stime = 0.0
-      bytes = 0
+      wtime = 0.0
+      utime = 0.0
+      stime = 0.0
+      bytes = 0.0
       errcodes = {}
+      nodewtime = {}
+      nodebytes = {}
       for (dirpath, dirnames, filenames) in os.walk(loc):
          for f in filenames:
             fname = os.path.join(dirpath, f)
@@ -1387,14 +1400,17 @@ and the program re-run.
 
             if f == "status":
                # Tally up info from status files
-               line = fh.readlines()[1]
-               stats = line.split()
-               ec = os.WEXITSTATUS(int(stats[0]))
+               stats = cPickle.load(fh)
+               ec = os.WEXITSTATUS(stats['status'])
                errcodes[ec] = errcodes.get(ec, 0) + 1
-               wtime += float(stats[1])
-               utime += float(stats[2])
-               stime += float(stats[3])
-               bytes += float(stats[5])
+               wtime += stats['time']
+               utime += stats['utime']
+               stime += stats['stime']
+               bytes += stats['inputsize']
+               nodename = stats['nodename']
+               nodewtime[nodename] = nodewtime.get(nodename, 0) + stats['time']
+               nodebytes[nodename] = nodebytes.get(nodename, 0) + stats['inputsize']
+
             elif f == "stderr":
                # Do nothing if empty
                if os.path.getsize(fname):
@@ -1412,11 +1428,15 @@ and the program re-run.
          if not errstr: 
             errstr = "%d processes returned %d" % (errcodes[k], k)
          else:
-            errstr += "; %d x %d" % (errcodes[k], k)
+            errstr += "; %d x %s" % (errcodes[k], k)
       if not errstr: errstr = 'No processes ran'
       MB = bytes/(2**20)
+
+      if Verbose > 0:
+         for n in nodebytes:
+            print >>sys.stderr, "Node %s %g MB/s" % (n, nodebytes[n]/2**20/nodewtime[n])
+
       nodes = self._Locations().processes()
-      assert(wallclock)
       if nodes and wallclock:
          print >>sys.stderr, errstr, "in %g seconds, %.0f%% User, %.0f%% System, %.0f%% Wait, %.0f%% Idle, %.1fx CPU scaling, %g MB/s" \
             % (wallclock, 100*utime/nodes/wallclock, 100*stime/nodes/wallclock, 100*(wtime - stime - utime)/nodes/wallclock, 100*(1 - wtime/nodes/wallclock), (stime+utime)/wallclock, MB/wallclock)
