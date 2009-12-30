@@ -334,6 +334,8 @@ locations of this instance."""
       return self.forAll(lcmd, subst=True, stdinstr=fp.getvalue(), tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
+      if not tag: tag = string.join(Cmdv + src + dst)
+
       if src and type(src) != type([]): src = [src]
       if dst and type(dst) != type([]): dst = [dst]
 
@@ -585,7 +587,7 @@ class Procs:
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
 
       if Verbose > 0:
-         print >>sys.stderr, "--- Report for", results[0].tag
+         print >>sys.stderr, "--- Report for", results[0].tag #XXX not al tags identical
          mean = 0.0
          for p in results:
             mean += p.time
@@ -1604,6 +1606,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          outglobs += newinglobs
 
       if options.fresh:
+         #XXX lower latency to accumulate these up to map() and let it do a bulk delete
+
          if reduce:
             syncfiles = ["%(SYNCDIR)/reduce/" + h + "/[0-9]*"]
          else:
