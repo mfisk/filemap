@@ -1450,7 +1450,8 @@ and the program re-run.
 
       if Verbose > 0:
          for n in nodebytes[0]:
-            print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
+            if nodebytes[0][n]:
+               print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
 
       swtime = sum(wtime)
       sbytes = sum(bytes)
@@ -1458,7 +1459,7 @@ and the program re-run.
       if swtime:
          sutime = sum(utime)
          sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %g MB/s, %gs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+         print >>sys.stderr, "Serial performance: %g MB/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
             % (sbytes/MB/swtime, swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
 
       if wallclock and swtime:
@@ -1468,7 +1469,7 @@ and the program re-run.
          nodes = self._Locations().processes()
          scaling = (stime[0]+utime[0])/wallclock
 
-         print >>sys.stderr, "Filemap performance: %g MB/s total, %gs, %.0f%% cached.  New work: %g MB/s, %.1f/%dx CPU scaling" % (rate, wallclock, cached, newrate, scaling, nodes)
+         print >>sys.stderr, "Filemap performance: %g MB/s, %.1fs, %.0f%% cached.  New work: %g MB/s, %.1f/%dx CPU scaling" % (rate, wallclock, cached, newrate, scaling, nodes)
  
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
