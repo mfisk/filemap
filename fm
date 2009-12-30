@@ -1440,8 +1440,13 @@ and the program re-run.
 
       nodes = self._Locations().processes()
       if nodes and wallclock:
-         print >>sys.stderr, errstr, "in %g seconds, %.0f%% User, %.0f%% System, %.0f%% Wait, %.0f%% Idle, %.1fx CPU scaling, %g MB/s" \
-            % (wallclock, 100*utime/nodes/wallclock, 100*stime/nodes/wallclock, 100*(wtime - stime - utime)/nodes/wallclock, 100*(1 - wtime/nodes/wallclock), (stime+utime)/wallclock, MB/wallclock)
+         if wtime/nodes > wallclock:
+            # Performance dominated by caching.  Normal display would look fishy
+            print >>sys.stderr, errstr, "in %g seconds using cache from %g seconds (%.0f%% User, %.0f%% System, %.0f%% Wait), %g cached MB/s" \
+               % (wallclock, wtime, 100*utime/wtime, 100*stime/wtime, 100*(wtime - stime - utime)/wtime, MB/wallclock)
+         else:
+            print >>sys.stderr, errstr, "in %g seconds, %.0f%% User, %.0f%% System, %.0f%% Wait, %.0f%% Idle, %.1fx CPU scaling, %g MB/s" \
+               % (wallclock, 100*utime/nodes/wallclock, 100*stime/nodes/wallclock, 100*(wtime - stime - utime)/nodes/wallclock, 100*(1 - wtime/nodes/wallclock), (stime+utime)/wallclock, MB/wallclock)
  
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
