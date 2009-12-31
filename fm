@@ -777,8 +777,6 @@ class Procs:
 #      hint that points to the job.  Failure to send this hint should only delay
 #      the job scheduler discovering the job since it should periodically poll
 #      for changes in the job directory.
-#   4. We assume out of band replication of the job dir across nodes (via NFS, 
-#      rsync, etc.)
 
 class JobScheduler:
    """JobScheduler maintains a set of child processes working on a set of jobs."""
@@ -804,6 +802,10 @@ class JobScheduler:
 
       for j in recent:
          #print "Job", j, "added"
+         jobuid = os.stat(self.options.jobdir + "/" + j).st_uid
+         if jobuid != os.getuid():
+            #print >>sys.stderr, "Skipping job owned by UID %d", jobuid
+            continue
          try:
             self.jobs[j] = FmJob(self.options.jobdir + "/" + j)
          except:
