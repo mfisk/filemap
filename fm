@@ -945,7 +945,7 @@ class FmJob:
                if i[-xlen:] == ext:
                   files.append(i)
 
-            outfilename = "/reduce/" + self.jobname + "." + ext
+            outfilename = "/reduce/" + self.jobname + "/" + ext
 
             p = self.computeItem(files, outfilename, options, procs)
             if p: 
@@ -1628,7 +1628,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
       # Each component of pipeline uses previous output as input
       if reduce:
-         newinglobs = ["/reduce/" + h + ".[0-9]*"]
+         newinglobs = ["/reduce/" + h + "/[0-9]*"]
          outglobs += newinglobs
       else:
          newinglobs = [i + ".d/" + escape(cmd) for i in inglobs]
