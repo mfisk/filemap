@@ -564,8 +564,6 @@ class Procs:
 
    def collect(self, ignoreErrors=False, labelPrint=False):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
-      if not labelPrint and Verbose > 0: labelPrint=True
-
       results = []
       errors = 0
       total = 0
@@ -614,11 +612,10 @@ class Procs:
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
             
-      if labelPrint or not ignoreErrors:
-         if labelPrint:
-            sys.stderr.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
-         if labelPrint and not ignoreErrors:
-            sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
+      if labelPrint:
+         sys.stderr.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
+      if labelPrint or Verbose > 0:
+         sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
 
       if Verbose > 0:
          print >>sys.stderr, "---"
