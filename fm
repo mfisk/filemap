@@ -1805,6 +1805,7 @@ directory in the virtual store that it originated in.
       d = {}
       d['name'] = fname
       d['node'] = self.Locations.thisnum
+      d['nodename'] = self.Locations.this.name
 
       if not fs:
           d['user'] = '?'
