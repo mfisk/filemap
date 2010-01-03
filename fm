@@ -1592,9 +1592,9 @@ and the program re-run.
 Remove empty file or directory.  Normal rm flags are passed through; -f is implied.
 """
       p = MethodOptionParser(fixed="files...")
-      p.add_option('-R', action='store_true', help="recurse")
+      p.add_option('-R', '--recurse', action='store_true', help="recurse")
       (options, args) = p.parse_args(args)
-      if options.R:
+      if options.recurse:
          options = ["-R"]
       else:
          options = []
