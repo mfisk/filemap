@@ -1522,41 +1522,46 @@ and the program re-run.
       keys = ls.keys()
       keys.sort()
       for k in keys:
-         base = ls[k][0]
-         nodes = [base['nodename']]
-         isdir = (base['perms'][0] == 'd')
-         islnk = (base['perms'][0] == 'l')
-         criteria = ['perms', 'user', 'group', 'size']
-         if isdir: base['size'] = 0
-         if not isdir: criteria.append('size')
+         for i in range(0,len(ls[k])):
+            if not ls[k][i]: continue
+
+            base = ls[k][i]
+            nodes = [base['nodename']]
+            isdir = (base['perms'][0] == 'd')
+            islnk = (base['perms'][0] == 'l')
+            criteria = ['perms', 'user', 'group']
+            if isdir: 
+               base['size'] = 0
+            else: 
+               criteria.append('size')
         
-         # Look for duplicates from other nodes 
-         for i in ls[k][1:]:
-            if isdir: i['size'] = 0
+            # Look for duplicates from other nodes 
+            for j in range(i, len(ls[k])):
+               if not ls[k][j]: continue
 
-            # See if this node's instance matches the right criteria to be
-            # collapsed into a single output line
-            match = True
-            for a in criteria:
-               if base[a] != i[a]: 
-                  # Does not match
-                  match = False
-                  break
+               # See if this node's instance matches the right criteria to be
+               # collapsed into a single output line
+               match = True
+               for a in criteria:
+                  if base[a] != ls[k][j][a]: 
+                     # Does not match
+                     match = False
+                     break
 
-            if match:
-               # If you specify the same file twice, we don't want
-               # the node number(s) duplicated in the node list
-               if i['nodename'] not in nodes:
-                  nodes.append(i['nodename'])
-            else:
-               # No match, so output a line for this instance
-               print self._lsline(i, listnodes=options.nodes)
+               if match:
+                  # If you specify the same file twice, we don't want
+                  # the node number(s) duplicated in the node list
+                  n = ls[k][j]['nodename']
+                  if n not in nodes:
+                     nodes.append(n)
 
-         # Update the nodelist for this base instance
-         base['nodename'] = nodes
+                  ls[k][j] = None
 
-         # Print out this file
-         print self._lsline(base, listnodes=options.nodes)
+            # Update the nodelist for this base instance
+            base['nodename'] = nodes
+
+            # Print out this file
+            print self._lsline(base, listnodes=options.nodes)
          
       return 
 
