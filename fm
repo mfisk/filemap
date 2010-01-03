@@ -99,22 +99,6 @@ def rsyncSimplify(lst):
    includes.append("--exclude=*")
    return [includes, paths]
   
-     
-def close_list(seq):
-   """Take a list of numbers like [1,2,3,5] and returns a list of ranges like ["1-3",5]"""
-   result = []
-   start  = None
-   for i,item in enumerate(seq):
-      if i < len(seq)-1 and item+1 == seq[i+1]:
-          if start is None:
-             start = item
-      elif start is not None:
-         result.append('%d-%d' % (start, item))
-         start = None
-      else:
-         result.append(item)
-   return result
-
 def coallesce(outputs, labels):
    """Take a list of multi-line strings and an equally long list of labels and return a string summarizing which labels had what output."""
    assert(len(outputs) == len(labels))
@@ -1502,7 +1486,9 @@ and the program re-run.
 
    def ls(self, args):
       """File & directory listing."""
-      (options, args) = MethodOptionParser(fixed="files...").parse_args(args)
+      p = MethodOptionParser(fixed="files...")
+      p.add_option('-n', '--nodes', action='store_true', help="List names of nodes holding each file")
+      (options, args) = p.parse_args(args)
 
       if not args: args = ["/"]
       procs = self._Locations().forAllLocal(["ls"] + args)
@@ -1528,7 +1514,7 @@ and the program re-run.
       keys.sort()
       for k in keys:
          base = ls[k][0]
-         nodes = [base['node']]
+         nodes = [base['nodename']]
          isdir = (base['perms'][0] == 'd')
          islnk = (base['perms'][0] == 'l')
          criteria = ['perms', 'user', 'group', 'size']
@@ -1551,23 +1537,25 @@ and the program re-run.
             if match:
                # If you specify the same file twice, we don't want
                # the node number(s) duplicated in the node list
-               if i['node'] not in nodes:
-                  nodes.append(i['node'])
+               if i['nodename'] not in nodes:
+                  nodes.append(i['nodename'])
             else:
                # No match, so output a line for this instance
-               print self._lsline(i)
+               print self._lsline(i, listnodes=options.nodes)
 
-         # Update the nodelist for this base instance and print it out
-         base['node'] = nodes
-         print self._lsline(base)
+         # Update the nodelist for this base instance
+         base['nodename'] = nodes
+
+         # Print out this file
+         print self._lsline(base, listnodes=options.nodes)
          
       return 
 
-   def _lsline(self, attrs):
+   def _lsline(self, attrs, listnodes=False):
       size = "%-.2g" % attrs['size']
       size = size.replace("e+", "e").replace("e0", "e")
 
-      nodes = attrs['node']
+      nodes = attrs['nodename']
       if type(nodes) != type([]): nodes = [nodes]
 
       if len(nodes) > 1:
@@ -1578,14 +1566,15 @@ and the program re-run.
             attrs['mtime'] = time.strftime("%b %d %H:%M", lt)
          else:
             attrs['mtime'] = time.strftime("%b %d  %Y", lt)
-               
-      if len(nodes) == len(self._Locations().locs):
-         nodes = '*'
+ 
+      if listnodes:
+         if len(nodes) == len(self._Locations().locs):
+            nodes = '*'
+         else:
+            nodes.sort()
+            nodes = string.join(nodes,',')
       else:
-         nodes.sort()
-         nodes = close_list(nodes)
-         nodes = [str(i) for i in nodes]
-         nodes = string.join(nodes,',')
+         nodes = len(nodes)
 
       return "%s %7s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], attrs['name'])
 
