@@ -1351,7 +1351,7 @@ and the program re-run.
             cmd = cmd.lstrip(">")
 
             # First, re-distribute the data
-            restore = "fm _local restore -s" 
+            restore = "fm _local restore -b" 
             jobname, ignore = self._MapComponent(restore, inglobs, outglobs, options, parent=jobname, tmpdir=tmpdir)
             # Ignore change to the inglobs directory since restore puts files in the same virtual path they started in
 
@@ -1760,17 +1760,17 @@ class FmLocalCommands(CommandSetBase):
       CommandSetBase.__init__(self, args, p)
 
    def restore(self, args):
-      """[-s] files...
+      """[-b] files...
 
 Iff -s is specified, then nodes should be chosen based on a pure
-function of the file's suffix so that similarly split files will be
+function of the file's basename so that similarly split files will be
 stored on the same nodes.  Also file will be stored into the same
 directory in the virtual store that it originated in.
 """
 
       p = MethodOptionParser()
       p.disable_interspersed_args()
-      p.add_option("-s", "--suffix", action="store_true", help="Store based on file's suffix")
+      p.add_option("-b", "--basename", action="store_true", help="Store based on file's basename")
       (options, args) = p.parse_args(args)
 
       procs = Procs()
@@ -1778,14 +1778,14 @@ directory in the virtual store that it originated in.
       for f in args:
          dst = os.path.dirname(f[len(self.Locations.this.rootdir):]) + "/"
          
-         if options.suffix: 
+         if options.basename: 
             ext = os.path.basename(f)
             n = ext
 
          # Pick some destinations.  If the algorithm picks this node,
          # that is reasonable, but is a NOOP
          dsts = self.Locations.pick(n, selfIsNoop=True)
-         #if options.suffix: print >>sys.stderr, "Extension", ext, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
+         #if options.basename: print >>sys.stderr, "File", f, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
 
          # Store with relative=True to make parent directories
          dsts.put(f, dst, relative=True, procs=procs)
