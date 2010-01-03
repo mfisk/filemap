@@ -182,16 +182,17 @@ class FmLocations:
       else:
          self.config = ConfigParser.SafeConfigParser()
 
+         # Get appropriate self.configstr and set FMCONFIG
          if stdin:
             # Read config file from stdin
-            self.config.readfp(sys.stdin)
+            self.configstr = sys.stdin.read()
 
             # Keep a copy of the config around so our children can reference it
             fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-")
             self.cleanup = name
             os.environ['FMCONFIG'] = name
             fh = os.fdopen(fd, 'w')
-            self.config.write(fh)
+            fh.write(self.configstr)
             fh.close()
 
          else:
@@ -203,13 +204,23 @@ class FmLocations:
                else:
                   filename = "/etc/filemap.conf"
 
-            # Read config file from stdin
-            r = self.config.read(filename)
-            if not r:
+               os.environ['FMCONFIG'] = filename
+
+            try:
+               fh = open(filename)
+            except:
                raise Exception("Unable to locate config file.  Set FMCONFIG or place filemap.conf in . or /etc")
 
+            # Read into a buffer that we can relay to children 
+            self.configstr = fh.read()
+
             #print >>sys.stderr, "Reading config", filename, self.config.sections()
-            os.environ['FMCONFIG'] = filename
+
+         # Parse it
+         filebuf = cStringIO.StringIO()
+         filebuf.write(self.configstr)
+         filebuf.seek(0)
+         self.config.readfp(filebuf)
 
          self.replication = int(self.config_get("global", "replication", "1"))
          self.umask = int(self.config_get("global", "umask", "0002"))
@@ -312,10 +323,8 @@ locations of this instance."""
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
 
       lcmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
-      fp = cStringIO.StringIO()
-      self.config.write(fp)
 
-      return self.forAll(lcmd, subst=True, stdinstr=fp.getvalue(), tag=string.join(cmd))
+      return self.forAll(lcmd, subst=True, stdinstr=self.configstr, tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
       if src and type(src) != type([]): src = [src]
