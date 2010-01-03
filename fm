@@ -24,7 +24,7 @@ Verbose = 0
 
 nonalphanumre = re.compile('\W')
 
-def hash(s):
+def printableHash(s):
    h = sha.sha(s).digest()
    h = base64.b64encode(h, '+_')  # Normal b64 but / is _
    h = h.rstrip('\n\r =')
@@ -1625,7 +1625,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       if reduce:
          jobdesc += "reduce = True\n"
 
-      h = hash(jobdesc)
+      h = printableHash(jobdesc)
       jobfilename = tmpdir + h
       jobfile = open(jobfilename, "w")
       jobfile.write(jobdesc)
