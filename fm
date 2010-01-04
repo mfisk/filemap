@@ -608,7 +608,7 @@ class Procs:
             # Queues was already empty, so now delete it
             del self.queues[qname]
 
-   def collect(self, ignoreErrors=False, labelPrint=False):
+   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
       results = []
       errors = 0
@@ -668,7 +668,11 @@ class Procs:
       if Verbose > 0:
          print >>sys.stderr, "---"
 
-      return (errors == 0), results
+      if not ignoreErrors and errors:
+         if maxErrors != None and errors > maxErrors:
+            exit(errors)
+
+      return errors, results
 
    def finalize(self, p):
       # Record compute time
@@ -1409,13 +1413,13 @@ and the program re-run.
 
 
       # Install the jobs on each node
-      self._Locations().put([tmpdir + "*"], "/jobs/").collect()
+      self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
       rm_rf(tmpdir)
       if not starttime: starttime = time.time()
 
-      print >>sys.stderr, "Waiting for completion.  Job", jobname
-      self._Locations().forAllLocal(["wait", jobname]).collect()
+      if Verbose > 0: print >>sys.stderr, "Waiting for completion.  Job", jobname
+      self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
 
       wallclock = time.time() - starttime
 
