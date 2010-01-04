@@ -624,7 +624,7 @@ class Procs:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
 
-      if not results: return results
+      if not results: return [None, results]
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
@@ -1185,7 +1185,7 @@ their doc strings."""
          optParser.print_help()
          exit(1)
 
-      method(self, args[1:])
+      exit( method(self, args[1:]))
 
    def _optionHook(self, optParser):
       pass
@@ -1535,7 +1535,7 @@ and the program re-run.
 
    def _local(self, args):
       """This is for slave (remote) instantiations."""
-      FmLocalCommands(args)
+      return FmLocalCommands(args)
 
    def ls(self, args):
       """File & directory listing."""
