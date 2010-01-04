@@ -379,18 +379,13 @@ locations of this instance."""
 
       return self.procs
    
-   def put(self, srclist, dst, relative=False, procs=None, pickn=False):
+   def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False):
       origdst = dst
+      if not procs: procs = Procs()
 
       if relative:
-         # Make src path be relative root local rootdir and place in corresponding path under remote rootdir 
-         rsynccmd = self.this.rsynccmd + ["-R"]
-         root = self.this.rootdir
-         os.chdir(root)
-         assert(src[:len(root)] == root)
-         src = src[len(root):].lstrip("/")
-
-      rsynccmd = self.this.rsynccmd
+         srclist = [s.lstrip("/") for s in srclist]
+         os.chdir(self.this.rootdir)
 
       srcs = multiglob(srclist)
       if not srcs:
@@ -417,9 +412,11 @@ locations of this instance."""
       qname = {}
       for i in items:
          src, dst, relative = i
-         dstfile = dst + "/" + os.path.basename(src)
          if pickn:
-            choices = self.pickn(seed=dstfile)
+            seed = os.path.basename(src)
+            if not hashbasename:
+               seed = dst + "/" + seed
+            choices = self.pickn(seed=seed)
             choices = [self.locs[c] for c in choices]
          else:
             choices = self.locs
@@ -439,16 +436,13 @@ locations of this instance."""
 
             qname[d] = loc.qname
 
-      if not procs: procs = Procs()
       for dst in bydst:
-         cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + bydst[dst] + [dst]
+         cmd = self.this.rsynccmd + ["-a", "-e", loc.sshcmdstr] + bydst[dst] + [dst]
          procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
 
       for dst in bydstrel:
-         cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
+         cmd = self.this.rsynccmd + ["-a", "-e", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
          procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
-
-      procs.collect()
 
       return procs
 
