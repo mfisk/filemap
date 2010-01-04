@@ -376,7 +376,9 @@ locations of this instance."""
 
       return self.procs
    
-   def put(self, src, dst, relative=False, mkdir=False, procs=None):
+   def put(self, srclist, dst, relative=False, procs=None, pickn=False):
+      origdst = dst
+
       if relative:
          # Make src path be relative root local rootdir and place in corresponding path under remote rootdir 
          rsynccmd = self.this.rsynccmd + ["-R"]
@@ -384,31 +386,66 @@ locations of this instance."""
          os.chdir(root)
          assert(src[:len(root)] == root)
          src = src[len(root):].lstrip("/")
-      elif mkdir:
-         rsynccmd = self.this.rsynccmd + ["-R"]
-      else:
-         rsynccmd = self.this.rsynccmd
 
-      s = multiglob([src])
+      rsynccmd = self.this.rsynccmd
 
-      if not s:
-         print >>sys.stderr, "No such file:", src
+      srcs = multiglob(srclist)
+      if not srcs:
+         print >>sys.stderr, "No such file:", srclist
          return procs
 
-      if not procs: procs = Procs()
+      # We always specify a seed when calling pick() so there is stability in which nodes work is mapped to.
+      # It's nice if they go to nodes that might have already received the store in a previous execution.
 
-      for loc in self.locs:
-         if relative:
-            d = loc.rootdir + "/"
+      items = []
+      for a in srcs:
+         # Convert directory arguments to lists of files
+         if os.path.isdir(a):
+            for root,dirs,files in os.walk(a):
+               for f in files:
+                  fp = os.path.join(root, f)
+                  dstfile = os.path.join(dst, root[0:]) + "/" + os.path.basename(fp)
+                  items.append([fp, dst, True])
          else:
-            d = loc.rootdir + "/" + dst
+            items.append([a, dst, False])
 
-         if isremote(loc.hostname):
-            d = loc.hostname + ":" + d
+      bydst = {}
+      bydstrel = {}
+      qname = {}
+      for i in items:
+         src, dst, relative = i
+         dstfile = dst + "/" + os.path.basename(src)
+         if pickn:
+            choices = self.pickn(seed=dstfile)
+            choices = [self.locs[c] for c in choices]
+         else:
+            choices = self.locs
 
-         cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + s + [d]
+         for loc in choices:
+            if isremote(loc.hostname):
+               d = loc.hostname + ":" + loc.rootdir 
+            else:
+               d = loc.rootdir
+ 
+            if relative:
+               bydstrel[d] = bydstrel.get(d, []) + [src]
+            else:
+               d = d + "/" + dst
+               d = d.replace("//","/")
+               bydst[d] = bydst.get(d, []) + [src]
 
-         procs.Popen(cmd, queue=loc.qname, tag="put %s %s" % (src, dst))
+            qname[d] = loc.qname
+
+      if not procs: procs = Procs()
+      for dst in bydst:
+         cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr] + bydst[dst] + [dst]
+         procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
+
+      for dst in bydstrel:
+         cmd = rsynccmd + ["-a", "-e", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
+         procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
+
+      procs.collect()
 
       return procs
 
@@ -504,11 +541,11 @@ class Procs:
    def Popen(self, cmdv, **kwargs):
       kwargs['cmdv'] = cmdv
       queue = kwargs.get('queue')
-      if not kwargs.get('tag'): kwargs['tag'] = string.join(cmdv)
+      if not kwargs.get('tag'): kwargs['tag'] = cmdv[0]+"..."
 
-      if queue and self.queues.get(queue):
-         # Will process later
-         if Verbose > 2: print >>sys.stderr, "Queueing", tag, "to", queue, len(self.queues[queue])
+      if queue and self.queues.get(queue) != None:
+         # If queue exists (even if it is an empty queue), then something is running
+         if Verbose > 2: print >>sys.stderr, "Queueing", kwargs['tag'], "to", queue, len(self.queues[queue])
          self.queues[queue].append(kwargs)
          return
       else:
@@ -1286,24 +1323,7 @@ Copy the specified file(s) into the virtual store.
       args = args[:-1]
       if len(args) > 1: dst += "/"
 
-      procs = Procs()
-
-      # We always specify a seed when calling pick() so there is stability in which nodes work is mapped to.
-      # It's nice if they go to nodes that might have already received the store in a previous execution.
-      for a in args:
-         # Convert directory arguments to lists of files
-         if os.path.isdir(a):
-             for root,dirs,files in os.walk(a):
-                for f in files:
-                   fp = os.path.join(root, f)
-                   dstfile = os.path.join(dst, root[0:]) + "/" + os.path.basename(fp)
-                   # Build up dstfile for pick(), but since we're doing mkdir=True, just send dst to put()
-                   self._Locations().pick(seed=dstfile).put(fp, dst, procs=procs, mkdir=True)
-         else:
-            dstfile = dst + "/" + os.path.basename(a)
-            self._Locations().pick(seed=dstfile).put(a, dstfile, procs=procs)
-            
-      procs.collect()
+      self._Locations().put(args, dst, pickn=True)
 
    def map(self, args):
       """Launch a computation on a set of input files in the cloud.
@@ -1356,7 +1376,7 @@ and the program re-run.
             # Ignore change to the inglobs directory since restore puts files in the same virtual path they started in
 
             # Install the jobs on each node
-            self._Locations().put(tmpdir + "*", "/jobs/").collect()
+            self._Locations().put([tmpdir + "*"], "/jobs/").collect()
 
             # Barrier; Wait for that job (and its parents) to finish:
             print >>sys.stderr, "Waiting for distribute to complete before reducing.  Job", jobname
@@ -1369,7 +1389,7 @@ and the program re-run.
 
 
       # Install the jobs on each node
-      self._Locations().put(tmpdir + "*", "/jobs/").collect()
+      self._Locations().put([tmpdir + "*"], "/jobs/").collect()
 
       rm_rf(tmpdir)
       if not starttime: starttime = time.time()
@@ -1616,7 +1636,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       if args:
          self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
-      self._Locations().put(__file__, "/sys/fm").collect()
+      self._Locations().put([__file__], "/sys/fm").collect()
 
    def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/"):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
@@ -1793,7 +1813,7 @@ directory in the virtual store that it originated in.
          #if options.basename: print >>sys.stderr, "File", f, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
 
          # Store with relative=True to make parent directories
-         dsts.put(f, dst, relative=True, procs=procs)
+         dsts.put([f], dst, relative=True, procs=procs)
 
       procs.collect()
 
