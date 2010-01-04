@@ -321,8 +321,11 @@ locations of this instance."""
          
    def forAllLocal(self, cmd):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
-
-      lcmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
+      if Verbose: 
+         verbose = "-" + "v" * Verbose
+         lcmd = ["fm", verbose, "_local", "-n", "%(NODENUM)"] + cmd
+      else:
+         lcmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
 
       return self.forAll(lcmd, subst=True, stdinstr=self.configstr, tag=string.join(cmd))
 
