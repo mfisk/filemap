@@ -589,15 +589,17 @@ class Procs:
       return r
 
    def wakeup(self, qname): 
+         if not qname: return
+
          #Wake-up anything on this queue
          if self.queues[qname]:
             kwargs = self.queues[qname].pop(0)
-            #if not self.queues[qname]: 
-               # If nothing left on queue, remove it so we won't block
-               #print "remove queue"
-               #del self.queues[qname]
+            # Leave queue, even if empty, so things wait for us to finish
             if Verbose > 2: print >>sys.stderr, "Waking", kwargs
             self.PopenNow(**kwargs)
+         else: 
+            # Queues was already empty, so now delete it
+            del self.queues[qname]
 
    def collect(self, ignoreErrors=False, labelPrint=False):
       """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
@@ -614,6 +616,8 @@ class Procs:
          if Verbose > 1:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
+
+      if not results: return results
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
