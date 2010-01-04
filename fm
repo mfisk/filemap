@@ -1388,29 +1388,28 @@ and the program re-run.
       starttime = None
       jobname = None
 
+      maxErrors = self._Locations().replication
+
       for cmd in cmds:
          reduce = False
          cmd = cmd.strip()
          if cmd[0] == ">":
             cmd = cmd.lstrip(">")
 
-            # First, re-distribute the data
-            restore = "fm _local restore -b" 
-            jobname, ignore = self._MapComponent(restore, inglobs, outglobs, options, parent=jobname, tmpdir=tmpdir)
-            # Ignore change to the inglobs directory since restore puts files in the same virtual path they started in
-
             # Install the jobs on each node
-            self._Locations().put([tmpdir + "*"], "/jobs/").collect()
+            self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+
+            rm_rf(tmpdir)
+            tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
             # Barrier; Wait for that job (and its parents) to finish:
-            print >>sys.stderr, "Waiting for distribute to complete before reducing.  Job", jobname
+            if Verbose > 0: print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
             if not starttime: starttime = time.time()
-            self._Locations().forAllLocal(["wait", jobname]).collect()
-
+            self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
+      
             reduce = True
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir)
-
 
       # Install the jobs on each node
       self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -1806,40 +1805,12 @@ class FmLocalCommands(CommandSetBase):
 
       self.Locations.thisis(int(options.nodenum))
 
-      CommandSetBase.__init__(self, args, p)
+      return CommandSetBase.__init__(self, args, p)
 
-   def restore(self, args):
-      """[-b] files...
-
-Iff -s is specified, then nodes should be chosen based on a pure
-function of the file's basename so that similarly split files will be
-stored on the same nodes.  Also file will be stored into the same
-directory in the virtual store that it originated in.
-"""
-
-      p = MethodOptionParser()
-      p.disable_interspersed_args()
-      p.add_option("-b", "--basename", action="store_true", help="Store based on file's basename")
-      (options, args) = p.parse_args(args)
-
-      procs = Procs()
-      n = None
-      for f in args:
-         dst = os.path.dirname(f[len(self.Locations.this.rootdir):]) + "/"
-         
-         if options.basename: 
-            ext = os.path.basename(f)
-            n = ext
-
-         # Pick some destinations.  If the algorithm picks this node,
-         # that is reasonable, but is a NOOP
-         dsts = self.Locations.pick(n, selfIsNoop=True)
-         #if options.basename: print >>sys.stderr, "File", f, "to", [(x.hostname or "") + ":" + x.rootdir + "/" + dst for x in dsts.locs]
-
-         # Store with relative=True to make parent directories
-         dsts.put([f], dst, relative=True, procs=procs)
-
-      procs.collect()
+   def redistribute(self, args):
+      procs = Procs(retries=7)
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, hashbasename=True).collect()
+      return errors
 
    def lscharmod(self, perms, offset, chr):
       perms = list(perms)
@@ -1980,8 +1951,10 @@ directory in the virtual store that it originated in.
    def wait(self, args):
       """Wait for a specified jobid to complete (and make sure scheduler is running)"""
       self.sched()
+      jobid = args[0]
+      nextcmd = args[1:]
 
-      jobfile = self.Locations.this.rootdir+"/jobs/"+args[0]
+      jobfile = self.Locations.this.rootdir+"/jobs/"+jobid
       #print >>sys.stderr, "Waiting on", jobfile
 
       sl = SchedLock(self.Locations.this.rootdir)
@@ -2005,6 +1978,15 @@ directory in the virtual store that it originated in.
          time.sleep(delay)
          delay *= 2
          if delay > 1: delay = 1
+
+      # Successful completion
+   
+      # Do anything else 
+      if nextcmd:
+         if nextcmd[0] == "redistribute":
+            return self.redistribute(nextcmd[1:])
+         else:
+            print >>sys.stderr, "Unknown command following wait: ", nextcmd
 
 def multiglob(globs):
    """Take a list of globs and return a list of all of the files that match any of those globs."""
