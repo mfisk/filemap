@@ -1389,6 +1389,7 @@ and the program re-run.
       p.add_option("-c", "--continuous", action="store_true", help="Continue to look for new input files to arrive")
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
       p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
+      p.add_option("-o", "--optimistic", action="store_true", help="Try to run even if there are many failures submitting job")
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
@@ -1407,7 +1408,10 @@ and the program re-run.
       starttime = None
       jobname = None
 
-      maxErrors = self._Locations().replication
+      if options.optimistic:
+         maxErrors = None
+      else:
+         maxErrors = self._Locations().replication
 
       for cmd in cmds:
          reduce = False
