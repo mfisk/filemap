@@ -673,7 +673,7 @@ class Procs:
 
       if not ignoreErrors and errors:
          if maxErrors != None and errors > maxErrors:
-            exit(errors)
+            sys.exit(errors)
 
       return errors, results
 
@@ -1178,7 +1178,7 @@ their doc strings."""
    
       if not args: 
          optParser.print_help()
-         exit(1)
+         sys.exit(1)
 
       try:
          method = self.__method(args[0])
@@ -1186,9 +1186,9 @@ their doc strings."""
       except:
          print >>sys.stderr, "Unknown command", args[0]
          optParser.print_help()
-         exit(1)
+         sys.exit(1)
 
-      exit( method(self, args[1:]))
+      sys.exit(method(self, args[1:]))
 
    def _optionHook(self, optParser):
       pass
@@ -1946,7 +1946,7 @@ class FmLocalCommands(CommandSetBase):
          else:
             self.Locations.cleanup = None #Don't cleanup in parent; child will
 
-         exit(0) # Children should just exit now
+         sys.exit(0) # Children should just exit now
 
       self.Locations.cleanup = None #Don't cleanup in parent; child will
 
