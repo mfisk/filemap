@@ -1366,7 +1366,7 @@ Copy the specified file(s) into the virtual store.
       args = args[:-1]
       if len(args) > 1: dst += "/"
 
-      self._Locations().put(args, dst, pickn=True)
+      self._Locations().put(args, dst, pickn=True).collect()
 
    def map(self, args):
       """Launch a computation on a set of input files in the cloud.
