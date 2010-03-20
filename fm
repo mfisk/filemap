@@ -1034,6 +1034,23 @@ class FmJob:
 
       return None # Nothing to do
 
+   def atomicLink(lockfilename):
+      myname = lockfilename + "-" + socket.gethostname() + "-" + os.getpid()
+      mkdirexist(os.path.dirname(lockfilename))
+
+      syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
+
+      success = False
+      try:
+         os.link(mysyncfilename, syncfilename)
+      except OSError, e:
+         if e.errno != errno.EEXIST:
+            os.unlink(mysyncfilename)
+            raise
+
+      os.unlink(mysyncfilename)
+      return success
+    
    def computeItem(self, inputs, outfilename, options, procs):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
 
@@ -1041,41 +1058,40 @@ class FmJob:
          inputs = [inputs]
 
       syncfilename = options.syncdir + "/" + outfilename + "/status"
-      mkdirexist(os.path.dirname(syncfilename))
-      try:
-         syncfile = os.fdopen(os.open(syncfilename, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY), "w")
-      except OSError, e:
-         if e.errno == errno.EEXIST:
+
+      if not atomicLink(syncfilename):
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
-            # this file --- unless in the inputs are newer than the outputs
+            # this file --- unless the inputs are newer than the outputs
             try:
                lasttime = os.path.getmtime(syncfilename)
                redo = False
                for i in inputs:
                   if os.path.getmtime(i) > lasttime:
-                     redo = True
+                     invalidate = True
                      break
             except: 
                traceback.print_exc()
                print >>sys.stderr, "Skipping file", outfilename
                return None
 
-            if not redo:
+            if not invalidate:
                return None
                
-            # Nuke the syncfile
+            # Invalidate (nuke) the syncfile
             try:
-               os.unlink(syncfilename)
-               syncfile = os.fdopen(os.open(syncfilename, os.O_CREAT|os.O_EXCL|os.O_WRONLY), "w")
+               offname = syncfilename + "-" + socket.gethostname() + "-" + os.pid()
+               os.rename(syncfilename, offname)
+               os.unlink(offname)
+               atomicLink(syncfilename)
             except:
                # Somebody else was doing this at the same time, let them have it
                return None
-            
-         else:
-            raise
 
       # Now we hold the "lock" on the syncfile, so proceed...
+
+      # Get rid of private name for it
+      os.unlink(mysyncfilename)
 
       print >>syncfile, socket.gethostname(), os.getpid()
       syncfile.flush()
