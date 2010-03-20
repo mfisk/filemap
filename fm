@@ -72,15 +72,19 @@ def rsyncDeWildcard(pth):
       pth = os.path.dirname(pth)
 
    # Find the wildcard portion of the original path and make it a glob
-   includes = [origpath[len(pth):].lstrip("/")]
+   if len(pth) < len(origpath):
+      includes = [origpath[len(pth):].lstrip("/")]
+   else:
+      includes = []
 
    # Include all parents of the wildcard pattern
-   x = includes[0]
-   while True:
-      dir = os.path.dirname(x)
-      if dir == x: break
-      x = dir
-      includes.append(x + "/")
+   if includes:
+      x = includes[0]
+      while True:
+         dir = os.path.dirname(x)
+         if dir == x: break
+         x = dir
+         includes.append(x + "/")
 
    includes.append(pth)
 
