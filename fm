@@ -253,7 +253,7 @@ class FmLocations:
       l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o GSSAPIDelegateCredentials=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -Ax", raw=True))
       l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
 
-      l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync", raw=True), comments=True)
+      l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync -t", raw=True), comments=True)
       l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
 
       if l.name != "global": 
