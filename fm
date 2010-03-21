@@ -1469,7 +1469,8 @@ and the program re-run.
       stime = [0.0, 0.0]
       bytes = [0.0, 0.0]
       nodewtime = [{}, {}]
-      nodebytes = [{}, {}]
+      nodebytes = [{}, {}] 
+      allstats = []
 
       for (dirpath, dirnames, filenames) in os.walk(loc):
          for f in filenames:
@@ -1479,6 +1480,8 @@ and the program re-run.
             if f == "status":
                # Tally up info from status files
                stats = cPickle.load(fh)
+               allstats.append(stats)
+
                ec = os.WEXITSTATUS(stats['status'])
                errcodes[ec] = errcodes.get(ec, 0) + 1
 
@@ -1506,6 +1509,10 @@ and the program re-run.
                sys.stdout.writelines(fh)
                
       rm_rf(loc)
+
+      statsfile = open('.fm.stats', 'w')
+      cPickle.dump(allstats, statsfile)
+      statsfile.close()
 
       # Print out summary info
       errstr = ''
