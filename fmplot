@@ -1,0 +1,91 @@
+#!/usr/bin/python
+
+import matplotlib.figure
+import matplotlib.collections
+import matplotlib.backends.backend_agg
+import cPickle
+import matplotlib.pyplot as plt
+import sys
+import re
+
+num_re = re.compile('(\d+)')
+
+def numcmp(x, y):
+   xn = num_re.match(x)
+   if not xn: return cmp(x,y)
+   
+   yn = num_re.match(y)
+   if not yn: return cmp(x,y)
+  
+   r = cmp(float(xn.group(0)), float(yn.group(0)))
+   if r == 0:
+      return cmp(x,y)
+   else:
+      return r
+   
+def plot(filename, pngfile):
+   statsfile = open(filename, 'r')
+   stats = cPickle.load(statsfile)
+   statsfile.close()
+
+   nodes = set()
+   for s in stats:
+      nodes.add(s['nodename'])
+
+   nodes = list(nodes)
+   nodes.sort(cmp=numcmp)
+
+   # Build map of nodenames to y coordinates
+   nodes2y = {}
+   i = 0
+   for n in nodes:
+      nodes2y[n] = i
+      i += 1
+
+   fig = matplotlib.figure.Figure()
+   ax = fig.add_subplot(111)
+   ax.set_autoscale_on(True)
+  
+   #l = matplotlib.lines.Line2D([1, 0.8e9], [2,2])
+   #ax.add_line(l)
+   #l = matplotlib.lines.Line2D([1269190522.252409, 1269190522.2774091], [14, 14])
+   #ax.add_line(l)
+
+   lines = []
+
+   for s in stats:
+      y = nodes2y[s['nodename']]
+
+      finish = s['timestamp']
+      start = finish - s['time']
+
+      l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|')
+      ax.add_line(l)
+      lines.append([ (start,y), (finish,y) ])
+
+   #col = matplotlib.collections.LineCollection(lines, linestyles='solid', linewidths=2, antialiaseds=False, marker='+')
+   #ax.add_collection(col, autolim=True)
+   ax.autoscale_view()
+   ax.set_yticks(range(0, i))
+   ax.set_yticklabels(nodes)
+
+   canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
+   canvas.print_figure(pngfile)
+
+if __name__ == '__main__':
+   infile = ".fm.stats"
+   pngfile = "fmstats.png"
+
+   if len(sys.argv) > 1:
+      infile = sys.argv[1]
+   else:
+      print >>sys.stderr, "Using .fm.stats as default input file"
+
+   if len(sys.argv) > 2:
+      pngfile = sys.argv[2]
+   if len(sys.argv) > 3:
+      print >>sys.stderr, "Usage: fmplot [<infile> [<outfile>]]"
+      sys.exit(-1)
+
+   plot(infile, pngfile)
+
