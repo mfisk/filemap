@@ -885,19 +885,18 @@ class JobScheduler:
             else:
                # No more work to do, check to see if job is complete
                # Note, job cannot be complete if parent is still active
-               j = self.jobs[job]
                if not j.continuous and not j.running and (not j.parent or not self.jobs.has_key(j.parent)):
-                  self.JobDone(job)
+                  self.JobDone(jobname)
 
          self.freethreads += 1
          return None
 
-   def JobDone(self, job):
+   def JobDone(self, jobname):
       """A job has run to completion, remove it locally."""
 
-      del self.jobs[job]
-      #print >>sys.stderr, "Job", job, "done"
-      os.unlink(self.options.jobdir + "/" + job)
+      del self.jobs[jobname]
+      #print >>sys.stderr, "Job", jobname, "done"
+      os.unlink(self.options.jobdir + "/" + jobname)
 
    def RunUntilDone(self):
       """Run until there is no more input on it.  Return True iff we did something"""
