@@ -949,10 +949,6 @@ class JobScheduler:
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
 
-      cPickle.dump(stats, p.syncfile)
-      p.syncfile.close()
-      p.syncfile = None
-
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
       cPickle.dump(stats, f)
       f.close()
@@ -1046,21 +1042,26 @@ class FmJob:
 
       return None # Nothing to do
 
-   def atomicLink(lockfilename):
-      myname = lockfilename + "-" + socket.gethostname() + "-" + os.getpid()
+   def atomicLink(self, lockfilename):
+      myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
       mkdirexist(os.path.dirname(lockfilename))
 
       syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
+      syncfile.write(myname)
+      syncfile.close()
 
-      success = False
       try:
-         os.link(mysyncfilename, syncfilename)
+         os.link(myname, lockfilename)
+         success = True
       except OSError, e:
+         success = False
          if e.errno != errno.EEXIST:
-            os.unlink(mysyncfilename)
+            os.unlink(myfilename)
             raise
 
-      os.unlink(mysyncfilename)
+      # Get rid of private name for it, successful or not
+      os.unlink(myname)
+
       return success
     
    def computeItem(self, inputs, outfilename, options, procs):
@@ -1071,7 +1072,8 @@ class FmJob:
 
       syncfilename = options.syncdir + "/" + outfilename + "/status"
 
-      if not atomicLink(syncfilename):
+      invalidate = False
+      if not self.atomicLink(syncfilename):
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
             # this file --- unless the inputs are newer than the outputs
@@ -1092,22 +1094,15 @@ class FmJob:
                
             # Invalidate (nuke) the syncfile
             try:
-               offname = syncfilename + "-" + socket.gethostname() + "-" + os.pid()
+               offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
                os.rename(syncfilename, offname)
                os.unlink(offname)
-               atomicLink(syncfilename)
+               self.atomicLink(syncfilename)
             except:
                # Somebody else was doing this at the same time, let them have it
                return None
 
       # Now we hold the "lock" on the syncfile, so proceed...
-
-      # Get rid of private name for it
-      os.unlink(mysyncfilename)
-
-      print >>syncfile, socket.gethostname(), os.getpid()
-      syncfile.flush()
-
       obase = options.rootdir + "/" + outfilename
 
       # Now insert a "." at the beginning of the basename for partial output
@@ -1159,7 +1154,6 @@ class FmJob:
       p.inputsize = 0
       for i in inputs:
          p.inputsize += os.path.getsize(i)
-      p.syncfile = syncfile
       p.outdirname = odirname
       p.outbasename = obasename
       p.job = self
