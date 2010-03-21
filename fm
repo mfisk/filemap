@@ -269,7 +269,8 @@ class FmLocations:
 
          pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
          l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
-         l.processes = int(self.config_get(stanza, "processes", "1"))
+         l.processes = int(self.config_get(stanza, "processes", "1000"))
+         l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
 
       return l
    
@@ -518,7 +519,7 @@ locations of this instance."""
       return procs
 
    def processes(self):
-      return sum(i.processes for i in self.locs)
+      return sum(i.cpusperjob for i in self.locs)
          
 class FmLocation:
    def __init__(self):
@@ -835,14 +836,12 @@ class Procs:
 class JobScheduler:
    """JobScheduler maintains a set of child processes working on a set of jobs."""
 
-   def __init__(self, options, numthreads=None):
+   def __init__(self, options):
       self.jobs = {}  # A dictionary of job objects indexed by job name
       self.procs = Procs()
       self.options = options
 
-      self.freethreads = numthreads 
-      if not self.freethreads:
-         self.freethreads = self.options.processes
+      self.freethreads = self.options.processes
 
    def ReadJobDir(self):
       """Check for new/removed jobs"""
@@ -861,7 +860,7 @@ class JobScheduler:
             #print >>sys.stderr, "Skipping job owned by UID %d", jobuid
             continue
          try:
-            self.jobs[j] = FmJob(self.options.jobdir + "/" + j)
+            self.jobs[j] = FmJob(self.options.jobdir + "/" + j, cpusPerJob=self.options.cpusperjob)
          except:
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
@@ -919,7 +918,7 @@ class JobScheduler:
                # So we do an exponential backoff in how long we sleep with a max of 1 second
                sleep *= 10
                if sleep > 1: sleep = 1  # Max out at 1 sec sleep
-               block=True
+               block=False # Don't block since new work could arrive before a child finishes
          else:
             block=True
             assert (not self.procs.isempty())
@@ -929,6 +928,9 @@ class JobScheduler:
          if p:
             self.freethreads += 1
             self.finalize(p)
+         else:
+            if not block:
+              time.sleep(sleep)
 
    def finalize(self, p):
       stats = {}
@@ -964,7 +966,7 @@ class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
 
-   def __init__(self, fname):
+   def __init__(self, fname, cpusPerJob = 1):
       config = ConfigParser.SafeConfigParser()
 
       processed = config.read(fname)
@@ -976,13 +978,18 @@ class FmJob:
       self.inputs = config.get("mrjob", "inputs")
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config.has_option("mrjob", "reduce")
+
+      if config.has_option("mrjob", "procspercpu"):
+         self.threads = int(config.get("mrjob", "procspercpu"))
+      else:
+         self.threads = 1
+      self.threads *= cpusPerJob
+      self.running = 0
+
       if config.has_option("mrjob", "parent"):
          self.parent = config.get("mrjob", "parent")
       else:
          self.parent = None
-
-      # Number of threads currently processing data for this job.
-      self.running = 0
 
    def compute(self, options, procs):
       inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
@@ -1390,6 +1397,7 @@ and the program re-run.
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
       p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
       p.add_option("-o", "--optimistic", action="store_true", help="Try to run even if there are many failures submitting job")
+      p.add_option("-p", "--procspercpu", action="store", help="Number of processes to run per CPU (default=1)", default=1)
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
@@ -1432,7 +1440,7 @@ and the program re-run.
       
             reduce = True
 
-         jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir)
+         jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
       # Install the jobs on each node
       self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -1684,9 +1692,13 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
       self._Locations().put([__file__], "/sys/fm").collect()
 
-   def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/"):
+   def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
-      if parent: jobdesc += "parent = %s\n" % (parent)
+      if parent: 
+         jobdesc += "parent = %s\n" % (parent)
+
+      if procsPerCpu: 
+         jobdesc += "procspercpu = %s\n" % (procsPerCpu)
 
       if options.continuous:
          jobdesc += "continuous = True\n"
