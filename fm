@@ -1336,8 +1336,8 @@ Has unix "mkdir -p" semantics."""
       fmt = "%-28s %-15s\n                             %s"
       print fmt % ("Job ID","Command", "Inputs")
         
-      for f in os.listdir(tmpdir):
-         j = FmJob(os.path.join(tmpdir, f))
+      for f in os.listdir(tmpdir + "/jobs/"):
+         j = FmJob(os.path.join(tmpdir, "jobs", f))
          print fmt % (f, j.cmd, j.inputs)
 
       rm_rf(tmpdir)
