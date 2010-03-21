@@ -871,8 +871,14 @@ class JobScheduler:
          self.freethreads -= 1
 
          # Look for something with work to do
-         for job in self.jobs.keys(): #XXX, Should randomize order
-            proc = self.jobs[job].compute(self.options, self.procs)
+         jobs = self.jobs.keys()
+         random.shuffle(jobs)
+         for jobname in jobs:
+            j = self.jobs[jobname] 
+            if j.running >= j.threads:
+               continue
+
+            proc = j.compute(self.options, self.procs)
             #print >>sys.stderr, "Launched", proc
             if proc: 
                return True
