@@ -1333,7 +1333,7 @@ Has unix "mkdir -p" semantics."""
       tmpdir = tempfile.mkdtemp(prefix='tmp-fm-jobs-')
 
       self._Locations().get(["/jobs/*", tmpdir], relative=False)
-      fmt = "%-28s %-15s %s"
+      fmt = "%-28s %-15s\n                             %s"
       print fmt % ("Job ID","Command", "Inputs")
         
       for f in os.listdir(tmpdir):
