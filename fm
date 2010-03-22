@@ -725,9 +725,10 @@ class Procs:
    def waitpid(self, block=False):
       """Check for any completed child, remove them from the procs dictionary and return them."""
 
-      while block and not self.isempty(): 
+      while not self.isempty():
          r = self.checkwait(block=block)
          if r: return r
+         if not block: break
 
       return None
 
