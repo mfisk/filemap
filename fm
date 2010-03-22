@@ -1530,7 +1530,7 @@ and the program re-run.
 
       if Verbose > 0:
          for n in nodebytes[0]:
-            if nodebytes[0][n]:
+            if nodewtime[0][n]:
                print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
 
       swtime = sum(wtime)
