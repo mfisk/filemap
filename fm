@@ -269,7 +269,8 @@ class FmLocations:
 
          pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
          l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
-         l.processes = int(self.config_get(stanza, "processes", "1"))
+         l.processes = int(self.config_get(stanza, "processes", "1000"))
+         l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
 
       return l
    
@@ -518,7 +519,7 @@ locations of this instance."""
       return procs
 
    def processes(self):
-      return sum(i.processes for i in self.locs)
+      return sum(i.cpusperjob for i in self.locs)
          
 class FmLocation:
    def __init__(self):
@@ -724,9 +725,10 @@ class Procs:
    def waitpid(self, block=False):
       """Check for any completed child, remove them from the procs dictionary and return them."""
 
-      while block and not self.isempty(): 
+      while not self.isempty():
          r = self.checkwait(block=block)
          if r: return r
+         if not block: break
 
       return None
 
@@ -835,14 +837,12 @@ class Procs:
 class JobScheduler:
    """JobScheduler maintains a set of child processes working on a set of jobs."""
 
-   def __init__(self, options, numthreads=None):
+   def __init__(self, options):
       self.jobs = {}  # A dictionary of job objects indexed by job name
       self.procs = Procs()
       self.options = options
 
-      self.freethreads = numthreads 
-      if not self.freethreads:
-         self.freethreads = self.options.processes
+      self.freethreads = self.options.processes
 
    def ReadJobDir(self):
       """Check for new/removed jobs"""
@@ -861,7 +861,7 @@ class JobScheduler:
             #print >>sys.stderr, "Skipping job owned by UID %d", jobuid
             continue
          try:
-            self.jobs[j] = FmJob(self.options.jobdir + "/" + j)
+            self.jobs[j] = FmJob(self.options.jobdir + "/" + j, cpusPerJob=self.options.cpusperjob)
          except:
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
@@ -872,27 +872,32 @@ class JobScheduler:
          self.freethreads -= 1
 
          # Look for something with work to do
-         for job in self.jobs.keys(): #XXX, Should randomize order
-            proc = self.jobs[job].compute(self.options, self.procs)
+         jobs = self.jobs.keys()
+         random.shuffle(jobs)
+         for jobname in jobs:
+            j = self.jobs[jobname] 
+            if j.running >= j.threads:
+               continue
+
+            proc = j.compute(self.options, self.procs)
             #print >>sys.stderr, "Launched", proc
             if proc: 
                return True
             else:
                # No more work to do, check to see if job is complete
                # Note, job cannot be complete if parent is still active
-               j = self.jobs[job]
                if not j.continuous and not j.running and (not j.parent or not self.jobs.has_key(j.parent)):
-                  self.JobDone(job)
+                  self.JobDone(jobname)
 
          self.freethreads += 1
          return None
 
-   def JobDone(self, job):
+   def JobDone(self, jobname):
       """A job has run to completion, remove it locally."""
 
-      del self.jobs[job]
-      #print >>sys.stderr, "Job", job, "done"
-      os.unlink(self.options.jobdir + "/" + job)
+      del self.jobs[jobname]
+      #print >>sys.stderr, "Job", jobname, "done"
+      os.unlink(self.options.jobdir + "/" + jobname)
 
    def RunUntilDone(self):
       """Run until there is no more input on it.  Return True iff we did something"""
@@ -919,7 +924,7 @@ class JobScheduler:
                # So we do an exponential backoff in how long we sleep with a max of 1 second
                sleep *= 10
                if sleep > 1: sleep = 1  # Max out at 1 sec sleep
-               block=True
+               block=False # Don't block since new work could arrive before a child finishes
          else:
             block=True
             assert (not self.procs.isempty())
@@ -929,6 +934,9 @@ class JobScheduler:
          if p:
             self.freethreads += 1
             self.finalize(p)
+         else:
+            if not block:
+              time.sleep(sleep)
 
    def finalize(self, p):
       stats = {}
@@ -941,10 +949,6 @@ class JobScheduler:
       stats['hostname'] = socket.gethostname()
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
-
-      cPickle.dump(stats, p.syncfile)
-      p.syncfile.close()
-      p.syncfile = None
 
       f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
       cPickle.dump(stats, f)
@@ -964,7 +968,7 @@ class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
 
-   def __init__(self, fname):
+   def __init__(self, fname, cpusPerJob = 1):
       config = ConfigParser.SafeConfigParser()
 
       processed = config.read(fname)
@@ -976,13 +980,18 @@ class FmJob:
       self.inputs = config.get("mrjob", "inputs")
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config.has_option("mrjob", "reduce")
+
+      if config.has_option("mrjob", "procspercpu"):
+         self.threads = int(config.get("mrjob", "procspercpu"))
+      else:
+         self.threads = 1
+      self.threads *= cpusPerJob
+      self.running = 0
+
       if config.has_option("mrjob", "parent"):
          self.parent = config.get("mrjob", "parent")
       else:
          self.parent = None
-
-      # Number of threads currently processing data for this job.
-      self.running = 0
 
    def compute(self, options, procs):
       inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
@@ -1034,21 +1043,26 @@ class FmJob:
 
       return None # Nothing to do
 
-   def atomicLink(lockfilename):
-      myname = lockfilename + "-" + socket.gethostname() + "-" + os.getpid()
+   def atomicLink(self, lockfilename):
+      myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
       mkdirexist(os.path.dirname(lockfilename))
 
       syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
+      syncfile.write(myname)
+      syncfile.close()
 
-      success = False
       try:
-         os.link(mysyncfilename, syncfilename)
+         os.link(myname, lockfilename)
+         success = True
       except OSError, e:
+         success = False
          if e.errno != errno.EEXIST:
-            os.unlink(mysyncfilename)
+            os.unlink(myfilename)
             raise
 
-      os.unlink(mysyncfilename)
+      # Get rid of private name for it, successful or not
+      os.unlink(myname)
+
       return success
     
    def computeItem(self, inputs, outfilename, options, procs):
@@ -1059,7 +1073,8 @@ class FmJob:
 
       syncfilename = options.syncdir + "/" + outfilename + "/status"
 
-      if not atomicLink(syncfilename):
+      invalidate = False
+      if not self.atomicLink(syncfilename):
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
             # this file --- unless the inputs are newer than the outputs
@@ -1080,22 +1095,15 @@ class FmJob:
                
             # Invalidate (nuke) the syncfile
             try:
-               offname = syncfilename + "-" + socket.gethostname() + "-" + os.pid()
+               offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
                os.rename(syncfilename, offname)
                os.unlink(offname)
-               atomicLink(syncfilename)
+               self.atomicLink(syncfilename)
             except:
                # Somebody else was doing this at the same time, let them have it
                return None
 
       # Now we hold the "lock" on the syncfile, so proceed...
-
-      # Get rid of private name for it
-      os.unlink(mysyncfilename)
-
-      print >>syncfile, socket.gethostname(), os.getpid()
-      syncfile.flush()
-
       obase = options.rootdir + "/" + outfilename
 
       # Now insert a "." at the beginning of the basename for partial output
@@ -1147,7 +1155,6 @@ class FmJob:
       p.inputsize = 0
       for i in inputs:
          p.inputsize += os.path.getsize(i)
-      p.syncfile = syncfile
       p.outdirname = odirname
       p.outbasename = obasename
       p.job = self
@@ -1327,11 +1334,11 @@ Has unix "mkdir -p" semantics."""
       tmpdir = tempfile.mkdtemp(prefix='tmp-fm-jobs-')
 
       self._Locations().get(["/jobs/*", tmpdir], relative=False)
-      fmt = "%-28s %-15s %s"
+      fmt = "%-28s %-15s\n                             %s"
       print fmt % ("Job ID","Command", "Inputs")
         
-      for f in os.listdir(tmpdir):
-         j = FmJob(os.path.join(tmpdir, f))
+      for f in os.listdir(tmpdir + "/jobs/"):
+         j = FmJob(os.path.join(tmpdir, "jobs", f))
          print fmt % (f, j.cmd, j.inputs)
 
       rm_rf(tmpdir)
@@ -1390,6 +1397,7 @@ and the program re-run.
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
       p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
       p.add_option("-o", "--optimistic", action="store_true", help="Try to run even if there are many failures submitting job")
+      p.add_option("-p", "--procspercpu", action="store", help="Number of processes to run per CPU (default=1)", default=1)
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
@@ -1432,7 +1440,7 @@ and the program re-run.
       
             reduce = True
 
-         jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir)
+         jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
       # Install the jobs on each node
       self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -1462,7 +1470,8 @@ and the program re-run.
       stime = [0.0, 0.0]
       bytes = [0.0, 0.0]
       nodewtime = [{}, {}]
-      nodebytes = [{}, {}]
+      nodebytes = [{}, {}] 
+      allstats = []
 
       for (dirpath, dirnames, filenames) in os.walk(loc):
          for f in filenames:
@@ -1472,6 +1481,8 @@ and the program re-run.
             if f == "status":
                # Tally up info from status files
                stats = cPickle.load(fh)
+               allstats.append(stats)
+
                ec = os.WEXITSTATUS(stats['status'])
                errcodes[ec] = errcodes.get(ec, 0) + 1
 
@@ -1500,6 +1511,10 @@ and the program re-run.
                
       rm_rf(loc)
 
+      statsfile = open('.fm.stats', 'w')
+      cPickle.dump(allstats, statsfile)
+      statsfile.close()
+
       # Print out summary info
       errstr = ''
       for k in errcodes.keys():
@@ -1515,7 +1530,7 @@ and the program re-run.
 
       if Verbose > 0:
          for n in nodebytes[0]:
-            if nodebytes[0][n]:
+            if nodewtime[0][n]:
                print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
 
       swtime = sum(wtime)
@@ -1684,9 +1699,13 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
       self._Locations().put([__file__], "/sys/fm").collect()
 
-   def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/"):
+   def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
-      if parent: jobdesc += "parent = %s\n" % (parent)
+      if parent: 
+         jobdesc += "parent = %s\n" % (parent)
+
+      if procsPerCpu: 
+         jobdesc += "procspercpu = %s\n" % (procsPerCpu)
 
       if options.continuous:
          jobdesc += "continuous = True\n"
