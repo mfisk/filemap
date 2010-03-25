@@ -1398,6 +1398,7 @@ and the program re-run.
       p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
       p.add_option("-o", "--optimistic", action="store_true", help="Try to run even if there are many failures submitting job")
       p.add_option("-p", "--procspercpu", action="store", help="Number of processes to run per CPU (default=1)", default=1)
+      p.add_option("-s", "--statusonly", action="store_true", help="Don't wait for completion; fetch any available results now")
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
@@ -1436,7 +1437,8 @@ and the program re-run.
             # Barrier; Wait for that job (and its parents) to finish:
             if Verbose > 0: print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
             if not starttime: starttime = time.time()
-            self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
+            if not options.statusonly:
+               self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
       
             reduce = True
 
@@ -1449,7 +1451,8 @@ and the program re-run.
       if not starttime: starttime = time.time()
 
       if Verbose > 0: print >>sys.stderr, "Waiting for completion.  Job", jobname
-      self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
+      if not options.statusonly: 
+         self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
 
       wallclock = time.time() - starttime
 
