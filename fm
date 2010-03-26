@@ -530,7 +530,7 @@ class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
-   def __init__(self, retries=0):
+   def __init__(self, retries=3):
       self.queues = {}
       self.poll = select.poll()
       self.fd2proc = {}
@@ -840,7 +840,7 @@ class JobScheduler:
 
    def __init__(self, options):
       self.jobs = {}  # A dictionary of job objects indexed by job name
-      self.procs = Procs()
+      self.procs = Procs(retries=0)
       self.options = options
 
       self.freethreads = self.options.processes
