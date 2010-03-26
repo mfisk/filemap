@@ -1967,7 +1967,7 @@ class FmLocalCommands(CommandSetBase):
          if not os.fork():
             # Child
 
-            f = file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid()), 'a')
+            f = file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid()), 'w')
             os.dup2(f.fileno(), 1)
             os.dup2(f.fileno(), 2)
 
