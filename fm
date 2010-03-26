@@ -1788,7 +1788,8 @@ class SchedLock:
       
    def lock(self):
       try:
-         lockfile = os.fdopen(os.open(self.lockname, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY), "w")
+         fd = os.open(self.lockname, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY)
+         lockfile = os.fdopen(fd, "w")
          lockfile.write(str(os.getpid()))
          lockfile.close()
          return True
