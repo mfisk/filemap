@@ -1761,7 +1761,7 @@ class SchedLock:
    def checkpid(self):
       # Check for running
       try:
-         f = file(self.lockname)
+         f = open(self.lockname)
       except:
          return False
 
