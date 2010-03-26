@@ -441,11 +441,11 @@ locations of this instance."""
             qname[d] = loc.qname
 
       for dst in bydst:
-         cmd = self.this.rsynccmd + ["-a", "-e", loc.sshcmdstr] + bydst[dst] + [dst]
+         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr] + bydst[dst] + [dst]
          procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
 
       for dst in bydstrel:
-         cmd = self.this.rsynccmd + ["-a", "-e", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
+         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
          procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
 
       return procs
