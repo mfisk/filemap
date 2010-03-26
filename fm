@@ -430,11 +430,12 @@ locations of this instance."""
                d = loc.hostname + ":" + loc.rootdir 
             else:
                d = loc.rootdir
+
+            d = d + "/" + dst
  
             if relative:
                bydstrel[d] = bydstrel.get(d, []) + [src]
             else:
-               d = d + "/" + dst
                d = d.replace("//","/")
                bydst[d] = bydst.get(d, []) + [src]
 
