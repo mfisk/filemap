@@ -665,7 +665,7 @@ class Procs:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
             
       if labelPrint:
-         sys.stderr.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
+         sys.stdout.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
       if labelPrint or Verbose > 0:
          sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
 
