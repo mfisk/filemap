@@ -19,6 +19,7 @@
 #
 
 import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex, select, signal, math, copy
+import sets
 
 try:
    import hashlib # New for python 2.5
@@ -1309,17 +1310,17 @@ http://mfisk.github.com/filemap
 
    def split(self, args):
       """Partition an input file.
-Split an inputfile into n pieces.  By default, the first
-whitespace-delimited field is used as the key.  All lines with the
-same key will be placed in the same output file.  The -r option can be
-used to specify a Perl-compatible regular expression that matches the
-key.  If the regex contains a group, then what matches the group is
-the key; otherwise, the whole match is the key.
+      Split an inputfile into n pieces.  By default, the first
+      whitespace-delimited field is used as the key.  All lines with the
+      same key will be placed in the same output file.  The -r option can be
+      used to specify a Perl-compatible regular expression that matches the
+      key.  If the regex contains a group, then what matches the group is
+      the key; otherwise, the whole match is the key.
 
-The root of the output file names must be specified either on the
-command line or in the FMOUTPUT environment variable (which is set for
-all programs running as FM jobs).  
-"""
+      The root of the output file names must be specified either on the
+      command line or in the FMOUTPUT environment variable (which is set for
+      all programs running as FM jobs).  
+      """
       p = MethodOptionParser(fixed="infile")
       p.add_option("-n", "--nways", help="Number of output files to use")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
@@ -1332,8 +1333,7 @@ all programs running as FM jobs).
       #print >>sys.stderr, "Writing to", ofile
 
       if not options.nways:
-         print >>sys.stderr, "-n option required"
-         return False
+         p.error("-n option required")
       
       if not options.regex:
          options.regex = '^([^\s]*)'
@@ -1667,6 +1667,73 @@ and the program re-run.
       """This is for slave (remote) instantiations."""
       return FmLocalCommands(args)
 
+   def _ls(self, args):
+      """generic way to get info about files in a blob"""             
+      listing = {}
+
+      if not args: 
+         args = ["/"]
+      procs = self._Locations().forAllLocal(["localls"] + args)
+      status, ps = procs.collect()
+      ls = {}
+
+      for p in ps:
+         pkl = p.stdout.read()
+         p.stdout.close()
+         if not pkl: 
+            continue
+
+         try:
+            files = cPickle.loads(pkl)
+         except:
+            print >>sys.stderr, "Error", sys.exc_value, "parsing remote ls results:", pkl
+            return -1
+         for f in files:
+            fname = f['name']
+            if not listing.has_key(fname): 
+               listing[fname] = []
+            listing[fname] += [f]
+
+      return listing
+
+   def fs(self, args):
+      p = MethodOptionParser(fixed="<dir> [<dir> ...]")
+      p.add_option('-c', '--check', action='store_true', help="Check file system for consistency")
+      p.add_option('-r', '--replication', action='store', help="Replication level to check for", default=self._Locations().replication)
+      p.add_option('-f', '--fix', action='store_true', help="Fix file system")
+      p.add_option('-v', '--verbose', action="count", help="Up verbostiy, more occurrances means higher level")
+      p.add_option('-d', '--dryrun', action='store_true', help="Display proposed fix, do not execute")
+      (options, args) = p.parse_args(args)
+
+      if not (options.check or options.fix):
+         p.error("an action must be specified")
+      options.replication = int(options.replication)
+
+      listing = self._ls(args)
+
+      toofew = sets.Set()
+      toomany = sets.Set()
+      total = len(listing.keys())
+
+      for i in listing.keys():
+         if len(listing[i]) < options.replication:
+            toofew.add(i)
+         if len(listing[i]) > options.replication:
+            toomany.add(i)
+
+      if options.check:
+         print total, "files found"
+         print len(toofew), "files don't have enough replication"
+         print len(toomany), "files have too much replication"
+         print total - len(toofew) - len(toomany), "files' replication is just right"
+
+
+      if options.fix:
+         pass
+         # for i in too few, find differnece in replication and occurrences, select hosts to store
+         # for i in too many, find differnece in replication and occurrences, select hosts to remove
+
+
    def ls(self, args):
       """File & directory listing."""
       p = MethodOptionParser(fixed="files...")
@@ -1675,27 +1742,15 @@ and the program re-run.
       p.add_option('-q', '--decode', action='store_true', help="Replace escaped characters")
       (options, args) = p.parse_args(args)
 
-      if not args: args = ["/"]
-      procs = self._Locations().forAllLocal(["localls"] + args)
-      status, ps = procs.collect()
       ls = {}
-      for p in ps:
-         pkl = p.stdout.read()
-         p.stdout.close()
-         if not pkl: continue
+      listing = self._ls(args)
 
-         try:
-            files = cPickle.loads(pkl)
-         except:
-            print >>sys.stderr, "Error", sys.exc_value, "parsing remote ls results:", pkl
-            return -1
-
-         for f in files:
-            fname = f['name']
-            if options.decode:
-               (fname, num) = quoprire.subn(lsUnescapeChr, fname)
-            if not ls.has_key(fname): ls[fname] = []
-            ls[fname] += [f]
+      for fkey in listing.keys():
+         if options.decode:
+            (fname, num) = quoprire.subn(lsUnescapeChr, fkey)
+         else:
+            fname = fkey
+         ls[fname] = listing[fkey]
 
       keys = ls.keys()
       keys.sort()
