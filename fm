@@ -418,7 +418,7 @@ locations of this instance."""
                   dstfile = os.path.join(dst, root[0:]) + "/" + os.path.basename(fp)
                   items.append([fp, dst, True])
          else:
-            items.append([a, dst, False])
+            items.append([a, dst, relative])
 
       bydst = {}
       bydstrel = {}
