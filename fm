@@ -1568,6 +1568,12 @@ and the program re-run.
       """Copy one or more files from the cloud ot local storage."""
       return self._Locations().get(*args, **kwargs)
 
+   def restore(self, args):
+      """Run a command on each node and print results."""
+      (options, args) = MethodOptionParser(fixed="glob...").parse_args(args)
+  
+      self._Locations().forAllLocal(["restore"] + args).collect(labelPrint=True)
+
    def run(self, args):
       """Run a command on each node and print results."""
       (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
@@ -1892,6 +1898,11 @@ class FmLocalCommands(CommandSetBase):
       self.Locations.thisis(int(options.nodenum))
 
       return CommandSetBase.__init__(self, args, p)
+
+   def restore(self, args):
+      procs = Procs(retries=7)
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True).collect()
+      return errors
 
    def redistribute(self, args):
       procs = Procs(retries=7)
