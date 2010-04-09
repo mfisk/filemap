@@ -22,7 +22,6 @@ import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errn
 
 Verbose = 0
 
-nonalphanumre = re.compile('\W')
 
 def printableHash(s):
    h = sha.sha(s).digest()
@@ -41,9 +40,19 @@ def isremote(hname):
    else:
       return True
 
+nonalphanumre = re.compile('\W')
+
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
+
+quoprire = re.compile('=([0-9a-fA-F]{2})')
+
+def lsUnescapeChr(m):
+   c = m.group(1).decode('hex')
+   if c == '/': c = '\\/'
+   if c == '\\': c = '\\\\'
+   return c
 
 def rm_rf(path):
    for (dirpath,dirs,files) in os.walk(path, topdown=False):
@@ -1582,6 +1591,8 @@ and the program re-run.
       """File & directory listing."""
       p = MethodOptionParser(fixed="files...")
       p.add_option('-n', '--nodes', action='store_true', help="List names of nodes holding each file")
+      p.add_option('-l', '--long', action='store_true', help="Show permissions, nodes, sizes, timestamps, etc.")
+      p.add_option('-q', '--decode', action='store_true', help="Replace escaped characters")
       (options, args) = p.parse_args(args)
 
       if not args: args = ["/"]
@@ -1601,56 +1612,84 @@ and the program re-run.
 
          for f in files:
             fname = f['name']
+            if options.decode:
+               (fname, num) = quoprire.subn(lsUnescapeChr, fname)
             if not ls.has_key(fname): ls[fname] = []
             ls[fname] += [f]
 
       keys = ls.keys()
       keys.sort()
-      for k in keys:
-         for i in range(0,len(ls[k])):
-            if not ls[k][i]: continue
+      if not options.long:
+         if not keys: return
 
-            base = ls[k][i]
-            nodes = [base['nodename']]
-            isdir = (base['perms'][0] == 'd')
-            islnk = (base['perms'][0] == 'l')
-            criteria = ['perms', 'user', 'group']
-            if isdir: 
-               base['size'] = 0
-            else: 
-               criteria.append('size')
-        
-            # Look for duplicates from other nodes 
-            for j in range(i, len(ls[k])):
-               if not ls[k][j]: continue
+         longest = max([len(k) for k in keys])
+         columns = int(os.environ.get("COLUMNS", 80))
+         cols = int(max(1,(columns+2) / (longest + 2)))
+         rows = int(math.ceil(1.0 * len(keys) / cols))
 
-               # See if this node's instance matches the right criteria to be
-               # collapsed into a single output line
-               match = True
-               for a in criteria:
-                  if base[a] != ls[k][j][a]: 
-                     # Does not match
-                     match = False
-                     break
+         i = 0
+         for j in range(0, rows):
+            line = []
+            for k in range(0, cols):
+               i = k * rows + j
+               if len(keys) <= i: break
+               line.append(keys[i])
 
-               if match:
-                  # If you specify the same file twice, we don't want
-                  # the node number(s) duplicated in the node list
-                  n = ls[k][j]['nodename']
-                  if n not in nodes:
-                     nodes.append(n)
+            # Pad all columns to same width
+            line = ["%-*s" % (longest, l) for l in line]
+            line = string.join(line, '  ')
+            print string.rstrip(line)
+            if len(keys) <= i: break
 
-                  ls[k][j] = None
+      else:
+         for k in keys:
+            for i in range(0,len(ls[k])):
+               if not ls[k][i]: continue
 
-            # Update the nodelist for this base instance
-            base['nodename'] = nodes
-
-            # Print out this file
-            print self._lsline(base, listnodes=options.nodes)
+               base = ls[k][i]
+               nodes = [base['nodename']]
+               isdir = (base['perms'][0] == 'd')
+               islnk = (base['perms'][0] == 'l')
+               criteria = ['perms', 'user', 'group']
+               if isdir: 
+                  base['size'] = 0
+               else: 
+                  criteria.append('size')
+           
+               # Look for duplicates from other nodes 
+               for j in range(i, len(ls[k])):
+                  if not ls[k][j]: continue
+   
+                  # See if this node's instance matches the right criteria to be
+                  # collapsed into a single output line
+                  match = True
+                  for a in criteria:
+                     if base[a] != ls[k][j][a]: 
+                        # Does not match
+                        match = False
+                        break
+   
+                  if match:
+                     # If you specify the same file twice, we don't want
+                     # the node number(s) duplicated in the node list
+                     n = ls[k][j]['nodename']
+                     if n not in nodes:
+                        nodes.append(n)
+   
+                     ls[k][j] = None
+   
+               # Update the nodelist for this base instance
+               base['nodename'] = nodes
+   
+               # Print out this file
+               print self._lsline(base, k, listnodes=options.nodes)
          
       return 
 
-   def _lsline(self, attrs, listnodes=False):
+   def _lsline(self, attrs, name, listnodes=False):
+      if not long: 
+         return attrs['name']
+
       size = "%-.2g" % attrs['size']
       size = size.replace("e+", "e").replace("e0", "e")
 
@@ -1675,7 +1714,7 @@ and the program re-run.
       else:
          nodes = len(nodes)
 
-      return "%s %7s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], attrs['name'])
+      return "%s %7s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], name)
 
    def rm(self, args):
       """Delete a file or directory tree in the cloud.
