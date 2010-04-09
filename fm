@@ -1468,8 +1468,7 @@ and the program re-run.
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
-         print >>sys.stderr, "Error: -i or --inputglob must be specified"
-         return None
+         p.error("-i or --inputglob must be specified")
 
       fresh = options.fresh # options.fresh gets rewritten later
 
