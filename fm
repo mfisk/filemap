@@ -439,11 +439,12 @@ locations of this instance."""
                d = loc.hostname + ":" + loc.rootdir 
             else:
                d = loc.rootdir
+
+            d = d + "/" + dst
  
             if relative:
                bydstrel[d] = bydstrel.get(d, []) + [src]
             else:
-               d = d + "/" + dst
                d = d.replace("//","/")
                bydst[d] = bydst.get(d, []) + [src]
 
@@ -538,7 +539,7 @@ class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
-   def __init__(self, retries=0):
+   def __init__(self, retries=3):
       self.queues = {}
       self.poll = select.poll()
       self.fd2proc = {}
@@ -720,7 +721,7 @@ class Procs:
       if p.status and p.kwargs['retries']:
          # Requeue
          p.kwargs['retries']  -= 1
-         print >>sys.stderr, p.kwargs['retries'], "more retries for", p.queue
+         if Verbose > 0: print >>sys.stderr, p.kwargs['retries'], "more retries for", p.queue
          time.sleep(2**(self.retries - p.kwargs['retries'] - 4) + 0.5 * random.random())
          self.queues[p.queue].append(p.kwargs)
          self.wakeup(p.queue)
@@ -848,7 +849,7 @@ class JobScheduler:
 
    def __init__(self, options):
       self.jobs = {}  # A dictionary of job objects indexed by job name
-      self.procs = Procs()
+      self.procs = Procs(retries=0)
       self.options = options
 
       self.freethreads = self.options.processes
