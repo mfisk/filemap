@@ -1491,8 +1491,9 @@ and the program re-run.
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
-      # Install the jobs on each node
-      self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+      if not options.statusonly:
+         # Install the jobs on each node
+         self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
       rm_rf(tmpdir)
       if not starttime: starttime = time.time()
