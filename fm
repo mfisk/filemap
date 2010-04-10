@@ -54,6 +54,42 @@ def lsUnescapeChr(m):
    if c == '\\': c = '\\\\'
    return c
 
+def tabulate(lst, width, ncols=None):
+   if not lst: return None
+   smallest = min([len(l) for l in lst])
+
+   if ncols == None:
+      # Initial case, start with each column being as wide as narrowest element
+      ncols = (width+2) / (smallest+2)
+      ncols = max(1, ncols)
+
+   # See if we can build a table with this many columns
+   minwidths = [smallest] * ncols
+   nrows = int(math.ceil(len(lst) / ncols))
+   for c in range(0, ncols):
+      colwidth = minwidths[c]
+      for r in range(0, nrows):
+         lel = len(lst[c*nrows + r])
+         if lel > colwidth:
+            colwidth = lel
+            minwidths[c] = lel
+ 
+            # But expanding this one may mean we can have fewer columns
+            startcol = c
+            if ncols > 1 and (sum(minwidths) + 2*len(minwidths)) > (width+2):
+               return tabulate(lst, width, ncols-1)
+
+   # If we got here, then the sizes fit!
+   for r in range(0, nrows):
+      line = []
+      for c in range(0, ncols):
+         i = c*nrows + r
+         if i > (len(lst)-1): break
+         line.append("%-*s" % (minwidths[c], lst[i]))
+      line = string.join(line, '  ')
+      line = line.rstrip()
+      print line
+
 def rm_rf(path):
    for (dirpath,dirs,files) in os.walk(path, topdown=False):
       for f in files: 
@@ -1627,26 +1663,7 @@ and the program re-run.
       keys = ls.keys()
       keys.sort()
       if not options.long:
-         if not keys: return
-
-         longest = max([len(k) for k in keys])
-         columns = int(os.environ.get("COLUMNS", 80))
-         cols = int(max(1,(columns+2) / (longest + 2)))
-         rows = int(math.ceil(1.0 * len(keys) / cols))
-
-         i = 0
-         for j in range(0, rows):
-            line = []
-            for k in range(0, cols):
-               i = k * rows + j
-               if len(keys) <= i: break
-               line.append(keys[i])
-
-            # Pad all columns to same width
-            line = ["%-*s" % (longest, l) for l in line]
-            line = string.join(line, '  ')
-            print string.rstrip(line)
-            if len(keys) <= i: break
+         tabulate(keys, int(os.environ.get("COLUMNS", 80)))
 
       else:
          for k in keys:
