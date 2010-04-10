@@ -22,12 +22,10 @@ import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errn
 
 try:
    import hashlib # New for python 2.5
-   def sha1digest(s):
-      return hashlib.sha1(s).hexdigest()
+   sha = hashlib.sha1
 except:
    import sha
-   def sha1digest(s):
-      return sha.sha(s).digest()
+   sha = sha.sha
 
 Verbose = 0
 
@@ -40,7 +38,7 @@ except:
 nonalphanumre = re.compile('\W')
 
 def printableHash(s):
-   h = sha1digests()
+   h = sha(s).digest()
    h = base64.b64encode(h, '+_')  # Normal b64 but / is _
    h = h.rstrip('\n\r =')
    return h
