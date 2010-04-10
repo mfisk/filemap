@@ -54,9 +54,55 @@ def isremote(hname):
    else:
       return True
 
+nonalphanumre = re.compile('\W')
+
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
    return s
+
+quoprire = re.compile('=([0-9a-fA-F]{2})')
+
+def lsUnescapeChr(m):
+   c = m.group(1).decode('hex')
+   if c == '/': c = '\\/'
+   if c == '\\': c = '\\\\'
+   return c
+
+def tabulate(lst, width, ncols=None):
+   if not lst: return None
+   smallest = min([len(l) for l in lst])
+
+   if ncols == None:
+      # Initial case, start with each column being as wide as narrowest element
+      ncols = (width+2) / (smallest+2)
+      ncols = max(1, ncols)
+
+   # See if we can build a table with this many columns
+   minwidths = [smallest] * ncols
+   nrows = int(math.ceil(len(lst) / ncols))
+   for c in range(0, ncols):
+      colwidth = minwidths[c]
+      for r in range(0, nrows):
+         lel = len(lst[c*nrows + r])
+         if lel > colwidth:
+            colwidth = lel
+            minwidths[c] = lel
+ 
+            # But expanding this one may mean we can have fewer columns
+            startcol = c
+            if ncols > 1 and (sum(minwidths) + 2*len(minwidths)) > (width+2):
+               return tabulate(lst, width, ncols-1)
+
+   # If we got here, then the sizes fit!
+   for r in range(0, nrows):
+      line = []
+      for c in range(0, ncols):
+         i = c*nrows + r
+         if i > (len(lst)-1): break
+         line.append("%-*s" % (minwidths[c], lst[i]))
+      line = string.join(line, '  ')
+      line = line.rstrip()
+      print line
 
 def rm_rf(path):
    for (dirpath,dirs,files) in os.walk(path, topdown=False):
@@ -422,7 +468,7 @@ locations of this instance."""
                   dstfile = os.path.join(dst, root[0:]) + "/" + os.path.basename(fp)
                   items.append([fp, dst, True])
          else:
-            items.append([a, dst, False])
+            items.append([a, dst, relative])
 
       bydst = {}
       bydstrel = {}
@@ -679,7 +725,7 @@ class Procs:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
             
       if labelPrint:
-         sys.stderr.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
+         sys.stdout.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
       if labelPrint or Verbose > 0:
          sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
 
@@ -1459,8 +1505,9 @@ and the program re-run.
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
-      # Install the jobs on each node
-      self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+      if not options.statusonly:
+         # Install the jobs on each node
+         self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
       rm_rf(tmpdir)
       if not starttime: starttime = time.time()
@@ -1573,6 +1620,12 @@ and the program re-run.
       """Copy one or more files from the cloud ot local storage."""
       return self._Locations().get(*args, **kwargs)
 
+   def restore(self, args):
+      """Run a command on each node and print results."""
+      (options, args) = MethodOptionParser(fixed="glob...").parse_args(args)
+  
+      self._Locations().forAllLocal(["restore"] + args).collect(labelPrint=True)
+
    def run(self, args):
       """Run a command on each node and print results."""
       (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
@@ -1596,6 +1649,8 @@ and the program re-run.
       """File & directory listing."""
       p = MethodOptionParser(fixed="files...")
       p.add_option('-n', '--nodes', action='store_true', help="List names of nodes holding each file")
+      p.add_option('-l', '--long', action='store_true', help="Show permissions, nodes, sizes, timestamps, etc.")
+      p.add_option('-q', '--decode', action='store_true', help="Replace escaped characters")
       (options, args) = p.parse_args(args)
 
       if not args: args = ["/"]
@@ -1615,56 +1670,65 @@ and the program re-run.
 
          for f in files:
             fname = f['name']
+            if options.decode:
+               (fname, num) = quoprire.subn(lsUnescapeChr, fname)
             if not ls.has_key(fname): ls[fname] = []
             ls[fname] += [f]
 
       keys = ls.keys()
       keys.sort()
-      for k in keys:
-         for i in range(0,len(ls[k])):
-            if not ls[k][i]: continue
+      if not options.long:
+         tabulate(keys, int(os.environ.get("COLUMNS", 80)))
 
-            base = ls[k][i]
-            nodes = [base['nodename']]
-            isdir = (base['perms'][0] == 'd')
-            islnk = (base['perms'][0] == 'l')
-            criteria = ['perms', 'user', 'group']
-            if isdir: 
-               base['size'] = 0
-            else: 
-               criteria.append('size')
-        
-            # Look for duplicates from other nodes 
-            for j in range(i, len(ls[k])):
-               if not ls[k][j]: continue
+      else:
+         for k in keys:
+            for i in range(0,len(ls[k])):
+               if not ls[k][i]: continue
 
-               # See if this node's instance matches the right criteria to be
-               # collapsed into a single output line
-               match = True
-               for a in criteria:
-                  if base[a] != ls[k][j][a]: 
-                     # Does not match
-                     match = False
-                     break
-
-               if match:
-                  # If you specify the same file twice, we don't want
-                  # the node number(s) duplicated in the node list
-                  n = ls[k][j]['nodename']
-                  if n not in nodes:
-                     nodes.append(n)
-
-                  ls[k][j] = None
-
-            # Update the nodelist for this base instance
-            base['nodename'] = nodes
-
-            # Print out this file
-            print self._lsline(base, listnodes=options.nodes)
+               base = ls[k][i]
+               nodes = [base['nodename']]
+               isdir = (base['perms'][0] == 'd')
+               islnk = (base['perms'][0] == 'l')
+               criteria = ['perms', 'user', 'group']
+               if isdir: 
+                  base['size'] = 0
+               else: 
+                  criteria.append('size')
+           
+               # Look for duplicates from other nodes 
+               for j in range(i, len(ls[k])):
+                  if not ls[k][j]: continue
+   
+                  # See if this node's instance matches the right criteria to be
+                  # collapsed into a single output line
+                  match = True
+                  for a in criteria:
+                     if base[a] != ls[k][j][a]: 
+                        # Does not match
+                        match = False
+                        break
+   
+                  if match:
+                     # If you specify the same file twice, we don't want
+                     # the node number(s) duplicated in the node list
+                     n = ls[k][j]['nodename']
+                     if n not in nodes:
+                        nodes.append(n)
+   
+                     ls[k][j] = None
+   
+               # Update the nodelist for this base instance
+               base['nodename'] = nodes
+   
+               # Print out this file
+               print self._lsline(base, k, listnodes=options.nodes)
          
       return 
 
-   def _lsline(self, attrs, listnodes=False):
+   def _lsline(self, attrs, name, listnodes=False):
+      if not long: 
+         return attrs['name']
+
       size = "%-.2g" % attrs['size']
       size = size.replace("e+", "e").replace("e0", "e")
 
@@ -1689,7 +1753,7 @@ and the program re-run.
       else:
          nodes = len(nodes)
 
-      return "%s %7s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], attrs['name'])
+      return "%s %7s %8s %8s %6s %12s %s" % (attrs['perms'], nodes, attrs['user'], attrs['group'], size, attrs['mtime'], name)
 
    def rm(self, args):
       """Delete a file or directory tree in the cloud.
@@ -1867,6 +1931,11 @@ class FmLocalCommands(CommandSetBase):
       self.Locations.thisis(int(options.nodenum))
 
       return CommandSetBase.__init__(self, args, p)
+
+   def restore(self, args):
+      procs = Procs(retries=7)
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True).collect()
+      return errors
 
    def redistribute(self, args):
       procs = Procs(retries=7)
