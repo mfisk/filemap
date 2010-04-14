@@ -1672,6 +1672,7 @@ and the program re-run.
          tabulate(keys, int(os.environ.get("COLUMNS", 80)))
 
       else:
+         totalsize = 0
          for k in keys:
             for i in range(0,len(ls[k])):
                if not ls[k][i]: continue
@@ -1713,7 +1714,10 @@ and the program re-run.
    
                # Print out this file
                print self._lsline(base, k, listnodes=options.nodes)
-         
+
+            totalsize += base['size']
+
+         print "%g bytes" % totalsize   
       return 
 
    def _lsline(self, attrs, name, listnodes=False):
