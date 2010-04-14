@@ -1458,7 +1458,31 @@ and the program re-run.
 
       fresh = options.fresh # options.fresh gets rewritten later
 
-      cmds = string.join(cmd).split("|")
+      cmdwords = shlex.split(string.join(cmd))
+      cmds = []
+      while True:
+         if "|" in cmdwords:
+            idx = cmdwords.index("|")
+         else:
+            idx = None
+
+         if "|>" in cmdwords:
+            reduceidx = cmdwords.index("|>")
+         else:
+            reduceidx = None
+
+         if idx == None and reduceidx == None:
+            cmds.append(cmdwords)
+            break
+         
+         if idx == None or reduceidx < idx:
+            idx = reduceidx
+      
+         cmd = cmdwords[:idx]
+         cmds.append(cmd)
+         cmdwords = cmdwords[idx+1:]
+
+      cmds = [string.join(c) for c in cmds]
       inglobs = options.inputglob
       outglobs = []
       assert (type(inglobs) == type([]))
