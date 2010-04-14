@@ -316,6 +316,7 @@ class FmLocations:
          l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
          l.processes = int(self.config_get(stanza, "processes", "1000"))
          l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
+         l.inactive = self.config_get(stanza, "inactive", False)
 
       return l
    
@@ -389,6 +390,9 @@ locations of this instance."""
 
       nodenum = 0
       for loc in self.locs:
+         if loc.inactive:
+            continue
+
          if subst: 
             cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(nodenum)) for n in Cmdv]
             src = [n.replace("%(SYNCDIR)", loc.syncdir) for n in src]
@@ -471,6 +475,8 @@ locations of this instance."""
             choices = self.locs
 
          for loc in choices:
+            if loc.inactive: continue
+
             if isremote(loc.hostname):
                d = loc.hostname + ":" + loc.rootdir 
             else:
@@ -519,6 +525,8 @@ locations of this instance."""
       if not procs: procs = Procs()
 
       for loc in self.locs:
+         if loc.inactive: continue
+
          # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
          # in the path between the rootdir and the relative path
          s = [loc.rootdir + "/./" + f for f in src]
