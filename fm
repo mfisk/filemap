@@ -1937,7 +1937,7 @@ class FmLocalCommands(CommandSetBase):
       errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, hashbasename=True).collect()
       return errors
 
-   def lscharmod(self, perms, offset, chr):
+   def _lscharmod(self, perms, offset, chr):
       perms = list(perms)
       if perms[offset] == "-": 
            perms[offset] = chr.upper()
@@ -1977,9 +1977,9 @@ class FmLocalCommands(CommandSetBase):
                c = "-"
             perms += c
 
-      if stat.S_ISUID & fs.st_mode: perms = self.lscharmod(perms, 3, "s")
-      if stat.S_ISGID & fs.st_mode: perms = self.lscharmod(perms, 6, "s")
-      if stat.S_ISVTX & fs.st_mode: perms = self.lscharmod(perms, 9, "t")
+      if stat.S_ISUID & fs.st_mode: perms = self._lscharmod(perms, 3, "s")
+      if stat.S_ISGID & fs.st_mode: perms = self._lscharmod(perms, 6, "s")
+      if stat.S_ISVTX & fs.st_mode: perms = self._lscharmod(perms, 9, "t")
  
       d['perms'] = perms
       d['size'] = fs.st_size
