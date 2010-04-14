@@ -762,8 +762,8 @@ class Procs:
 
       del self.pids[p.pid]
 
-      if p.status and p.kwargs['retries']:
-         # Requeue
+      if p.status and p.kwargs['retries'] and os.WEXITSTATUS(p.status) == 255:
+         # Requeue if retries enabled and child returned 255 (SSH failed to connect)
          p.kwargs['retries']  -= 1
          if Verbose > 0: print >>sys.stderr, p.kwargs['retries'], "more retries for", p.queue
          time.sleep(2**(self.retries - p.kwargs['retries'] - 4) + 0.5 * random.random())
