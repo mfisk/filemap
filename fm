@@ -18,13 +18,27 @@
 # Author: Mike Fisk <mfisk@lanl.gov>
 #
 
-import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, sha, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex, select, signal, math
+import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex, select, signal, math
+
+try:
+   import hashlib # New for python 2.5
+   sha = hashlib.sha1
+except:
+   import sha
+   sha = sha.sha
 
 Verbose = 0
 
+try:
+   select.poll
+except:
+   print >>sys.stderr, "select.poll() not implemented.  If MacOS, use DarwinPorts python."
+   sys.exit(-1)
+
+nonalphanumre = re.compile('\W')
 
 def printableHash(s):
-   h = sha.sha(s).digest()
+   h = sha(s).digest()
    h = base64.b64encode(h, '+_')  # Normal b64 but / is _
    h = h.rstrip('\n\r =')
    return h
