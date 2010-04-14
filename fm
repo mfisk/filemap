@@ -219,7 +219,7 @@ class MethodOptionParser(optparse.OptionParser):
       return r
 
 class FmLocations:
-   def __init__(self, config=None, locs=[], stdin=False):
+   def __init__(self, config=None, locs={}, stdin=False):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
       self.procs = Procs()
       self.cleanup = None
@@ -280,7 +280,7 @@ class FmLocations:
          for s in self.config.sections():
             if s == "global": continue
             l = self.parseLocation(s)
-            self.locs.append(l)
+            self.locs[s] = l
 
       # Use global config values by default (thisis() can override later)
       self.this = self.parseLocation("global")
@@ -328,10 +328,9 @@ class FmLocations:
       else:
          return defval
 
-   def thisis(self, n):
-      # This sets of an easy to use member to get the info for this Location
-      self.this = self.locs[n]
-      self.thisnum = n
+   def thisis(self, nodename):
+      self.thisname = nodename
+      self.this = self.locs[nodename]
 
    def pickn(self, seed=None):
       """Pick some pseudo-random locations.  The number of locations
@@ -341,7 +340,7 @@ class FmLocations:
       the current locations."""
 
       #print "pick seed=", seed
-      candidates = range(0, len(self.locs))
+      candidates = self.locs.keys()
       used = []
 
       if seed: random.seed(seed)
@@ -363,8 +362,8 @@ class FmLocations:
 locations of this instance."""
 
       used = self.pickn(seed)
-      if selfIsNoop and self.thisnum in used: 
-         used.remove(self.thisnum)
+      if selfIsNoop and self.thisname in used: 
+         used.remove(self.thisname)
       picked = FmLocations(self.config, [self.locs[i] for i in used])
       picked.this = self.this
       return picked
@@ -373,9 +372,9 @@ locations of this instance."""
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
       if Verbose: 
          verbose = "-" + "v" * Verbose
-         lcmd = ["fm", verbose, "_local", "-n", "%(NODENUM)"] + cmd
+         lcmd = ["fm", verbose, "_local", "-n", "%(NODE)"] + cmd
       else:
-         lcmd = ["fm", "_local", "-n", "%(NODENUM)"] + cmd
+         lcmd = ["fm", "_local", "-n", "%(NODE)"] + cmd
 
       return self.forAll(lcmd, subst=True, stdinstr=self.configstr, tag=string.join(cmd))
 
@@ -388,13 +387,12 @@ locations of this instance."""
       if stdinstr:
          stdin = subprocess.PIPE
 
-      nodenum = 0
-      for loc in self.locs:
+      for loc in self.locs.values():
          if loc.inactive:
             continue
 
          if subst: 
-            cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODENUM)", str(nodenum)) for n in Cmdv]
+            cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODE)", loc.name) for n in Cmdv]
             src = [n.replace("%(SYNCDIR)", loc.syncdir) for n in src]
          else:
             cmd = list(Cmdv)
@@ -428,7 +426,6 @@ locations of this instance."""
 
          self.procs.Popen(cmd, call=call, stdinstr=stdinstr, queue=loc.qname, tag=tag)
 
-         nodenum += 1
 
       return self.procs
    
@@ -472,7 +469,7 @@ locations of this instance."""
             choices = self.pickn(seed=seed)
             choices = [self.locs[c] for c in choices]
          else:
-            choices = self.locs
+            choices = self.locs.values()
 
          for loc in choices:
             if loc.inactive: continue
@@ -524,7 +521,7 @@ locations of this instance."""
 
       if not procs: procs = Procs()
 
-      for loc in self.locs:
+      for loc in self.locs.values():
          if loc.inactive: continue
 
          # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
@@ -573,7 +570,7 @@ locations of this instance."""
       return procs
 
    def processes(self):
-      return sum(i.cpusperjob for i in self.locs)
+      return sum(i.cpusperjob for i in self.locs.values())
          
 class FmLocation:
    def __init__(self):
@@ -1061,8 +1058,8 @@ class FmJob:
             # Apply all of the files with the same extension,
             # but only if that extension belongs on this node.
             choices = Locations.pickn(ext)
-            if Locations.thisnum not in choices:
-               #print >>sys.stderr, Locations.thisnum, "hashes", ext, "to", choices
+            if Locations.thisname not in choices:
+               #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", choices
                continue
 
             #Get list of files with this extension
@@ -1076,7 +1073,7 @@ class FmJob:
 
             p = self.computeItem(files, outfilename, options, procs)
             if p: 
-               #print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisnum, files, "of", self.inputs
+               #print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisname, files, "of", self.inputs
 
                return p
 
@@ -1907,22 +1904,22 @@ class FmLocalCommands(CommandSetBase):
       self._locs = None
       p = MethodOptionParser()
       p.set_usage("""fm _local command args...\n""" + self._usage())
-      p.add_option("-n", "--nodenum", help="Id number of this node")
+      p.add_option("-n", "--node", help="Node name for this node")
       p.disable_interspersed_args()
       (options, args) = p.parse_args(args)
 
-      if options.nodenum:
+      if options.node:
          # If -n is given, then we are a direct slave and 
          # should get our config on stdin
-         os.environ['FMNODENUM'] = options.nodenum
+         os.environ['FMNODE'] = options.node
          self.Locations = FmLocations(stdin=True)
       else:
          # We are a child of a scheduler and
          # should pick-up the config from an environment variable
-         options.nodenum = os.environ['FMNODENUM']
+         options.node = os.environ['FMNODE']
          self.Locations = FmLocations()
 
-      self.Locations.thisis(int(options.nodenum))
+      self.Locations.thisis(options.node)
 
       return CommandSetBase.__init__(self, args, p)
 
@@ -1948,7 +1945,7 @@ class FmLocalCommands(CommandSetBase):
       # Construct the dict that is pickled and passed to the client
       d = {}
       d['name'] = fname
-      d['node'] = self.Locations.thisnum
+      d['node'] = self.Locations.thisname
       d['nodename'] = self.Locations.this.name
 
       if not fs:
