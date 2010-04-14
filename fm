@@ -1645,7 +1645,7 @@ and the program re-run.
       (options, args) = p.parse_args(args)
 
       if not args: args = ["/"]
-      procs = self._Locations().forAllLocal(["ls"] + args)
+      procs = self._Locations().forAllLocal(["localls"] + args)
       status, ps = procs.collect()
       ls = {}
       for p in ps:
@@ -1993,7 +1993,7 @@ class FmLocalCommands(CommandSetBase):
 
       return d
 
-   def ls(self, args):
+   def localls(self, args):
       os.chdir(self.Locations.this.rootdir)  
       #args = [(a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
       procs = Procs()
