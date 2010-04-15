@@ -376,9 +376,15 @@ class FmLocations:
 locations of this instance."""
 
       used = self.pickn(seed)
+
       if selfIsNoop and self.thisname in used: 
          used.remove(self.thisname)
-      picked = FmLocations(self.config, [self.locs[i] for i in used])
+
+      useddict = {}
+      for u in used: 
+         useddict[u] = self.locs[u]
+
+      picked = FmLocations(self.config, locs=useddict)
       picked.this = self.this
       return picked
          
