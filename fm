@@ -43,11 +43,11 @@ def printableHash(s):
    h = h.rstrip('\n\r =')
    return h
 
+me = socket.gethostname().split('.')[0]
+
 def isremote(hname):
    if not hname: return False
 
-   me = socket.gethostname()
-   me = me.split('.')[0]
    hname = hname.split('.')[0]
    if me == hname:
       return False
@@ -502,12 +502,14 @@ locations of this instance."""
                d = loc.rootdir
 
             d = d + "/" + dst
+            d = d.replace("//","/")
  
             if relative:
-               bydstrel[d] = bydstrel.get(d, []) + [src]
+               if not bydstrel.get(d): bydstrel[d] = []
+               bydstrel[d].append(src)
             else:
-               d = d.replace("//","/")
-               bydst[d] = bydst.get(d, []) + [src]
+               if not bydst.get(d): bydst[d] = []
+               bydst[d].append(src)
 
             qname[d] = loc.qname
 
