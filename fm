@@ -18,8 +18,35 @@
 # Author: Mike Fisk <mfisk@lanl.gov>
 #
 
-import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex, select, signal, math, copy
+import ConfigParser
+import copy
+import base64
+import cPickle
+import cStringIO
+import errno
+import glob
+import grp
+import math
+import optparse
+import os
+import pwd
+import pydoc
+import random
+import re
+import select
 import sets
+import shlex
+import signal
+import socket
+import socket
+import stat
+import string
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+import urlparse
 
 try:
    import hashlib # New for python 2.5
@@ -47,7 +74,8 @@ def printableHash(s):
 me = socket.gethostname().split('.')[0]
 
 def isremote(hname):
-   if not hname: return False
+   if not hname:
+      return False
 
    hname = hname.split('.')[0]
    if me == hname:
@@ -65,12 +93,15 @@ quoprire = re.compile('=([0-9a-fA-F]{2})')
 
 def lsUnescapeChr(m):
    c = m.group(1).decode('hex')
-   if c == '/': c = '\\/'
-   if c == '\\': c = '\\\\'
+   if c == '/':
+      c = '\\/'
+   if c == '\\':
+      c = '\\\\'
    return c
 
 def tabulate(lst, width, ncols=None):
-   if not lst: return None
+   if not lst:
+      return None
    smallest = min([len(l) for l in lst])
 
    if ncols == None:
@@ -101,7 +132,8 @@ def tabulate(lst, width, ncols=None):
       line = []
       for c in range(0, ncols):
          i = c*nrows + r
-         if i > (len(lst)-1): break
+         if i > (len(lst)-1):
+            break
          line.append("%-*s" % (minwidths[c], lst[i]))
       line = string.join(line, '  ')
       line = line.rstrip()
@@ -144,7 +176,8 @@ def rsyncDeWildcard(pth):
       x = includes[0]
       while True:
          dir = os.path.dirname(x)
-         if dir == x: break
+         if dir == x:
+            break
          x = dir
          includes.append(x + "/")
 
@@ -221,7 +254,8 @@ class MethodOptionParser(optparse.OptionParser):
                options += ' '
 
          flags = string.join(flags, '')
-         if flags: options += "[-" + flags + "] "
+         if flags:
+            options += "[-" + flags + "] "
          
          self.usage = "%prog " + options + self.fixed
 
@@ -295,7 +329,8 @@ class FmLocations:
       # from the config file.
       if not locs:
          for s in self.config.sections():
-            if s == "global": continue
+            if s == "global": 
+               continue
             l = self.parseLocation(s)
             self.locs[s] = l
 
@@ -360,7 +395,8 @@ class FmLocations:
       candidates = self.locs.keys()
       used = []
 
-      if seed: random.seed(seed)
+      if seed:
+         random.seed(seed)
 
       for i in range(0, self.replication):
          if not candidates:
@@ -402,10 +438,13 @@ locations of this instance."""
       return self.forAll(lcmd, subst=True, stdinstr=self.configstr, tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
-      if src and type(src) != type([]): src = [src]
-      if dst and type(dst) != type([]): dst = [dst]
+      if src and type(src) != type([]):
+         src = [src]
+      if dst and type(dst) != type([]):
+         dst = [dst]
 
-      if not tag: tag = string.join(Cmdv + src + dst)
+      if not tag:
+         tag = string.join(Cmdv + src + dst)
 
       if stdinstr:
          stdin = subprocess.PIPE
@@ -436,11 +475,13 @@ locations of this instance."""
             if s and glob:
                #time.sleep(random.random())  #RHEL5 + thumper glob issues
                s = multiglob(s)
-               if not s: continue
+               if not s:
+                  continue
 
             if d and glob:
                d = multiglob(d)
-               if not d: continue
+               if not d:
+                  continue
 
             cmd += s + d 
             
@@ -454,7 +495,8 @@ locations of this instance."""
    
    def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False):
       origdst = dst
-      if not procs: procs = Procs()
+      if not procs:
+         procs = Procs()
 
       if relative:
          srclist = [s.lstrip("/") for s in srclist]
@@ -533,7 +575,8 @@ locations of this instance."""
       (options, args) = p.parse_args(args)
 
       rsyncflags = "-rptgo"
-      if relative: rsyncflags += "R"
+      if relative:
+         rsyncflags += "R"
 
       if options.cat:
          assert(len(args) > 0)
@@ -544,7 +587,8 @@ locations of this instance."""
          dst = args[-1]
          src = args[:-1]
 
-      if not procs: procs = Procs()
+      if not procs:
+         procs = Procs()
 
       for loc in self.locs.values():
          if loc.inactive: continue
@@ -619,12 +663,15 @@ class Procs:
    def Popen(self, cmdv, **kwargs):
       kwargs['cmdv'] = cmdv
       queue = kwargs.get('queue')
-      if not kwargs.get('tag'): kwargs['tag'] = cmdv[0]+"..."
-      if not kwargs.get('retries'): kwargs['retries'] = self.retries
+      if not kwargs.get('tag'):
+         kwargs['tag'] = cmdv[0]+"..."
+      if not kwargs.get('retries'):
+         kwargs['retries'] = self.retries
       
       if queue and self.queues.get(queue) != None:
          # If queue exists (even if it is an empty queue), then something is running
-         if Verbose > 2: print >>sys.stderr, "Queueing", kwargs['tag'], "to", queue, len(self.queues[queue])
+         if Verbose > 2:
+            print >>sys.stderr, "Queueing", kwargs['tag'], "to", queue, len(self.queues[queue])
          self.queues[queue].append(kwargs)
          return
       else:
@@ -667,7 +714,8 @@ class Procs:
       r.start = time.time()
       r.queue = queue
       self.pids[r.pid] = r
-      if Verbose > 2: print >>sys.stderr, r.pid, cmdv, r.queue
+      if Verbose > 2:
+         print >>sys.stderr, r.pid, cmdv, r.queue
 
       if stdinstr:
          r.stdin.write(stdinstr)
@@ -676,13 +724,15 @@ class Procs:
       return r
 
    def wakeup(self, qname): 
-         if not qname: return
+         if not qname:
+            return
 
          #Wake-up anything on this queue
          if self.queues[qname]:
             kwargs = self.queues[qname].pop(0)
             # Leave queue, even if empty, so things wait for us to finish
-            if Verbose > 2: print >>sys.stderr, "Waking", kwargs
+            if Verbose > 2:
+               print >>sys.stderr, "Waking", kwargs
             self.PopenSave(**kwargs)
          else: 
             # Queues was already empty, so now delete it
@@ -695,16 +745,19 @@ class Procs:
       total = 0
       while True:
          p = self.waitpid(True)
-         if p == None: break
+         if p == None:
+            break
 
          results.append(p)
          total += 1
-         if p.status: errors += 1 
+         if p.status:
+            errors += 1 
          if Verbose > 1:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
 
-      if not results: return [None, results]
+      if not results:
+         return [None, results]
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
@@ -787,7 +840,8 @@ class Procs:
       if p.status and p.kwargs['retries'] and os.WEXITSTATUS(p.status) == 255:
          # Requeue if retries enabled and child returned 255 (SSH failed to connect)
          p.kwargs['retries']  -= 1
-         if Verbose > 0: print >>sys.stderr, p.kwargs['retries'], "more retries for", p.queue
+         if Verbose > 0:
+            print >>sys.stderr, p.kwargs['retries'], "more retries for", p.queue
          time.sleep(2**(self.retries - p.kwargs['retries'] - 4) + 0.5 * random.random())
          self.queues[p.queue].append(p.kwargs)
          self.wakeup(p.queue)
@@ -803,8 +857,10 @@ class Procs:
 
       while not self.isempty():
          r = self.checkwait(block=block)
-         if r: return r
-         if not block: break
+         if r:
+            return r
+         if not block:
+            break
 
       return None
 
@@ -858,7 +914,8 @@ class Procs:
             # So, poll on each of our children to find the one to finalize:
             for p in self.pids.values():
                # First look for things reaped by the signal handler
-               if p.__dict__.has_key('error'): return self.finalize(p)
+               if p.__dict__.has_key('error'):
+                  return self.finalize(p)
 
                # Since the chils is already reaped, we'll probably measure no CPU time for it. oh well
                starttimes = os.times()
@@ -999,7 +1056,8 @@ class JobScheduler:
                # Sleeping hurts latency for detecting new inputs, but avoids busy waits.
                # So we do an exponential backoff in how long we sleep with a max of 1 second
                sleep *= 10
-               if sleep > 1: sleep = 1  # Max out at 1 sec sleep
+               if sleep > 1:
+                  sleep = 1  # Max out at 1 sec sleep
                block=False # Don't block since new work could arrive before a child finishes
          else:
             block=True
@@ -1012,7 +1070,7 @@ class JobScheduler:
             self.finalize(p)
          else:
             if not block:
-              time.sleep(sleep)
+               time.sleep(sleep)
 
    def finalize(self, p):
       stats = {}
@@ -1082,7 +1140,8 @@ class FmJob:
 
          for ext in exts:
             # Don't process .d directories as named inputs (feedback loop)
-            if ext[-2:] == ".d": continue
+            if ext[-2:] == ".d":
+               continue
 
             # Apply all of the files with the same extension,
             # but only if that extension belongs on this node.
@@ -1119,7 +1178,8 @@ class FmJob:
          outfilename = relativename + ".d/" + escape(self.cmd)
         
          p = self.computeItem(i, outfilename, options, procs)
-         if p: return p
+         if p:
+            return p
 
       return None # Nothing to do
 
@@ -1250,7 +1310,8 @@ their doc strings."""
       keys = self.__class__.__dict__.keys()
       keys.sort()
       for cmd in keys:
-         if cmd[0] == "_": continue
+         if cmd[0] == "_":
+            continue
          method = self.__method(cmd)
          #docstr = pydoc.text.indent(pydoc.text.document(method)).replace("(self, args)","")
          docstr = method.__doc__
@@ -1391,7 +1452,8 @@ Has unix "mkdir -p" semantics."""
       (options, args) = MethodOptionParser(fixed="dir...").parse_args(args)
       # Make sure destination exists
       p = self._Locations().forAll(["mkdir", "-p", "-m", "2775"] + absolutes, args, subst=True, glob=False)
-      if not async: p.collect()
+      if not async:
+         p.collect()
 
    def jobs(self, args):
       """Show all of the jobs still active."""
@@ -1439,7 +1501,8 @@ Copy the specified file(s) into the virtual store.
       assert(len(args) > 1)
       dst = args[-1]
       args = args[:-1]
-      if len(args) > 1: dst += "/"
+      if len(args) > 1:
+         dst += "/"
 
       self._Locations().put(args, dst, pickn=True).collect()
 
@@ -1520,8 +1583,10 @@ and the program re-run.
             tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
             # Barrier; Wait for that job (and its parents) to finish:
-            if Verbose > 0: print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
-            if not starttime: starttime = time.time()
+            if Verbose > 0:
+               print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
+            if not starttime:
+               starttime = time.time()
             if not options.statusonly:
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
       
@@ -1534,9 +1599,11 @@ and the program re-run.
          self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
       rm_rf(tmpdir)
-      if not starttime: starttime = time.time()
+      if not starttime:
+         starttime = time.time()
 
-      if Verbose > 0: print >>sys.stderr, "Waiting for completion.  Job", jobname
+      if Verbose > 0:
+         print >>sys.stderr, "Waiting for completion.  Job", jobname
       if not options.statusonly: 
          self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
 
@@ -1611,7 +1678,8 @@ and the program re-run.
             errstr = "%d processes returned %d" % (errcodes[k], k)
          else:
             errstr += "; %d x %s" % (errcodes[k], k)
-      if not errstr: errstr = 'No processes ran'
+      if not errstr:
+         errstr = 'No processes ran'
 
       print >>sys.stderr, errstr
 
@@ -1763,7 +1831,8 @@ and the program re-run.
          totalsize = 0
          for k in keys:
             for i in range(0,len(ls[k])):
-               if not ls[k][i]: continue
+               if not ls[k][i]:
+                  continue
 
                base = ls[k][i]
                nodes = [base['nodename']]
@@ -1777,7 +1846,8 @@ and the program re-run.
            
                # Look for duplicates from other nodes 
                for j in range(i, len(ls[k])):
-                  if not ls[k][j]: continue
+                  if not ls[k][j]:
+                     continue
    
                   # See if this node's instance matches the right criteria to be
                   # collapsed into a single output line
@@ -1816,7 +1886,8 @@ and the program re-run.
       size = size.replace("e+", "e").replace("e0", "e")
 
       nodes = attrs['nodename']
-      if type(nodes) != type([]): nodes = [nodes]
+      if type(nodes) != type([]):
+         nodes = [nodes]
 
       if len(nodes) > 1:
          attrs['mtime'] = '-'
@@ -2055,7 +2126,8 @@ class FmLocalCommands(CommandSetBase):
       for kind in "BLK", "CHR", "DIR", "LNK", "SOCK", "FIFO", "REG":
          if getattr(stat, "S_IS"+kind)(fs.st_mode):
             perms = kind[0].lower().replace("f","p")
-      if perms == "r": perms = "-"
+      if perms == "r":
+         perms = "-"
          
       for who in "USR", "GRP", "OTH":
          for what in "R", "W", "X":
@@ -2065,9 +2137,12 @@ class FmLocalCommands(CommandSetBase):
                c = "-"
             perms += c
 
-      if stat.S_ISUID & fs.st_mode: perms = self._lscharmod(perms, 3, "s")
-      if stat.S_ISGID & fs.st_mode: perms = self._lscharmod(perms, 6, "s")
-      if stat.S_ISVTX & fs.st_mode: perms = self._lscharmod(perms, 9, "t")
+      if stat.S_ISUID & fs.st_mode:
+         perms = self._lscharmod(perms, 3, "s")
+      if stat.S_ISGID & fs.st_mode:
+         perms = self._lscharmod(perms, 6, "s")
+      if stat.S_ISVTX & fs.st_mode:
+         perms = self._lscharmod(perms, 9, "t")
  
       d['perms'] = perms
       d['size'] = fs.st_size
@@ -2090,7 +2165,8 @@ class FmLocalCommands(CommandSetBase):
       #args = [(a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
       procs = Procs()
       args = multiglob(["./" + a for a in args])
-      if not args: return
+      if not args:
+         return
       output = []
       for apath in args:
 
@@ -2190,7 +2266,8 @@ class FmLocalCommands(CommandSetBase):
          # XXX: use famd
          time.sleep(delay)
          delay *= 2
-         if delay > 1: delay = 1
+         if delay > 1:
+            delay = 1
 
       # Successful completion
    
@@ -2223,7 +2300,8 @@ class SubprocessLs:
       smallest = None
       for i in self.procs:
            # Job slot is set to None after that job terminates
-           if not self.procs[i]: continue
+           if not self.procs[i]:
+              continue
 
            # Get next line from this job if we don't already have one cached
            if not self.nextline[i]:
