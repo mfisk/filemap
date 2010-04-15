@@ -1021,7 +1021,7 @@ class JobScheduler:
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
 
-      f = file(p.outdirname + "/." + p.outbasename + "/status", "w")
+      f = file(p.outdirname + "/." + p.outbasename + "/.status", "w")
       cPickle.dump(stats, f)
       f.close()
    
@@ -1186,8 +1186,8 @@ class FmJob:
       obasename = os.path.basename(obase)
       obase = odirname + "/." + obasename
 
-      oname = obase + "/0"
-      ename = obase + "/stderr"
+      oname = obase + "/stdout"
+      ename = obase + "/.stderr"
       mkdirexist(obase)
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
@@ -1542,8 +1542,8 @@ and the program re-run.
       # Print any stderr files to stderr
 
       # Get the output files
-      outputglobs = [f + "/stderr" for f in outglobs]
-      outputglobs += [f + "/status" for f in outglobs]
+      outputglobs = [f + "/.stderr" for f in outglobs]
+      outputglobs += [f + "/.status" for f in outglobs]
       if not options.quiet:
          outputglobs += inglobs
       loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
@@ -1564,7 +1564,7 @@ and the program re-run.
             fname = os.path.join(dirpath, f)
             fh = file(fname)
 
-            if f == "status":
+            if f == ".status":
                # Tally up info from status files
                stats = cPickle.load(fh)
                allstats.append(stats)
@@ -1586,13 +1586,13 @@ and the program re-run.
                nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
                nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
 
-            elif f == "stderr":
+            elif f == ".stderr":
                # Do nothing if empty
                if os.path.getsize(fname):
                   print >>sys.stderr, '===', fname, '==='
                   sys.stderr.writelines(fh)
                   print >>sys.stderr, '====='
-            elif f == "0":
+            elif f == "stdout":
                sys.stdout.writelines(fh)
                
       rm_rf(loc)
@@ -1828,7 +1828,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
       # Each component of pipeline uses previous output as input
       if reduce:
-         newinglobs = ["/reduce/" + h + "/[0-9]*"]
+         newinglobs = ["/reduce/" + h + "/*"]
          outglobs += newinglobs
       else:
          newinglobs = [i + ".d/" + escape(cmd) for i in inglobs]
@@ -1838,7 +1838,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          #XXX lower latency to accumulate these up to map() and let it do a bulk delete
 
          if reduce:
-            syncfiles = ["%(SYNCDIR)/reduce/" + h + "/[0-9]*"]
+            syncfiles = ["%(SYNCDIR)/reduce/" + h + "/*"]
          else:
             syncfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) + "/status" for g in inglobs] 
 
@@ -1853,7 +1853,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          # Only force the first stage of the pipeline.  Out-of-date checks will handle downstream.
          options.fresh = False
 
-      newinglobs = [i + "/[0-9]*" for i in newinglobs]
+      newinglobs = [i + "/*" for i in newinglobs]
       return h, newinglobs
 
 class SchedLock:
