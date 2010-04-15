@@ -1660,7 +1660,7 @@ and the program re-run.
       procs = self._Locations().forAll(["cat"], args)
       for f in procs.pids.values():
             sys.stdout.writelines(f.stdout)
-      return procs.collect(ignoreErrors=True)
+      procs.collect(ignoreErrors=True)
 
    def _local(self, args):
       """This is for slave (remote) instantiations."""
