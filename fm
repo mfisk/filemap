@@ -79,10 +79,12 @@ def tabulate(lst, width, ncols=None):
 
    # See if we can build a table with this many columns
    minwidths = [smallest] * ncols
-   nrows = int(math.ceil(len(lst) / ncols))
+   nrows = int(math.ceil(len(lst)*1.0 / ncols))
    for c in range(0, ncols):
       colwidth = minwidths[c]
       for r in range(0, nrows):
+         i = c * nrows + r
+         if i > (len(lst)-1): break
          lel = len(lst[c*nrows + r])
          if lel > colwidth:
             colwidth = lel
