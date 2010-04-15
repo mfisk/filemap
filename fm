@@ -18,7 +18,7 @@
 # Author: Mike Fisk <mfisk@lanl.gov>
 #
 
-import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex, select, signal, math
+import ConfigParser, sys, optparse, random, urlparse, subprocess, os, glob, errno, string, socket, time, traceback, pydoc, tempfile, re, socket, cStringIO, base64, stat, cPickle, pwd, grp, shlex, select, signal, math, copy
 
 try:
    import hashlib # New for python 2.5
@@ -57,7 +57,7 @@ def isremote(hname):
 nonalphanumre = re.compile('\W')
 
 def escape(s):
-   (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), s)
+   (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), string.join(s))
    return s
 
 quoprire = re.compile('=([0-9a-fA-F]{2})')
@@ -1042,6 +1042,10 @@ class FmJob:
 
       self.jobname = os.path.basename(fname)
       self.cmd = config.get("mrjob", "cmd", raw=True)
+      try:
+         self.cmd = eval(self.cmd)
+      except:
+         self.cmd = self.cmd.split()
       self.inputs = config.get("mrjob", "inputs")
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config.has_option("mrjob", "reduce")
@@ -1182,26 +1186,13 @@ class FmJob:
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
 
-      cmd = self.cmd
+      cmd = copy.copy(self.cmd)
 
       if '%(input)' in cmd:
-         cmd = shlex.split(cmd)
-         try:
-             # In this case, %(input) is just an argument and can be expanded
-             iidx = cmd.index('%(input)')
-             cmd[iidx:iidx+1] = inputs
-         except ValueError:
-             # If we're here, then when know %(input) is in some argument to
-             # something else.  We must find it and replace it with some nice
-             # spaces.
-             for i in range(len(cmd)):
-                 if not '%(input)' in cmd[i]:
-                    continue
-                 cmd[i] = cmd[i].replace('%(input)',' '.join(inputs),1)
-                 break
+         idx = cmd.index('%(input)')
+         cmd[idx:idx+1] = inputs
       else:
-         #cmd = cmd.split() + inputs
-         cmd = shlex.split(cmd) + inputs
+         cmd += inputs
     
       if cmd[0] == "fm":
          cmd = options.fmcmd + cmd[1:]
@@ -1404,6 +1395,8 @@ Has unix "mkdir -p" semantics."""
         
       for f in os.listdir(tmpdir + "/jobs/"):
          j = FmJob(os.path.join(tmpdir, "jobs", f))
+         if type(j.cmd) == type([]):
+            j.cmd = string.join(j.cmd)
          print fmt % (f, j.cmd, j.inputs)
 
       rm_rf(tmpdir)
@@ -1475,28 +1468,22 @@ and the program re-run.
       cmdwords = shlex.split(string.join(cmd))
       cmds = []
       while True:
+         if "|>" in cmdwords:
+            idx = cmdwords.index("|>")
+            cmdwords.insert(idx+1, ">")
+            cmdwords[idx] = "|"
+            continue
+        
          if "|" in cmdwords:
             idx = cmdwords.index("|")
          else:
-            idx = None
-
-         if "|>" in cmdwords:
-            reduceidx = cmdwords.index("|>")
-         else:
-            reduceidx = None
-
-         if idx == None and reduceidx == None:
             cmds.append(cmdwords)
             break
-         
-         if idx == None or reduceidx < idx:
-            idx = reduceidx
-      
+
          cmd = cmdwords[:idx]
          cmds.append(cmd)
          cmdwords = cmdwords[idx+1:]
 
-      cmds = [string.join(c) for c in cmds]
       inglobs = options.inputglob
       outglobs = []
       assert (type(inglobs) == type([]))
@@ -1513,9 +1500,8 @@ and the program re-run.
 
       for cmd in cmds:
          reduce = False
-         cmd = cmd.strip()
          if cmd[0] == ">":
-            cmd = cmd.lstrip(">")
+            cmd = cmd[1:]
 
             if not options.statusonly:
                # Install the jobs on each node
@@ -1815,7 +1801,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       self._Locations().put([__file__], "/sys/fm").collect()
 
    def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None):
-      jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (cmd, string.join(inglobs))
+      jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (repr(cmd), string.join(inglobs))
       if parent: 
          jobdesc += "parent = %s\n" % (parent)
 
