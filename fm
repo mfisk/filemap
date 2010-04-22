@@ -767,6 +767,10 @@ class Procs:
          if Verbose > 1:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
+            waiting = [l.queue for l in self.pids.values()]
+            waiting.sort()
+            if waiting and len(waiting) < len(results): 
+               print >>sys.stderr, "Still waiting on", string.join(waiting)
 
       if not results:
          return [None, results]
