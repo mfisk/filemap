@@ -1564,13 +1564,17 @@ and the program re-run.
         
          if "|" in cmdwords:
             idx = cmdwords.index("|")
+            cmd = cmdwords[:idx]
+            cmds.append(cmd)
+            assert(cmd)
+            cmdwords = cmdwords[idx+1:]
          else:
+            if not cmdwords:
+               # We should probably warn the user they had an empty pipeline segment
+               print >>sys.stderr, "Empty pipeline element in ", cmds
+               break
             cmds.append(cmdwords)
             break
-
-         cmd = cmdwords[:idx]
-         cmds.append(cmd)
-         cmdwords = cmdwords[idx+1:]
 
       inglobs = options.inputglob
       outglobs = []
@@ -1587,11 +1591,15 @@ and the program re-run.
       else:
          maxErrors = self._Locations().replication
 
+      reduceNext = False
       for cmd in cmds:
          reduce = False
-         if cmd[0] == ">":
-            cmd = cmd[1:]
 
+         if cmd[0] == ">":
+            reduceNext = True
+            continue
+
+         if reduceNext:
             if not options.statusonly:
                # Install the jobs on each node
                self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -1608,6 +1616,7 @@ and the program re-run.
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
       
             reduce = True
+            reduceNext = False
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
