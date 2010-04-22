@@ -1574,6 +1574,7 @@ and the program re-run.
 
       inglobs = options.inputglob
       outglobs = []
+      statglobs = []
       assert (type(inglobs) == type([]))
 
       tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
@@ -1618,24 +1619,18 @@ and the program re-run.
       if not starttime:
          starttime = time.time()
 
-      if Verbose > 0:
-         print >>sys.stderr, "Waiting for completion.  Job", jobname
       if not options.statusonly: 
+         if Verbose > 0:
+            print >>sys.stderr, "Waiting for completion.  Job", jobname
          self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
 
       wallclock = time.time() - starttime
 
-      # Print any stderr files to stderr
-
       # Get the output files
-      outputglobs = [f + "/.stderr" for f in outglobs]
-      outputglobs += [f + "/.status" for f in outglobs]
-      if not options.quiet:
-         outputglobs += inglobs
-      loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
-      self.get(outputglobs + [loc])
+      errglobs = [f + "/.stderr" for f in outglobs]
+      statglobs += [f + "/.status" for f in outglobs]
 
-      # Process the output files
+      # Process the stats
       errcodes = {}
       wtime = [0.0, 0.0]
       utime = [0.0, 0.0]
@@ -1645,43 +1640,50 @@ and the program re-run.
       nodebytes = [{}, {}] 
       allstats = []
 
-      for (dirpath, dirnames, filenames) in os.walk(loc):
-         for f in filenames:
-            fname = os.path.join(dirpath, f)
-            fh = file(fname)
+      for statlist in self._local_pickles(["localstats"] + statglobs):
+         allstats.extend(statlist)
+         for stats in statlist:
+            ec = os.WEXITSTATUS(stats['status'])
+            errcodes[ec] = errcodes.get(ec, 0) + 1
 
-            if f == ".status":
-               # Tally up info from status files
-               stats = cPickle.load(fh)
-               allstats.append(stats)
+            if stats['timestamp'] < starttime:
+               cached = 1
+            else:
+               cached = 0
 
-               ec = os.WEXITSTATUS(stats['status'])
-               errcodes[ec] = errcodes.get(ec, 0) + 1
+            wtime[cached] += stats['time']
+            utime[cached] += stats['utime']
+            stime[cached] += stats['stime']
+            bytes[cached] += stats['inputsize']
 
-               if stats['timestamp'] < starttime:
-                  cached = 1
+            nodename = stats['nodename']
+            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
+            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
+
+      # Fetch stdout/stderr               
+      if not options.statusonly:
+         if options.quiet:
+            outputglobs = []
+         else:
+            outputglobs += inglobs
+         loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
+         self.get(outputglobs + errglobs + [loc])
+
+         for (dirpath, dirnames, filenames) in os.walk(loc):
+            for f in filenames:
+               fname = os.path.join(dirpath, f)
+               fh = file(fname)
+
+               if f == ".stderr":
+                  # Do nothing if empty
+                  if os.path.getsize(fname):
+                     print >>sys.stderr, '===', fname, '==='
+                     sys.stderr.writelines(fh)
+                     print >>sys.stderr, '====='
                else:
-                  cached = 0
-
-               wtime[cached] += stats['time']
-               utime[cached] += stats['utime']
-               stime[cached] += stats['stime']
-               bytes[cached] += stats['inputsize']
-
-               nodename = stats['nodename']
-               nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
-               nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
-
-            elif f == ".stderr":
-               # Do nothing if empty
-               if os.path.getsize(fname):
-                  print >>sys.stderr, '===', fname, '==='
-                  sys.stderr.writelines(fh)
-                  print >>sys.stderr, '====='
-            elif f == "stdout":
-               sys.stdout.writelines(fh)
+                  sys.stdout.writelines(fh)
                
-      rm_rf(loc)
+         rm_rf(loc)
 
       statsfile = open('.fm.stats', 'w')
       cPickle.dump(allstats, statsfile)
@@ -1753,16 +1755,14 @@ and the program re-run.
       """This is for slave (remote) instantiations."""
       return FmLocalCommands(args)
 
-   def _ls(self, args):
-      """generic way to get info about files in a blob"""             
-      listing = {}
+   def _local_pickles(self, args):
+      """Execute a command on each node and return a list of the unpickled output from each node."""
 
-      if not args: 
-         args = ["/"]
-      procs = self._Locations().forAllLocal(["localls"] + args)
+      procs = self._Locations().forAllLocal(args)
       status, ps = procs.collect()
-      ls = {}
 
+      pickles = []
+      
       for p in ps:
          pkl = p.stdout.read()
          p.stdout.close()
@@ -1770,10 +1770,23 @@ and the program re-run.
             continue
 
          try:
-            files = cPickle.loads(pkl)
+            unpkl = cPickle.loads(pkl)
          except:
-            print >>sys.stderr, "Error", sys.exc_value, "parsing remote ls results:", pkl
+            print >>sys.stderr, "Error", sys.exc_value, "parsing remote pickle results:", pkl
             return -1
+         pickles.append(unpkl)
+
+      return pickles
+
+   def _ls(self, args):
+      """generic way to get info about files in a blob"""             
+      if not args: 
+         args = ["/"]
+      pkls = self._local_pickles(["localls"] + args)
+
+      listing = {}
+
+      for files in pkls:
          for f in files:
             fname = f['name']
             if not listing.has_key(fname): 
@@ -2175,6 +2188,17 @@ class FmLocalCommands(CommandSetBase):
          d['group'] = fs.st_gid
 
       return d
+
+   def localstats(self, args):
+      os.chdir(self.Locations.this.rootdir)  
+      args = multiglob(["./" + a for a in args])
+      statlist = []
+      for apath in args:
+         stats = cPickle.load(open(apath))
+         statlist.append(stats)
+
+      sys.stdout.write(cPickle.dumps(statlist))
+      return 
 
    def localls(self, args):
       os.chdir(self.Locations.this.rootdir)  
