@@ -24,6 +24,7 @@ import base64
 import cPickle
 import cStringIO
 import errno
+import fcntl
 import glob
 import grp
 import math
@@ -699,15 +700,26 @@ class Procs:
 
       if r.stderr or r.stdout:
          self.numprocspolling += 1
-
          if r.stdout:
+            fd = r.stdout.fileno()
             self.poll.register(r.stdout, select.POLLIN|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[r.stdout.fileno()] = r
+            self.fd2proc[fd] = r
+
+            # make non-blocking file
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
             r.stdoutbuf = cStringIO.StringIO()
    
          if r.stderr:
+            fd = r.stderr.fileno()
             self.poll.register(r.stderr, select.POLLIN|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[r.stderr.fileno()] = r
+            self.fd2proc[fd] = r
+
+            # make non-blocking file
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
             r.stderrbuf = cStringIO.StringIO()
 
       r.tag = tag
