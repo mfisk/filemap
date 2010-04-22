@@ -385,32 +385,43 @@ class FmLocations:
       self.thisname = nodename
       self.this = self.locs[nodename]
 
-   def pickn(self, seed=None):
-      """Pick some pseudo-random locations.  The number of locations
-      chosen is based on the replication factor in the config.
-      Specify a seed to get deterministic results (e.g. for a given
-      extension number.)  The return value is the list of indices into
-      the current locations."""
+   def nodes(self, seed=None):
+      """Generate a list of pseudo-random locations.  
+      Specify a seed to get deterministic results (e.g. for a given extension 
+      number, file name, path, etc).  Returns a generator of a list of node names."""
 
-      #print "pick seed=", seed
       candidates = self.locs.keys()
-      used = []
 
       if seed:
          random.seed(seed)
 
-      for i in range(0, self.replication):
-         if not candidates:
-            print >>sys.stderr, "Cannot pick %d locations from %d available" % (n, len(self.locs))
-            break
+      while candidates:
          l = random.choice(candidates)
-         used.append(l)
          candidates.remove(l)
-     
-      #print >>sys.stderr, "pick", seed, "->", used
+         if not self.locs[l].inactive:
+            yield l
+ 
+   def pickn(self, seed=None, n=None):
+      """Pick some pseudo-random locations.  The number of locations
+      chosen is based on the replication factor in the config.
+      Specify a seed to get deterministic results (e.g. for a given
+      extension number.)  The return value is the list of node names."""
 
-      return used
-         
+      if not n: 
+         n = self.replication
+
+      nodes = self.nodes(seed=seed)
+
+      i = 0
+      for l in nodes:
+         i += 1
+         if i > n:
+            break
+         yield l
+
+      if i <= n:
+         print >>sys.stderr, "Cannot pick %d locations" % (n)
+
    def pick(self, seed=None, selfIsNoop=False):
       """Return a new FmLocations instance that uses a subset of the
 locations of this instance."""
@@ -532,7 +543,7 @@ locations of this instance."""
             seed = os.path.basename(src)
             if not hashbasename:
                seed = dst + "/" + seed
-            choices = self.pickn(seed=seed)
+            choices = self.pickn(seed=seed, n=pickn)
             choices = [self.locs[c] for c in choices]
          else:
             choices = self.locs.values()
@@ -1163,7 +1174,7 @@ class FmJob:
             # but only if that extension belongs on this node.
             choices = Locations.pickn(ext)
             if Locations.thisname not in choices:
-               #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", choices
+               #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", list(choices)
                continue
 
             #Get list of files with this extension
@@ -2135,7 +2146,7 @@ class FmLocalCommands(CommandSetBase):
 
    def redistribute(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=1, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
