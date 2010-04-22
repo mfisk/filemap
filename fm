@@ -1723,8 +1723,12 @@ and the program re-run.
          cached = 100*bytes[1]/sbytes
          nodes = self._Locations().processes()
          scaling = (stime[0]+utime[0])/wallclock
-
-         print >>sys.stderr, "Filemap performance: %g MB/s, %.1fs, %.0f%% cached.  New work: %g MB/s, %.1f/%dx CPU scaling" % (rate, wallclock, cached, newrate, scaling, nodes)
+         if bytes[0]:
+            newstuff = "New work: %g MB/s, %.1f/%dx CPU scaling" % (newrate, scaling, nodes)
+         else:
+            newstuff = ""
+            
+         print >>sys.stderr, "Filemap performance: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached), newstuff
  
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
