@@ -1408,13 +1408,12 @@ http://mfisk.github.com/filemap
       key.  If the regex contains a group, then what matches the group is
       the key; otherwise, the whole match is the key.
 
-      The root of the output file names must be specified either on the
-      command line or in the FMOUTPUT environment variable (which is set for
-      all programs running as FM jobs).  
+      Output files are numbered 1 to n and created in the current directory.
       """
       p = MethodOptionParser(fixed="infile")
       p.add_option("-n", "--nways", help="Number of output files to use")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
+      p.add_option("-f", "--field", default=1, help="Use field # (starting with 1).")
       (options, args) = p.parse_args(args)
       options.nways = int(options.nways)
 
@@ -1425,11 +1424,12 @@ http://mfisk.github.com/filemap
 
       if not options.nways:
          p.error("-n option required")
-      
-      if not options.regex:
-         options.regex = '^([^\s]*)'
-         
-      options.regex = re.compile(options.regex)
+     
+      if options.regex:
+         options.regex = re.compile(options.regex)
+ 
+      if options.field:
+         options.field = int(options.field) - 1
 
       files = []
       for i in range(0, options.nways):
@@ -1437,15 +1437,23 @@ http://mfisk.github.com/filemap
          files.append(file(fname, "w"))
 
       for line in file(infile):
-         key = options.regex.search(line)
-         if key:
-            g = key.groups()
-            if len(g):
-               key = g[0]
+         if options.regex:
+            key = options.regex.search(line)
+            if key:
+               g = key.groups()
+               if len(g):
+                  key = g[0]
+               else:
+                  key = key.group(0)
             else:
-               key = key.group(0)
+               print >>sys.stderr, "Key not found in line:", line.rstrip()
          else:
-            print >>sys.stderr, "Key not found in line:", line.rstrip()
+            words= line.split()
+            if options.field >= len(words):
+               key = None
+            else:
+               #print words[options.field], words
+               key = words[options.field]
 
          i = hash(key) % options.nways
          files[i].write(line)
