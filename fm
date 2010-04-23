@@ -1739,7 +1739,7 @@ and the program re-run.
       self._Locations().forAll(args, subst=True).collect(labelPrint=True)
 
    def runhost(self, args):
-      """Run a command on each node and print results."""
+      """Run a command on each unique host and print results."""
       (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
 
       self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
