@@ -1611,15 +1611,12 @@ and the program re-run.
       else:
          maxErrors = self._Locations().replication
 
-      reduceNext = False
       for cmd in cmds:
          reduce = False
 
          if cmd[0] == ">":
-            reduceNext = True
-            continue
+            cmd = cmd[1:]
 
-         if reduceNext:
             if not options.statusonly:
                # Install the jobs on each node
                self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -1627,16 +1624,15 @@ and the program re-run.
             rm_rf(tmpdir)
             tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
-            # Barrier; Wait for that job (and its parents) to finish:
-            if Verbose > 0:
-               print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
             if not starttime:
                starttime = time.time()
             if not options.statusonly:
+               # Barrier; Wait for that job (and its parents) to finish:
+               if Verbose > 0:
+                  print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
       
             reduce = True
-            reduceNext = False
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
