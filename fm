@@ -1173,7 +1173,7 @@ class FmJob:
 
             # Apply all of the files with the same extension,
             # but only if that extension belongs on this node.
-            choices = Locations.pickn(ext)
+            choices = Locations.pickn(ext, n=1)
             if Locations.thisname not in choices:
                #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", list(choices)
                continue
