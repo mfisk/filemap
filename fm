@@ -24,6 +24,7 @@ import base64
 import cPickle
 import cStringIO
 import errno
+import fcntl
 import glob
 import grp
 import math
@@ -71,12 +72,12 @@ def printableHash(s):
    h = h.rstrip('\n\r =')
    return h
 
+me = socket.gethostname().split('.')[0]
+
 def isremote(hname):
    if not hname:
       return False
 
-   me = socket.gethostname()
-   me = me.split('.')[0]
    hname = hname.split('.')[0]
    if me == hname:
       return False
@@ -399,33 +400,43 @@ class FmLocations:
       newlocs.this = self.this
       return newlocs
       
+   def nodes(self, seed=None):
+      """Generate a list of pseudo-random locations.  
+      Specify a seed to get deterministic results (e.g. for a given extension 
+      number, file name, path, etc).  Returns a generator of a list of node names."""
 
-   def pickn(self, seed=None):
-      """Pick some pseudo-random locations.  The number of locations
-      chosen is based on the replication factor in the config.
-      Specify a seed to get deterministic results (e.g. for a given
-      extension number.)  The return value is the list of indices into
-      the current locations."""
-
-      #print "pick seed=", seed
       candidates = self.locs.keys()
-      used = []
 
       if seed:
          random.seed(seed)
 
-      for i in range(0, self.replication):
-         if not candidates:
-            print >>sys.stderr, "Cannot pick %d locations from %d available" % (n, len(self.locs))
-            break
+      while candidates:
          l = random.choice(candidates)
-         used.append(l)
          candidates.remove(l)
-     
-      #print >>sys.stderr, "pick", seed, "->", used
+         if not self.locs[l].inactive:
+            yield l
+ 
+   def pickn(self, seed=None, n=None):
+      """Pick some pseudo-random locations.  The number of locations
+      chosen is based on the replication factor in the config.
+      Specify a seed to get deterministic results (e.g. for a given
+      extension number.)  The return value is the list of node names."""
 
-      return used
-         
+      if not n: 
+         n = self.replication
+
+      nodes = self.nodes(seed=seed)
+
+      i = 0
+      for l in nodes:
+         i += 1
+         if i > n:
+            break
+         yield l
+
+      if i <= n:
+         print >>sys.stderr, "Cannot pick %d locations" % (n)
+
    def pick(self, seed=None, selfIsNoop=False):
       """Return a new FmLocations instance that uses a subset of the
 locations of this instance."""
@@ -547,7 +558,7 @@ locations of this instance."""
             seed = os.path.basename(src)
             if not hashbasename:
                seed = dst + "/" + seed
-            choices = self.pickn(seed=seed)
+            choices = self.pickn(seed=seed, n=pickn)
             choices = [self.locs[c] for c in choices]
          else:
             choices = self.locs.values()
@@ -561,12 +572,14 @@ locations of this instance."""
                d = loc.rootdir
 
             d = d + "/" + dst
+            d = d.replace("//","/")
  
             if relative:
-               bydstrel[d] = bydstrel.get(d, []) + [src]
+               if not bydstrel.get(d): bydstrel[d] = []
+               bydstrel[d].append(src)
             else:
-               d = d.replace("//","/")
-               bydst[d] = bydst.get(d, []) + [src]
+               if not bydst.get(d): bydst[d] = []
+               bydst[d].append(src)
 
             qname[d] = loc.qname
 
@@ -713,15 +726,26 @@ class Procs:
 
       if r.stderr or r.stdout:
          self.numprocspolling += 1
-
          if r.stdout:
+            fd = r.stdout.fileno()
             self.poll.register(r.stdout, select.POLLIN|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[r.stdout.fileno()] = r
+            self.fd2proc[fd] = r
+
+            # make non-blocking file
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
             r.stdoutbuf = cStringIO.StringIO()
    
          if r.stderr:
+            fd = r.stderr.fileno()
             self.poll.register(r.stderr, select.POLLIN|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[r.stderr.fileno()] = r
+            self.fd2proc[fd] = r
+
+            # make non-blocking file
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
             r.stderrbuf = cStringIO.StringIO()
 
       r.tag = tag
@@ -769,6 +793,10 @@ class Procs:
          if Verbose > 1:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
+            waiting = [l.queue for l in self.pids.values()]
+            waiting.sort()
+            if waiting and len(waiting) < len(results): 
+               print >>sys.stderr, "Still waiting on", string.join(waiting)
 
       if not results:
          return [None, results]
@@ -1161,7 +1189,7 @@ class FmJob:
             # but only if that extension belongs on this node.
             choices = Locations.pickn(ext)
             if Locations.thisname not in choices:
-               #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", choices
+               #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", list(choices)
                continue
 
             #Get list of files with this extension
@@ -1562,16 +1590,21 @@ and the program re-run.
         
          if "|" in cmdwords:
             idx = cmdwords.index("|")
+            cmd = cmdwords[:idx]
+            cmds.append(cmd)
+            assert(cmd)
+            cmdwords = cmdwords[idx+1:]
          else:
+            if not cmdwords:
+               # We should probably warn the user they had an empty pipeline segment
+               print >>sys.stderr, "Empty pipeline element in ", cmds
+               break
             cmds.append(cmdwords)
             break
 
-         cmd = cmdwords[:idx]
-         cmds.append(cmd)
-         cmdwords = cmdwords[idx+1:]
-
       inglobs = options.inputglob
       outglobs = []
+      statglobs = []
       assert (type(inglobs) == type([]))
 
       tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
@@ -1584,11 +1617,15 @@ and the program re-run.
       else:
          maxErrors = self._Locations().replication
 
+      reduceNext = False
       for cmd in cmds:
          reduce = False
-         if cmd[0] == ">":
-            cmd = cmd[1:]
 
+         if cmd[0] == ">":
+            reduceNext = True
+            continue
+
+         if reduceNext:
             if not options.statusonly:
                # Install the jobs on each node
                self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -1605,6 +1642,7 @@ and the program re-run.
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
       
             reduce = True
+            reduceNext = False
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
@@ -1616,24 +1654,18 @@ and the program re-run.
       if not starttime:
          starttime = time.time()
 
-      if Verbose > 0:
-         print >>sys.stderr, "Waiting for completion.  Job", jobname
       if not options.statusonly: 
+         if Verbose > 0:
+            print >>sys.stderr, "Waiting for completion.  Job", jobname
          self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
 
       wallclock = time.time() - starttime
 
-      # Print any stderr files to stderr
-
       # Get the output files
-      outputglobs = [f + "/.stderr" for f in outglobs]
-      outputglobs += [f + "/.status" for f in outglobs]
-      if not options.quiet:
-         outputglobs += inglobs
-      loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
-      self.get(outputglobs + [loc])
+      errglobs = [f + "/.stderr" for f in outglobs]
+      statglobs += [f + "/.status" for f in outglobs]
 
-      # Process the output files
+      # Process the stats
       errcodes = {}
       wtime = [0.0, 0.0]
       utime = [0.0, 0.0]
@@ -1643,43 +1675,50 @@ and the program re-run.
       nodebytes = [{}, {}] 
       allstats = []
 
-      for (dirpath, dirnames, filenames) in os.walk(loc):
-         for f in filenames:
-            fname = os.path.join(dirpath, f)
-            fh = file(fname)
+      for statlist in self._local_pickles(["localstats"] + statglobs):
+         allstats.extend(statlist)
+         for stats in statlist:
+            ec = os.WEXITSTATUS(stats['status'])
+            errcodes[ec] = errcodes.get(ec, 0) + 1
 
-            if f == ".status":
-               # Tally up info from status files
-               stats = cPickle.load(fh)
-               allstats.append(stats)
+            if stats['timestamp'] < starttime:
+               cached = 1
+            else:
+               cached = 0
 
-               ec = os.WEXITSTATUS(stats['status'])
-               errcodes[ec] = errcodes.get(ec, 0) + 1
+            wtime[cached] += stats['time']
+            utime[cached] += stats['utime']
+            stime[cached] += stats['stime']
+            bytes[cached] += stats['inputsize']
 
-               if stats['timestamp'] < starttime:
-                  cached = 1
+            nodename = stats['nodename']
+            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
+            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
+
+      # Fetch stdout/stderr               
+      if not options.statusonly:
+         if options.quiet:
+            outputglobs = []
+         else:
+            outputglobs += inglobs
+         loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
+         self.get(outputglobs + errglobs + [loc])
+
+         for (dirpath, dirnames, filenames) in os.walk(loc):
+            for f in filenames:
+               fname = os.path.join(dirpath, f)
+               fh = file(fname)
+
+               if f == ".stderr":
+                  # Do nothing if empty
+                  if os.path.getsize(fname):
+                     print >>sys.stderr, '===', fname, '==='
+                     sys.stderr.writelines(fh)
+                     print >>sys.stderr, '====='
                else:
-                  cached = 0
-
-               wtime[cached] += stats['time']
-               utime[cached] += stats['utime']
-               stime[cached] += stats['stime']
-               bytes[cached] += stats['inputsize']
-
-               nodename = stats['nodename']
-               nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
-               nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
-
-            elif f == ".stderr":
-               # Do nothing if empty
-               if os.path.getsize(fname):
-                  print >>sys.stderr, '===', fname, '==='
-                  sys.stderr.writelines(fh)
-                  print >>sys.stderr, '====='
-            elif f == "stdout":
-               sys.stdout.writelines(fh)
+                  sys.stdout.writelines(fh)
                
-      rm_rf(loc)
+         rm_rf(loc)
 
       statsfile = open('.fm.stats', 'w')
       cPickle.dump(allstats, statsfile)
@@ -1719,8 +1758,12 @@ and the program re-run.
          cached = 100*bytes[1]/sbytes
          nodes = self._Locations().processes()
          scaling = (stime[0]+utime[0])/wallclock
-
-         print >>sys.stderr, "Filemap performance: %g MB/s, %.1fs, %.0f%% cached.  New work: %g MB/s, %.1f/%dx CPU scaling" % (rate, wallclock, cached, newrate, scaling, nodes)
+         if bytes[0]:
+            newstuff = "New work: %g MB/s, %.1f/%dx CPU scaling" % (newrate, scaling, nodes)
+         else:
+            newstuff = ""
+            
+         print >>sys.stderr, "Filemap performance: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached), newstuff
  
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
@@ -1757,16 +1800,14 @@ and the program re-run.
       """This is for slave (remote) instantiations."""
       return FmLocalCommands(args)
 
-   def _ls(self, args):
-      """generic way to get info about files in a blob"""             
-      listing = {}
+   def _local_pickles(self, args):
+      """Execute a command on each node and return a list of the unpickled output from each node."""
 
-      if not args: 
-         args = ["/"]
-      procs = self._Locations().forAllLocal(["localls"] + args)
+      procs = self._Locations().forAllLocal(args)
       status, ps = procs.collect()
-      ls = {}
 
+      pickles = []
+      
       for p in ps:
          pkl = p.stdout.read()
          p.stdout.close()
@@ -1774,10 +1815,23 @@ and the program re-run.
             continue
 
          try:
-            files = cPickle.loads(pkl)
+            unpkl = cPickle.loads(pkl)
          except:
-            print >>sys.stderr, "Error", sys.exc_value, "parsing remote ls results:", pkl
+            print >>sys.stderr, "Error", sys.exc_value, "parsing remote pickle results:", pkl
             return -1
+         pickles.append(unpkl)
+
+      return pickles
+
+   def _ls(self, args):
+      """generic way to get info about files in a blob"""             
+      if not args: 
+         args = ["/"]
+      pkls = self._local_pickles(["localls"] + args)
+
+      listing = {}
+
+      for files in pkls:
          for f in files:
             fname = f['name']
             if not listing.has_key(fname): 
@@ -2113,7 +2167,7 @@ class FmLocalCommands(CommandSetBase):
 
    def redistribute(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=1, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
@@ -2179,6 +2233,17 @@ class FmLocalCommands(CommandSetBase):
          d['group'] = fs.st_gid
 
       return d
+
+   def localstats(self, args):
+      os.chdir(self.Locations.this.rootdir)  
+      args = multiglob(["./" + a for a in args])
+      statlist = []
+      for apath in args:
+         stats = cPickle.load(open(apath))
+         statlist.append(stats)
+
+      sys.stdout.write(cPickle.dumps(statlist))
+      return 
 
    def localls(self, args):
       os.chdir(self.Locations.this.rootdir)  
