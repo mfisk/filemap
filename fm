@@ -422,11 +422,11 @@ class FmLocations:
       if i <= n:
          print >>sys.stderr, "Cannot pick %d locations" % (n)
 
-   def pick(self, seed=None, selfIsNoop=False):
+   def pick(self, n=None, seed=None, selfIsNoop=False):
       """Return a new FmLocations instance that uses a subset of the
 locations of this instance."""
 
-      used = self.pickn(seed)
+      used = self.pickn(seed, n=n)
 
       if selfIsNoop and self.thisname in used: 
          used.remove(self.thisname)
@@ -864,7 +864,8 @@ class Procs:
 
       del self.pids[p.pid]
 
-      if p.status and p.kwargs['retries'] and os.WEXITSTATUS(p.status) == 255:
+      # XXX: ssh returns 255 if it can't connect and rsync returns 12
+      if p.status and p.kwargs['retries'] and os.WEXITSTATUS(p.status) == 255 or os.WEXITSTATUS(p.status) == 12:
          # Requeue if retries enabled and child returned 255 (SSH failed to connect)
          p.kwargs['retries']  -= 1
          if Verbose > 0:
@@ -1975,6 +1976,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          options = []
 
       self._Locations().forAll(["rm", "-f"] + options, args).collect()
+
+      self._Locations().pick(n=1).forAll(["rm", "-f"] + options + ["%(SYNCDIR)/" + f for f in args], subst=True).collect()
 
 
    def init(self, args):
