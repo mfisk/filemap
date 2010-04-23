@@ -35,7 +35,6 @@ import pydoc
 import random
 import re
 import select
-import sets
 import shlex
 import signal
 import socket
@@ -385,6 +384,21 @@ class FmLocations:
       self.thisname = nodename
       self.this = self.locs[nodename]
 
+   def pickHosts(self):
+      """Return a subset of locations containing only one location per hostname"""
+      hosts = set()
+      newlocs = {}
+      for l in self.locs.values():
+         if l.hostname in hosts:
+            continue
+         else:
+            newlocs[l.name] = l
+            hosts.add(l.hostname)
+ 
+      newlocs = FmLocations(self.config, locs=newlocs)
+      newlocs.this = self.this
+      return newlocs
+      
    def nodes(self, seed=None):
       """Generate a list of pseudo-random locations.  
       Specify a seed to get deterministic results (e.g. for a given extension 
@@ -1771,6 +1785,12 @@ and the program re-run.
   
       self._Locations().forAll(args, subst=True).collect(labelPrint=True)
 
+   def runhost(self, args):
+      """Run a command on each unique host and print results."""
+      (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
+
+      self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
+
    def cat(self, args):
       """Concatenate one or more files to stdout."""
       (options, args) = MethodOptionParser(fixed="files...").parse_args(args)
@@ -1839,8 +1859,8 @@ and the program re-run.
 
       listing = self._ls(args)
 
-      toofew = sets.Set()
-      toomany = sets.Set()
+      toofew = set()
+      toomany = set()
       total = len(listing.keys())
 
       for i in listing.keys():

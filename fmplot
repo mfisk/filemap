@@ -58,7 +58,10 @@ def plot(filename, pngfile):
 
    lines = []
    maxsize = math.log(maxsize)
-   minsize = math.log(minsize)
+   if not minsize:
+      minsize = 0
+   else:
+      minsize = math.log(minsize)
 
    for s in stats:
       y = nodes2y[s['nodename']]
@@ -67,10 +70,18 @@ def plot(filename, pngfile):
       start = finish - s['time']
 
       # Size is a log-scal enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
-      size = (math.log(s['inputsize']) - minsize)/(maxsize-minsize)
+      insize = s['inputsize']
+      if insize:
+         insize = math.log(insize)
+      else:
+         insize = 0
+      size = (insize-minsize)/(maxsize-minsize)
 
       # CPU is % of wallclock time in user or system CPU time
-      cpu = (s['utime'] + s['stime']) / s['time']
+      if s['time'] == 0:
+         cpu = 1
+      else:
+         cpu = (s['utime'] + s['stime']) / s['time']
 
       l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size)
       ax.add_line(l)
@@ -82,7 +93,7 @@ def plot(filename, pngfile):
    ax.set_ylim(ymin=-2)
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
-   canvas.print_figure(pngfile)
+   canvas.print_figure(pngfile, dpi=600)
 
 if __name__ == '__main__':
    infile = ".fm.stats"
