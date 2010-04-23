@@ -384,6 +384,22 @@ class FmLocations:
       self.thisname = nodename
       self.this = self.locs[nodename]
 
+   def pickHosts(self):
+      """Return a subset of locations containing only one location per hostname"""
+      hosts = set()
+      newlocs = {}
+      for l in self.locs.values():
+         if l.hostname in hosts:
+            continue
+         else:
+            newlocs[l.name] = l
+            hosts.add(l.hostname)
+ 
+      newlocs = FmLocations(self.config, locs=newlocs)
+      newlocs.this = self.this
+      return newlocs
+      
+
    def pickn(self, seed=None):
       """Pick some pseudo-random locations.  The number of locations
       chosen is based on the replication factor in the config.
@@ -1721,6 +1737,12 @@ and the program re-run.
       (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
   
       self._Locations().forAll(args, subst=True).collect(labelPrint=True)
+
+   def runhost(self, args):
+      """Run a command on each node and print results."""
+      (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
+
+      self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
 
    def cat(self, args):
       """Concatenate one or more files to stdout."""
