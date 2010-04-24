@@ -2381,40 +2381,4 @@ def multiglob(globs):
       ret += glob.glob(g)
    return ret
 
-class SubprocessLs:
-   def __init__(self, procs): 
-      """Take a list of subprocesses"""
-      self.procs = procs
-      self.nextline = [None] * len(self.procs)
-
-   def __iter__(self): 
-      return self
-
-   def next(self):
-      smallest = None
-      for i in self.procs:
-           # Job slot is set to None after that job terminates
-           if not self.procs[i]:
-              continue
-
-           # Get next line from this job if we don't already have one cached
-           if not self.nextline[i]:
-              self.nextline[i] = self.procs[i].stdout.readline()
-
-              # Check to see if the job terminated
-              #if not self.nextline[i]:
-                 #print >>sys.stderr, i, "exited", self.procs[i].poll()
-
-           # See if this job's next line should go before any others
-           if self.nextline[i] and (smallest == None or self.nextline[i] < self.nextline[smallest]):
-              smallest = i
-
-      if smallest == None:
-            #print >>sys.stderr, "Done; left", self.nextline
-            raise StopIteration
-
-      s = self.nextline[smallest]
-      self.nextline[smallest] = None
-      return s 
-
 FmCommands(sys.argv[1:])
