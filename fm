@@ -324,9 +324,6 @@ class FmLocations:
 
          self.replication = int(self.config_get("global", "replication", "1"))
          self.umask = int(self.config_get("global", "umask", "0002"))
-         path = self.config_get("global", "pathextras")
-         if path:
-            os.environ['PATH'] += ":" + path
          os.umask(self.umask)
 
       # Unless we were passed an explicit list of locations, grab all
@@ -354,7 +351,7 @@ class FmLocations:
       l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o GSSAPIDelegateCredentials=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -Ax", raw=True))
       l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
 
-      l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync -tO", raw=True), comments=True)
+      l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync -t", raw=True), comments=True)
       l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
 
       if l.name != "global": 
