@@ -35,6 +35,7 @@ import pydoc
 import random
 import re
 import select
+import sets
 import shlex
 import signal
 import socket
@@ -1857,8 +1858,8 @@ and the program re-run.
 
       listing = self._ls(args)
 
-      toofew = set()
-      toomany = set()
+      toofew = sets.Set()
+      toomany = sets.Set()
       total = len(listing.keys())
 
       for i in listing.keys():
