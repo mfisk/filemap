@@ -2447,4 +2447,6 @@ def multiglob(globs):
       ret += glob.glob(g)
    return ret
 
-FmCommands(sys.argv[1:])
+
+if __name__ == "__main__":
+   FmCommands(sys.argv[1:])
