@@ -1539,7 +1539,7 @@ class FmJob:
       except OSError, e:
          success = False
          if e.errno != errno.EEXIST:
-            os.unlink(myfilename)
+            os.unlink(myname)
             raise
 
       # Get rid of private name for it, successful or not
@@ -2421,7 +2421,7 @@ class FmLocalCommands(CommandSetBase):
 
       self.Locations.thisis(options.node)
 
-      return CommandSetBase.__init__(self, args, p)
+      CommandSetBase.__init__(self, args, p)
 
    def replicate(self, args):
       procs = Procs(retries=7)
