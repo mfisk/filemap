@@ -55,8 +55,10 @@ except:
    import sha
    sha = sha.sha
 
+# Globals
 Verbose = 0
 RegressionTest = False
+Locations = None
 
 try:
    select.poll
