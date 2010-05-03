@@ -928,7 +928,7 @@ class Procs:
                print >>sys.stderr, "Still waiting on", string.join(waiting)
 
       if not results:
-         return [None, results]
+         return None, results
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
@@ -1890,7 +1890,9 @@ and the program re-run.
             unpkl = cPickle.loads(pkl)
          except:
             print >>sys.stderr, "Error", sys.exc_value, "parsing remote pickle results:", pkl
-            return -1
+            return -1   # TODO: this value isn't ever expected/handled by the code calling this function
+                        # we should return an empty list or check the list contents or at least the
+                        # return type after this function is called
          pickles.append(unpkl)
 
       return pickles
