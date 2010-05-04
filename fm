@@ -1006,7 +1006,7 @@ class Procs:
       del self.pids[p.pid]
 
       # XXX: ssh returns 255 if it can't connect and rsync returns 12
-      if p.status and p.kwargs['retries'] and os.WEXITSTATUS(p.status) == 255 or os.WEXITSTATUS(p.status) == 12:
+      if p.status and p.kwargs['retries'] and (os.WEXITSTATUS(p.status) == 255 or os.WEXITSTATUS(p.status) == 12):
          # Requeue if retries enabled and child returned 255 (SSH failed to connect)
          p.kwargs['retries']  -= 1
          if Verbose > 0:
