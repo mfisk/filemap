@@ -23,27 +23,75 @@ def numcmp(x, y):
       return cmp(x,y)
    else:
       return r
+
+def overlap(joba, jobb):
+   if jobb['start'] > joba['finish'] or joba['start'] > jobb['finish']:
+      return False
+   return True
+
+def makeVnodes(nodes):
+   # We may have multiple jobs at a time per node (e.g. SMP nodes), so 
+   # treat those as multiple nodes.  Since we don't have an explicity thread id, 
+   # just assign them arbitrarily in a non-overlapping way
+   for nodename in nodes.keys():
+      vnodes = []
+      for job in nodes[nodename]:
+         found = False
+         for vnode in vnodes:
+            conflict = False
+            for j in vnode:
+               if overlap(job, j):
+                  #print "Conflict", job, "\nwith", j
+                  conflict = True
+                  break
+            if not conflict:
+               vnode.append(job)
+               found = True
+               break
+         if not found:
+            vnodes.append([job])
+         #print "now", vnodes
+
+      if len(vnodes) < 2:
+         # It was serial, so no virtual nodes required
+         continue
+
+      del nodes[nodename]
+      print "Replacing", nodename, "with", len(vnodes)
+      for i in range(0, len(vnodes)):
+         nodes[nodename + "." + str(i)] = vnodes[i]
+         #print nodes.keys()
+
+   return nodes
    
 def plot(filename, pngfile):
    statsfile = open(filename, 'r')
    stats = cPickle.load(statsfile)
    statsfile.close()
 
-   nodes = set()
+   # Load all stats and keep track of min and max inputsizes along the way
+   nodes = {}
    minsize = 2**31
    maxsize = 0
    for s in stats:
-      nodes.add(s['nodename'])
+      s['start'] = s['timestamp'] - s['time']
+      s['finish'] = s['timestamp']
+      if not nodes.get(s['nodename']):
+         nodes[s['nodename']] = []
+      nodes[s['nodename']].append(s)
+
       minsize = min(minsize, s['inputsize'])
       maxsize = max(maxsize, s['inputsize'])
 
-   nodes = list(nodes)
-   nodes.sort(cmp=numcmp)
+   nodes = makeVnodes(nodes)
+         
+   nodenames = nodes.keys()
+   nodenames.sort(cmp=numcmp)
 
    # Build map of nodenames to y coordinates
    nodes2y = {}
    i = 0
-   for n in nodes:
+   for n in nodenames:
       nodes2y[n] = i
       i += 1
 
@@ -63,33 +111,34 @@ def plot(filename, pngfile):
    else:
       minsize = math.log(minsize)
 
-   for s in stats:
-      y = nodes2y[s['nodename']]
+   for node in nodes:
+      y = nodes2y[node]
+      for s in nodes[node]:
 
-      finish = s['timestamp']
-      start = finish - s['time']
+         finish = s['finish']
+         start = s['start']
 
-      # Size is a log-scal enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
-      insize = s['inputsize']
-      if insize:
-         insize = math.log(insize)
-      else:
-         insize = 0
-      size = (insize-minsize)/(maxsize-minsize)
-
-      # CPU is % of wallclock time in user or system CPU time
-      if s['time'] == 0:
-         cpu = 1
-      else:
-         cpu = (s['utime'] + s['stime']) / s['time']
-
-      l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size)
-      ax.add_line(l)
-      lines.append([ (start,y), (finish,y) ])
+         # Size is a log-scal enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
+         insize = s['inputsize']
+         if insize:
+            insize = math.log(insize)
+         else:
+            insize = 0
+         size = (insize-minsize)/(maxsize-minsize)
+   
+         # CPU is % of wallclock time in user or system CPU time
+         if s['time'] == 0:
+            cpu = 1
+         else:
+            cpu = (s['utime'] + s['stime']) / s['time']
+   
+         l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size)
+         ax.add_line(l)
+         lines.append([ (start,y), (finish,y) ])
 
    ax.autoscale_view()
    ax.set_yticks(range(0, i))
-   ax.set_yticklabels(nodes)
+   ax.set_yticklabels(nodenames)
    ax.set_ylim(ymin=-2)
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
