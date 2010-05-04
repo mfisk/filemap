@@ -56,7 +56,7 @@ except:
    sha = sha.sha
 
 Verbose = 0
-#RegressionTest = False
+RegressionTest = False
 
 try:
    select.poll
