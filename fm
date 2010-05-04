@@ -139,6 +139,127 @@ def tabulate(lst, width, ncols=None):
       line = line.rstrip()
       print line
 
+def collapseIntervals(lst):
+   """Take list of (start,end) interval tuples and return a similar list with all overlapping intervals combined."""
+   intervals = []
+   for (sstart,send) in lst:
+      found = False
+      for i in range(0, len(intervals)):
+         (start,end) = intervals[i]
+         if (sstart <= end and send > end) or (send >= start and sstart < start):
+            # Expand interval
+            start=min(start,sstart)
+            end=max(end,send)
+            intervals[i] = (start,end)
+            found = True
+         elif send <= end and start >=start:
+            # Already encompassed
+            found = True
+      if not found: 
+         # Add new interval to list
+         intervals.append((sstart,send))
+
+   return intervals
+
+if RegressionTest:
+   assert(collapseIntervals([(1,3), (2,4), (2,3), (0,2), (5,6), (4,4.5)]) == [(0,4.5), (5,6)])
+
+def tallyStats(statlist, starttime, wallclock):
+      # Tally the stats
+      errcodes = {}
+      wtime = [0.0, 0.0]
+      utime = [0.0, 0.0]
+      stime = [0.0, 0.0]
+      bytes = [0.0, 0.0]
+      nodewtime = [{}, {}]
+      nodebytes = [{}, {}] 
+      allstats = []
+      maxend = 0
+      minstart = starttime
+
+      for stats in statlist:
+            ec = os.WEXITSTATUS(stats['status'])
+            errcodes[ec] = errcodes.get(ec, 0) + 1
+
+            if stats['timestamp'] < starttime:
+               cached = 1
+            else:
+               cached = 0
+
+            wtime[cached] += stats['time']
+            utime[cached] += stats['utime']
+            stime[cached] += stats['stime']
+            bytes[cached] += stats['inputsize']
+
+            minstart = min(minstart, stats['timestamp'] - stats['time'])
+            maxend = max(maxend, stats['timestamp'])
+
+            nodename = stats['nodename']
+            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
+            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
+           
+      # Print out summary info
+      errstr = ''
+      for k in errcodes.keys():
+         if not errstr: 
+            errstr = "%d processes returned %d" % (errcodes[k], k)
+         else:
+            errstr += "; %d x %s" % (errcodes[k], k)
+      if not errstr:
+         errstr = 'No processes ran'
+
+      print >>sys.stderr, errstr
+
+      MB = 10**6
+
+      if Verbose > 0:
+         for n in nodebytes[0]:
+            if nodewtime[0][n]:
+               print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
+
+      swtime = sum(wtime)
+
+      if swtime:
+         sbytes = sum(bytes)
+         sutime = sum(utime)
+         sstime = sum(stime)
+         print >>sys.stderr, "Serial performance: %g MB/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+            % (sbytes/MB/swtime, swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
+
+         if bytes[0] and wallclock:
+            rate = bytes[0]/MB/wallclock
+            nodes = self._Locations().processes()
+            scaling = (stime[0]+utime[0])/wallclock
+            newstuff = "New: %g MB/s, %.1f/%dx CPU scaling." % (rate, scaling, nodes)
+         else:
+            newstuff = ""
+         
+         # Find intervals we were computing over 
+         intervals = [(s['timestamp'] - s['time'], s['timestamp']) for s in statlist]
+         intervals = collapseIntervals(intervals)
+
+         if bytes[1]:
+            # Find intervals that were before starttime (cached)
+            cacheduration = 0
+            for (start,end) in intervals:
+               if end < starttime:
+                  cacheduration += (end-start)
+
+            rate = bytes[1]/MB/cacheduration
+            scaling = (stime[1]+stime[0])/cacheduration
+            cached = "Cached: %g MB/s, %.1fx" % (rate, scaling)
+         else:
+            cached = ""
+
+         if True or sbytes and wallclock:
+            rate = sbytes/MB/wallclock
+            cached = 100*bytes[1]/sbytes
+            fm = "Filemap: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
+         else:
+            fm = "" 
+
+         print >>sys.stderr, string.join([fm, newstuff, cached], '  ')
+  
 def rm_rf(path):
    for (dirpath,dirs,files) in os.walk(path, topdown=False):
       for f in files: 
@@ -1675,35 +1796,15 @@ and the program re-run.
       errglobs = [f + "/.stderr" for f in outglobs]
       statglobs += [f + "/.status" for f in outglobs]
 
-      # Process the stats
-      errcodes = {}
-      wtime = [0.0, 0.0]
-      utime = [0.0, 0.0]
-      stime = [0.0, 0.0]
-      bytes = [0.0, 0.0]
-      nodewtime = [{}, {}]
-      nodebytes = [{}, {}] 
+      statlists = self._local_pickles(["localstats"] + statglobs)
       allstats = []
+      for lst in statlists:
+         allstats.extend(lst)
 
-      for statlist in self._local_pickles(["localstats"] + statglobs):
-         allstats.extend(statlist)
-         for stats in statlist:
-            ec = os.WEXITSTATUS(stats['status'])
-            errcodes[ec] = errcodes.get(ec, 0) + 1
-
-            if stats['timestamp'] < starttime:
-               cached = 1
-            else:
-               cached = 0
-
-            wtime[cached] += stats['time']
-            utime[cached] += stats['utime']
-            stime[cached] += stats['stime']
-            bytes[cached] += stats['inputsize']
-
-            nodename = stats['nodename']
-            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
-            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
+      tally = tallyStats(allstats, starttime, wallclock)
+      statsfile = open('.fm.stats', 'w')
+      cPickle.dump(allstats, statsfile)
+      statsfile.close()
 
       # Fetch stdout/stderr               
       if not options.statusonly:
@@ -1730,50 +1831,6 @@ and the program re-run.
                
          rm_rf(loc)
 
-      statsfile = open('.fm.stats', 'w')
-      cPickle.dump(allstats, statsfile)
-      statsfile.close()
-
-      # Print out summary info
-      errstr = ''
-      for k in errcodes.keys():
-         if not errstr: 
-            errstr = "%d processes returned %d" % (errcodes[k], k)
-         else:
-            errstr += "; %d x %s" % (errcodes[k], k)
-      if not errstr:
-         errstr = 'No processes ran'
-
-      print >>sys.stderr, errstr
-
-      MB = 2**20
-
-      if Verbose > 0:
-         for n in nodebytes[0]:
-            if nodewtime[0][n]:
-               print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
-
-      swtime = sum(wtime)
-      sbytes = sum(bytes)
-
-      if swtime:
-         sutime = sum(utime)
-         sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %g MB/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
-            % (sbytes/MB/swtime, swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
-
-      if wallclock and swtime:
-         rate = sbytes/MB/wallclock
-         newrate = bytes[0]/MB/wallclock
-         cached = 100*bytes[1]/sbytes
-         nodes = self._Locations().processes()
-         scaling = (stime[0]+utime[0])/wallclock
-         if bytes[0]:
-            newstuff = "New work: %g MB/s, %.1f/%dx CPU scaling" % (newrate, scaling, nodes)
-         else:
-            newstuff = ""
-            
-         print >>sys.stderr, "Filemap performance: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached), newstuff
  
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud ot local storage."""
