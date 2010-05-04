@@ -56,6 +56,7 @@ except:
    sha = sha.sha
 
 Verbose = 0
+#RegressionTest = False
 
 try:
    select.poll
@@ -2064,8 +2065,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       else:
          options = []
 
+      # Assumes shared space
       self._Locations().forAll(["rm", "-f"] + options, args).collect()
-
       self._Locations().pick(n=1).forAll(["rm", "-f"] + options + ["%(SYNCDIR)/" + f for f in args], subst=True).collect()
 
 
