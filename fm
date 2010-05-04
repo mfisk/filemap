@@ -559,7 +559,10 @@ locations of this instance."""
          if pickn:
             seed = os.path.basename(src)
             if not hashbasename:
-               seed = dst + "/" + seed
+               if relative:
+                  seed = dst + "/" + src
+               else:
+                  seed = dst + "/" + seed
             choices = self.pickn(seed=seed, n=pickn)
             choices = [self.locs[c] for c in choices]
          else:
