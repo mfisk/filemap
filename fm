@@ -1184,6 +1184,7 @@ class JobScheduler:
             proc = j.compute(self.options, self.procs)
             #print >>sys.stderr, "Launched", proc
             if proc: 
+               proc.jobname = jobname
                return True
             else:
                # No more work to do, check to see if job is complete
@@ -1248,6 +1249,7 @@ class JobScheduler:
       stats['utime'] = p.utime
       stats['stime'] = p.stime
       stats['inputsize'] = p.inputsize
+      stats['jobname'] = p.jobname
       stats['nodename'] = self.options.name
       stats['hostname'] = socket.gethostname()
       #stats['schedpid'] = os.getpid()
@@ -2309,6 +2311,7 @@ class FmLocalCommands(CommandSetBase):
       statlist = []
       for apath in args:
          stats = cPickle.load(open(apath))
+         stats['statusfile'] = apath
          statlist.append(stats)
 
       sys.stdout.write(cPickle.dumps(statlist))
