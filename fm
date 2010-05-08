@@ -165,7 +165,7 @@ def collapseIntervals(lst):
 if RegressionTest:
    assert(collapseIntervals([(1,3), (2,4), (2,3), (0,2), (5,6), (4,4.5)]) == [(0,4.5), (5,6)])
 
-def tallyStats(statlist, starttime, wallclock):
+def tallyStats(statlist, starttime, wallclock, nodes):
       # Tally the stats
       errcodes = {}
       wtime = [0.0, 0.0]
@@ -229,7 +229,6 @@ def tallyStats(statlist, starttime, wallclock):
 
          if bytes[0] and wallclock:
             rate = bytes[0]/MB/wallclock
-            nodes = self._Locations().processes()
             scaling = (stime[0]+utime[0])/wallclock
             newstuff = "New: %g MB/s, %.1f/%dx CPU scaling." % (rate, scaling, nodes)
          else:
@@ -1804,7 +1803,8 @@ and the program re-run.
       for lst in statlists:
          allstats.extend(lst)
 
-      tally = tallyStats(allstats, starttime, wallclock)
+      nodes = self._Locations().processes()
+      tally = tallyStats(allstats, starttime, wallclock, nodes)
       statsfile = open('.fm.stats', 'w')
       cPickle.dump(allstats, statsfile)
       statsfile.close()
