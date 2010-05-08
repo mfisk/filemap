@@ -95,7 +95,7 @@ def plot(filename, pngfile):
       nodes2y[n] = i
       i += 1
 
-   fig = matplotlib.figure.Figure()
+   fig = matplotlib.figure.Figure(figsize=(8,10.5))
    ax = fig.add_subplot(111)
    ax.set_autoscale_on(True)
   
