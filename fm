@@ -1799,20 +1799,25 @@ Has unix "mkdir -p" semantics."""
       """Show all of the jobs still active."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
 
-      tmpdir = tempfile.mkdtemp(prefix='tmp-fm-jobs-')
+      pkls = self._local_pickles(["localjobs"])
+      jobs = {}
+      for mx in pkls:
+         for jname,j in pkls[mx].iteritems():
+            if type(j.cmd) == type([]):
+               j.cmd = string.join(j.cmd)
+            if not jobs.get(jname):
+               jobs[jname] = j
+               j.nodes = [mx]
+            else:
+               jobs[jname].nodes.append(mx)
 
-      self._Locations().get(["/jobs/*", tmpdir], relative=False)
-      fmt = "%-28s %-15s\n                             %s"
-      print fmt % ("Job ID","Command", "Inputs")
-        
-      for f in os.listdir(tmpdir + "/jobs/"):
-         j = FmJob(os.path.join(tmpdir, "jobs", f))
-         if type(j.cmd) == type([]):
-            j.cmd = string.join(j.cmd)
-         print fmt % (f, j.cmd, j.inputs)
+      fmt = "%-28s %-9s %-15s\n                             %s\n                             %s"
+      print fmt % ("Job ID", "User", "Nodes", "Command", "Inputs")
+       
+      for jname,j in jobs.iteritems():
+         j.nodes.sort(cmp=numcmp)
+         print fmt % (jname, j.uid, string.join(j.nodes, ','), j.cmd, j.inputs)
 
-      shutil.rmtree(tmpdir)
-  
    def df(self, args):
       """Show free space on each node."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
@@ -1959,7 +1964,7 @@ and the program re-run.
 
       statlists = self._local_pickles(["localstats"] + statglobs)
       allstats = []
-      for lst in statlists:
+      for lst in statlists.values():
          allstats.extend(lst)
 
       nodecount = self._Locations().processes()
@@ -2052,12 +2057,12 @@ and the program re-run.
       return FmLocalCommands(args)
 
    def _local_pickles(self, args):
-      """Execute a command on each node and return a list of the unpickled output from each node."""
+      """Execute a command on each node and return a dict of the unpickled output from each node (node->output)."""
 
       procs = self._Locations().forAllLocal(args)
       status, ps = procs.collect()
 
-      pickles = []
+      pickles = {}
       
       for p in ps:
          pkl = p.stdout.read()
@@ -2072,7 +2077,7 @@ and the program re-run.
             return 1   # TODO: this value isn't ever expected/handled by the code calling this function
                         # we should return an empty list or check the list contents or at least the
                         # return type after this function is called
-         pickles.append(unpkl)
+         pickles[p.queue] = unpkl
 
       return pickles
 
@@ -2084,9 +2089,10 @@ and the program re-run.
 
       listing = {}
 
-      for files in pkls:
-         for f in files:
+      for nodename in pkls:
+         for f in pkls[nodename]:
             fname = f['name']
+            f['nodename'] = nodename
             if not listing.has_key(fname): 
                listing[fname] = []
             listing[fname] += [f]
@@ -2439,8 +2445,8 @@ class FmLocalCommands(CommandSetBase):
       # Construct the dict that is pickled and passed to the client
       d = {}
       d['name'] = fname
-      d['node'] = self.Locations.thisname
-      d['nodename'] = self.Locations.this.name
+      #d['node'] = self.Locations.thisname
+      #d['nodename'] = self.Locations.this.name
 
       if not fs:
           d['user'] = '?'
@@ -2503,6 +2509,17 @@ class FmLocalCommands(CommandSetBase):
       sys.stdout.write(cPickle.dumps(statlist))
       return 
 
+   def localjobs(self, args):
+      jobs = {}
+      jobdir = self.Locations.this.jobdir
+      for j in os.listdir(self.Locations.this.jobdir):
+         jobs[j] = FmJob(jobdir + "/" + j)
+         jobuid = os.stat(jobdir + "/" + j).st_uid
+         jobs[j].uid = jobuid
+
+      sys.stdout.write(cPickle.dumps(jobs))
+      return
+      
    def localls(self, args):
       os.chdir(self.Locations.this.rootdir)  
       #args = [(a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
