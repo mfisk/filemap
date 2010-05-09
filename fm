@@ -360,6 +360,7 @@ class MethodOptionParser(optparse.OptionParser):
          self.fixed = None
 
       optparse.OptionParser.__init__(self, *args, **kwargs)
+      self.disable_interspersed_args()
 
    def get_usage(self):
       if self.fixed != None:
@@ -725,7 +726,6 @@ locations of this instance."""
    def get(self, args, procs=None, outfile=sys.stdout, relative=True):
       """Copy files from the cloud to local storage."""
       p = MethodOptionParser(fixed="src... dst")
-      p.disable_interspersed_args()
       p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
       p.add_option("-n", "--name", action="store_true", help="Show file name when catting files")
       (options, args) = p.parse_args(args)
@@ -1498,7 +1498,6 @@ their doc strings."""
       if not optParser:  
          optParser = MethodOptionParser()
          optParser.set_usage("""%prog command args...\n""" + self._usage())
-         optParser.disable_interspersed_args()
       (options, args) = optParser.parse_args(args)
    
       if not args: 
@@ -1531,7 +1530,6 @@ http://mfisk.github.com/filemap
       p = MethodOptionParser()
       p.set_usage("""fm command args...\n""" + self._usage())
       p.add_option("-v", "--verbose", action="count", help="Increase verbosity (can be used multiple times)")
-      p.disable_interspersed_args()
       (options, args) = p.parse_args(args)
 
       if options.verbose:
@@ -1704,7 +1702,6 @@ and the program re-run.
 """
 
       p = MethodOptionParser(fixed="cmd [| cmd...]")
-      p.disable_interspersed_args()
       p.add_option("-i", "--inputglob", action="append", help="Glob of input files (in root)")
       p.add_option("-c", "--continuous", action="store_true", help="Continue to look for new input files to arrive")
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
@@ -2221,7 +2218,6 @@ class FmLocalCommands(CommandSetBase):
       p = MethodOptionParser()
       p.set_usage("""fm _local command args...\n""" + self._usage())
       p.add_option("-n", "--node", help="Node name for this node")
-      p.disable_interspersed_args()
       (options, args) = p.parse_args(args)
 
       if options.node:
