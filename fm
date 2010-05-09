@@ -238,13 +238,12 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          if bytes[0] and wallclock:
             rate = bytes[0]/MB/wallclock
             scaling = (stime[0]+utime[0])/wallclock
-            newstuff = "New: %g MB/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
-         else:
-            newstuff = ""
+            print >>sys.stderr, "New: %g MB/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
          
          # Find intervals we were computing over 
          intervals = [(s['timestamp'] - s['time'], s['timestamp']) for s in statlist]
          intervals = collapseIntervals(intervals)
+         #print >>sys.stderr, intervals
 
          if bytes[1]:
             # Find intervals that were before starttime (cached)
@@ -254,19 +253,13 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
                   cacheduration += (end-start)
 
             rate = bytes[1]/MB/cacheduration
-            scaling = (stime[1]+stime[0])/cacheduration
-            cached = "Cached: %g MB/s, %.1fx" % (rate, scaling)
-         else:
-            cached = ""
+            scaling = swtime/cacheduration
+            print >>sys.stderr, "Cached: %g MB/s, %gs, %.1fx" % (rate, cacheduration, scaling)
 
          if True or sbytes and wallclock:
             rate = sbytes/MB/wallclock
             cached = 100*bytes[1]/sbytes
-            fm = "Filemap: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
-         else:
-            fm = "" 
-
-         print >>sys.stderr, string.join([fm, newstuff, cached], '  ')
+            print >>sys.stderr, "Filemap: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
   
 def rm_rf(path):
    for (dirpath,dirs,files) in os.walk(path, topdown=False):
