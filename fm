@@ -55,8 +55,10 @@ except:
    import sha
    sha = sha.sha
 
+# Globals
 Verbose = 0
 RegressionTest = False
+Locations = None
 
 try:
    select.poll
@@ -926,7 +928,7 @@ class Procs:
                print >>sys.stderr, "Still waiting on", string.join(waiting)
 
       if not results:
-         return [None, results]
+         return None, results
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
@@ -1889,7 +1891,9 @@ and the program re-run.
             unpkl = cPickle.loads(pkl)
          except:
             print >>sys.stderr, "Error", sys.exc_value, "parsing remote pickle results:", pkl
-            return -1
+            return -1   # TODO: this value isn't ever expected/handled by the code calling this function
+                        # we should return an empty list or check the list contents or at least the
+                        # return type after this function is called
          pickles.append(unpkl)
 
       return pickles
@@ -1913,15 +1917,12 @@ and the program re-run.
 
    def fs(self, args):
       p = MethodOptionParser(fixed="<dir> [<dir> ...]")
-      p.add_option('-c', '--check', action='store_true', help="Check file system for consistency")
       p.add_option('-r', '--replication', action='store', help="Replication level to check for", default=self._Locations().replication)
       p.add_option('-f', '--fix', action='store_true', help="Fix file system")
       p.add_option('-v', '--verbose', action="count", help="Up verbostiy, more occurrances means higher level")
       p.add_option('-d', '--dryrun', action='store_true', help="Display proposed fix, do not execute")
       (options, args) = p.parse_args(args)
 
-      if not (options.check or options.fix):
-         p.error("an action must be specified")
       options.replication = int(options.replication)
 
       listing = self._ls(args)
@@ -1936,12 +1937,17 @@ and the program re-run.
          if len(listing[i]) > options.replication:
             toomany.add(i)
 
-      if options.check:
-         print total, "files found"
-         print len(toofew), "files don't have enough replication"
-         print len(toomany), "files have too much replication"
-         print total - len(toofew) - len(toomany), "files' replication is just right"
+      print total, "files found"
+      print len(toofew), "files don't have enough replication"
+      print len(toomany), "files have too much replication"
+      print total - len(toofew) - len(toomany), "files' replication is just right"
 
+      if options.dryrun:
+         print "Need to up replication on:"
+         print toofew
+         print "Need to prune replication on:"
+         print toomany
+         sys.exit(0)
 
       if options.fix:
          pass
@@ -2446,4 +2452,6 @@ def multiglob(globs):
       ret += glob.glob(g)
    return ret
 
-FmCommands(sys.argv[1:])
+
+if __name__ == "__main__":
+   FmCommands(sys.argv[1:])
