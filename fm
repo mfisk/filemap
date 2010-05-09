@@ -148,22 +148,30 @@ def collapseIntervals(lst):
       for i in range(0, len(intervals)):
          (start,end) = intervals[i]
          if (sstart <= end and send > end) or (send >= start and sstart < start):
-            # Expand interval
+            # Expand interval (note this may make this interval overlap with one of the ones already in the list)
             start=min(start,sstart)
             end=max(end,send)
+            #print >>sys.stderr, "Changing", intervals[i], "to", (start,end)
             intervals[i] = (start,end)
             found = True
+            break
          elif send <= end and start >=start:
             # Already encompassed
             found = True
       if not found: 
          # Add new interval to list
          intervals.append((sstart,send))
+         #print >>sys.stderr, "Adding", (sstart,send), intervals
+
+   # Repeat until no more merges left
+   while lst != intervals:
+      lst = intervals
+      intervals = collapseIntervals(lst)
 
    return intervals
 
 if RegressionTest:
-   assert(collapseIntervals([(1,3), (2,4), (2,3), (0,2), (5,6), (4,4.5)]) == [(0,4.5), (5,6)])
+   assert(collapseIntervals([(1,3), (2,4), (2,3), (1,4), (0,2), (5,6), (4,4.5)]) == [(0,4.5), (5,6)])
 
 def tallyStats(statlist, starttime, wallclock, nodecount):
       # Tally the stats
