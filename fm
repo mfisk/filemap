@@ -36,6 +36,7 @@ import random
 import re
 import select
 import shlex
+import shutil
 import signal
 import socket
 import socket
@@ -263,13 +264,6 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
             cached = 100*bytes[1]/sbytes
             print >>sys.stderr, "Filemap: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
   
-def rm_rf(path):
-   for (dirpath,dirs,files) in os.walk(path, topdown=False):
-      for f in files: 
-         os.unlink(dirpath + "/" + f)
-
-      os.rmdir(dirpath)
-
 def mkdirexist(path):
    try:
       os.makedirs(path)
@@ -942,7 +936,7 @@ locations of this instance."""
          if options.name and not empty:
             print >>outfile, "======"
 
-         rm_rf(dst)
+         shutil.rmtree(dst)
 
       return procs
 
@@ -1416,7 +1410,7 @@ class JobScheduler:
    
       dst = p.outdirname + "/" + p.outbasename 
       if os.path.exists(dst): 
-          rm_rf(dst)
+          shutil.rmtree(dst)
           # By removing this dst, we're invalidating any previously derived data, but our redo-if-newer-than logic will handle the compute.
 
       os.rename(p.outdirname + "/." + p.outbasename, dst)
@@ -1803,7 +1797,7 @@ Has unix "mkdir -p" semantics."""
             j.cmd = string.join(j.cmd)
          print fmt % (f, j.cmd, j.inputs)
 
-      rm_rf(tmpdir)
+      shutil.rmtree(tmpdir)
   
    def df(self, args):
       """Show free space on each node."""
@@ -1916,7 +1910,7 @@ and the program re-run.
                # Install the jobs on each node
                self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
-            rm_rf(tmpdir)
+            shutil.rmtree(tmpdir)
             tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
             if not starttime:
@@ -1935,7 +1929,7 @@ and the program re-run.
          # Install the jobs on each node
          self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
-      rm_rf(tmpdir)
+      shutil.rmtree(tmpdir)
       if not starttime:
          starttime = time.time()
 
@@ -1984,7 +1978,7 @@ and the program re-run.
                else:
                   sys.stdout.writelines(fh)
                
-         rm_rf(loc)
+         shutil.rmtree(loc)
 
  
    def get(self, *args, **kwargs):
