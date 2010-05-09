@@ -505,8 +505,22 @@ class MethodOptionParser(optparse.OptionParser):
       else:
          self.fixed = None
 
+      self.numrequired = 0
+      if self.fixed:
+         for i in self.fixed:
+            if i[0] != "[":
+               self.numrequired += 1 
+
       optparse.OptionParser.__init__(self, *args, **kwargs)
       self.disable_interspersed_args()
+
+   def parse_args(self, args):
+      (options, args) = optparse.OptionParser.parse_args(self, args)
+      if len(args) < self.numrequired:
+         print >>sys.stderr, "Required argument(s) missing"
+         self.print_help()
+         sys.exit(1)
+      return (options, args)
 
    def get_usage(self):
       if self.fixed != None:
@@ -528,7 +542,7 @@ class MethodOptionParser(optparse.OptionParser):
          if flags:
             options += "[-" + flags + "] "
          
-         self.usage = "%prog " + options + self.fixed
+         self.usage = "%prog " + options + string.join(self.fixed)
 
       return optparse.OptionParser.get_usage(self)
 
@@ -871,7 +885,7 @@ locations of this instance."""
 
    def get(self, args, procs=None, outfile=sys.stdout, relative=True):
       """Copy files from the cloud to local storage."""
-      p = MethodOptionParser(fixed="src... dst")
+      p = MethodOptionParser(fixed=["src...", "dst"])
       p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
       p.add_option("-n", "--name", action="store_true", help="Show file name when catting files")
       (options, args) = p.parse_args(args)
@@ -881,11 +895,9 @@ locations of this instance."""
          rsyncflags += "R"
 
       if options.cat:
-         assert(len(args) > 0)
          dst = tempfile.mkdtemp(prefix="tmp-fm-get-") + "/"
          src = args
       else:
-         assert(len(args) > 1)
          dst = args[-1]
          src = args[:-1]
 
@@ -1700,14 +1712,13 @@ http://mfisk.github.com/filemap
 
       Output files are numbered 1 to n and created in the current directory.
       """
-      p = MethodOptionParser(fixed="infile")
+      p = MethodOptionParser(fixed=["infile"])
       p.add_option("-n", "--nways", help="Number of output files to use")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
       p.add_option("-f", "--field", default=1, help="Use field # (starting with 1).")
       (options, args) = p.parse_args(args)
       options.nways = int(options.nways)
 
-      assert(len(args))
       infile = args[0]
 
       #print >>sys.stderr, "Writing to", ofile
@@ -1752,20 +1763,13 @@ http://mfisk.github.com/filemap
 
    def kill(self, args):
       """Kill a job."""
-      (options, args) = MethodOptionParser(fixed="jobid").parse_args(args)
-      if len(args) < 1:
-         print >>sys.stderr, "Must specify a JobId to kill"
-         return False
+      (options, args) = MethodOptionParser(fixed=["jobid"]).parse_args(args)
       args = ["/jobs/" + a for a in args]
       self._Locations().forAll(["rm", "-f"], args).collect()
 
    def mv(self, args):
       """Rename files in the cloud"""
-      (options, args) = MethodOptionParser(fixed="src... dst").parse_args(args)
-      if len(args) < 2:
-         print >>sys.stderr, "mv requires at least 2 arguments"
-         return False
-
+      (options, args) = MethodOptionParser(fixed=["src...", "dst"]).parse_args(args)
       dst = args[-1]
       each = args[:-1]
       if len(each) > 1: dst += "/"
@@ -1775,7 +1779,7 @@ http://mfisk.github.com/filemap
    def mkdir(self, args, absolutes=[], async=False):
       """Make a directory (or directories) on all nodes.  
 Has unix "mkdir -p" semantics."""
-      (options, args) = MethodOptionParser(fixed="dir...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["dir..."]).parse_args(args)
       # Make sure destination exists
       p = self._Locations().forAll(["mkdir", "-p", "-m", "2775"] + absolutes, args, subst=True, glob=False)
       if not async:
@@ -1783,7 +1787,7 @@ Has unix "mkdir -p" semantics."""
 
    def jobs(self, args):
       """Show all of the jobs still active."""
-      (options, args) = MethodOptionParser(fixed="").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
 
       tmpdir = tempfile.mkdtemp(prefix='tmp-fm-jobs-')
 
@@ -1801,18 +1805,18 @@ Has unix "mkdir -p" semantics."""
   
    def df(self, args):
       """Show free space on each node."""
-      (options, args) = MethodOptionParser(fixed="").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
 
       self._Locations().forAll(["df", "-h"], ["/"]).collect(labelPrint=True)
 
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
-      (options, args) = MethodOptionParser(fixed="mode files...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["mode", "files..."]).parse_args(args)
       self._Locations().forAll(["chmod", args[0]] + absolutes, args[1:], subst=True).collect(ignoreErrors=ignoreErrors)
 
    def chgrp(self, args, absolutes=[]):
       """Change GID on files in the cloud."""
-      (options, args) = MethodOptionParser(fixed="perm files...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["perm", "files..."]).parse_args(args)
       self._Locations().forAll(["chgrp", args[0]] + absolutes, args[1:], subst=True).collect()
 
    def store(self, args):
@@ -1822,9 +1826,8 @@ Has unix "mkdir -p" semantics."""
 
 Copy the specified file(s) into the virtual store.  
 """
-      (options, args) = MethodOptionParser(fixed="files... dst").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["files...", "dst"]).parse_args(args)
 
-      assert(len(args) > 1)
       dst = args[-1]
       args = args[:-1]
       if len(args) > 1:
@@ -1847,7 +1850,7 @@ The -f option says that any previously cached output should be ignored
 and the program re-run.
 """
 
-      p = MethodOptionParser(fixed="cmd [| cmd...]")
+      p = MethodOptionParser(fixed=["cmd [| cmd...]"])
       p.add_option("-i", "--inputglob", action="append", help="Glob of input files (in root)")
       p.add_option("-c", "--continuous", action="store_true", help="Continue to look for new input files to arrive")
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
@@ -1982,30 +1985,30 @@ and the program re-run.
 
  
    def get(self, *args, **kwargs):
-      """Copy one or more files from the cloud ot local storage."""
+      """Copy one or more files from the cloud to local storage."""
       return self._Locations().get(*args, **kwargs)
 
    def replicate(self, args):
       """Replicate the specified files (in the virtual file system) from each node."""
-      (options, args) = MethodOptionParser(fixed="glob...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["glob..."]).parse_args(args)
   
       self._Locations().forAllLocal(["replicate"] + args).collect(labelPrint=True)
 
    def run(self, args):
       """Run a command on each node and print results."""
-      (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["cmd..."]).parse_args(args)
   
       self._Locations().forAll(args, subst=True).collect(labelPrint=True)
 
    def runhost(self, args):
       """Run a command on each unique host and print results."""
-      (options, args) = MethodOptionParser(fixed="cmd...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["cmd..."]).parse_args(args)
 
       self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
 
    def cat(self, args):
       """Concatenate one or more files to stdout."""
-      (options, args) = MethodOptionParser(fixed="files...").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["files..."]).parse_args(args)
 
       procs = self._Locations().forAll(["cat"], args)
       for f in procs.pids.values():
@@ -2056,7 +2059,7 @@ and the program re-run.
             unpkl = cPickle.loads(pkl)
          except:
             print >>sys.stderr, "Error", sys.exc_value, "parsing remote pickle results:", pkl
-            return -1   # TODO: this value isn't ever expected/handled by the code calling this function
+            return 1   # TODO: this value isn't ever expected/handled by the code calling this function
                         # we should return an empty list or check the list contents or at least the
                         # return type after this function is called
          pickles.append(unpkl)
@@ -2081,7 +2084,7 @@ and the program re-run.
       return listing
 
    def fs(self, args):
-      p = MethodOptionParser(fixed="<dir> [<dir> ...]")
+      p = MethodOptionParser(fixed=["<dir>..."])
       p.add_option('-r', '--replication', action='store', help="Replication level to check for", default=self._Locations().replication)
       p.add_option('-f', '--fix', action='store_true', help="Fix file system")
       p.add_option('-v', '--verbose', action="count", help="Up verbostiy, more occurrances means higher level")
@@ -2122,7 +2125,7 @@ and the program re-run.
 
    def ls(self, args):
       """File & directory listing."""
-      p = MethodOptionParser(fixed="files...")
+      p = MethodOptionParser(fixed=["[files...]"])
       p.add_option('-n', '--nodes', action='store_true', help="List names of nodes holding each file")
       p.add_option('-l', '--long', action='store_true', help="Show permissions, nodes, sizes, timestamps, etc.")
       p.add_option('-q', '--decode', action='store_true', help="Replace escaped characters")
@@ -2230,7 +2233,7 @@ and the program re-run.
       """Delete a file or directory tree in the cloud.
 Remove empty file or directory.  Normal rm flags are passed through; -f is implied.
 """
-      p = MethodOptionParser(fixed="files...")
+      p = MethodOptionParser(fixed=["files..."])
       p.add_option('-R', '--recurse', action='store_true', help="recurse")
       (options, args) = p.parse_args(args)
       if options.recurse:
@@ -2246,7 +2249,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
    def init(self, args):
       """Create/correct directory structure.
  If a groupname is specified, it will be applied to the directories."""
-      (options, args) = MethodOptionParser(fixed="[group]").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["[group]"]).parse_args(args)
 
       self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"], async=True)
       if args:
@@ -2590,7 +2593,7 @@ class FmLocalCommands(CommandSetBase):
                if not sl.checkpid() and os.path.isfile(jobfile):
                   print >>sys.stderr, "Error: scheduler exited while job still running.  Dumping log:"
                   sys.stderr.writelines(file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid())))
-                  return -1
+                  return 1
 
          # Wait 
          # XXX: use famd
