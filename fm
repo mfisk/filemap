@@ -341,6 +341,158 @@ def coallesce(outputs, labels):
 
    return result
  
+def multiglob(globs):
+   """Take a list of globs and return a list of all of the files that match any of those globs."""
+
+   assert(type(globs) == type([]))
+   ret = []
+   for g in globs:
+      ret += glob.glob(g)
+   return ret
+
+
+num_re = re.compile('(\d+)')
+
+def numcmp(x, y):
+   xn = num_re.match(x)
+   if not xn: return cmp(x,y)
+   
+   yn = num_re.match(y)
+   if not yn: return cmp(x,y)
+  
+   r = cmp(float(xn.group(0)), float(yn.group(0)))
+   if r == 0:
+      return cmp(x,y)
+   else:
+      return r
+
+def statOverlap(joba, jobb):
+   """Return true iff duration of joba does not overlap with duration of jobb."""
+
+   if jobb['start'] > joba['finish'] or joba['start'] > jobb['finish']:
+      return False
+   return True
+
+def makeVnodes(nodes):
+   # We may have multiple jobs at a time per node (e.g. SMP nodes), so 
+   # treat those as multiple nodes.  Since we don't have an explicity thread id, 
+   # just assign them arbitrarily in a non-overlapping way
+   for nodename in nodes.keys():
+      vnodes = []
+      for job in nodes[nodename]:
+         found = False
+         for vnode in vnodes:
+            conflict = False
+            for j in vnode:
+               if statOverlap(job, j):
+                  #print "Conflict", job, "\nwith", j
+                  conflict = True
+                  break
+            if not conflict:
+               vnode.append(job)
+               found = True
+               break
+         if not found:
+            vnodes.append([job])
+         #print "now", vnodes
+
+      if len(vnodes) < 2:
+         # It was serial, so no virtual nodes required
+         continue
+
+      del nodes[nodename]
+      print "Replacing", nodename, "with", len(vnodes)
+      for i in range(0, len(vnodes)):
+         nodes[nodename + "." + str(i)] = vnodes[i]
+         #print nodes.keys()
+
+   return nodes
+   
+def plot(filename, pngfile):
+   import matplotlib.figure
+   import matplotlib.collections
+   import matplotlib.backends.backend_agg
+   import matplotlib.pyplot as plt
+
+   statsfile = open(filename, 'r')
+   stats = cPickle.load(statsfile)
+   statsfile.close()
+
+   # Load all stats and keep track of min and max inputsizes along the way
+   nodes = {}
+   minsize = 2**31
+   maxsize = 0
+   for s in stats:
+      s['start'] = s['timestamp'] - s['time']
+      s['finish'] = s['timestamp']
+      if not nodes.get(s['nodename']):
+         nodes[s['nodename']] = []
+      nodes[s['nodename']].append(s)
+
+      minsize = min(minsize, s['inputsize'])
+      maxsize = max(maxsize, s['inputsize'])
+
+   nodes = makeVnodes(nodes)
+         
+   nodenames = nodes.keys()
+   nodenames.sort(cmp=numcmp)
+
+   # Build map of nodenames to y coordinates
+   nodes2y = {}
+   i = 0
+   for n in nodenames:
+      nodes2y[n] = i
+      i += 1
+
+   fig = matplotlib.figure.Figure(figsize=(8,10.5))
+   ax = fig.add_subplot(111)
+   ax.set_autoscale_on(True)
+  
+   #l = matplotlib.lines.Line2D([1, 0.8e9], [2,2])
+   #ax.add_line(l)
+   #l = matplotlib.lines.Line2D([1269190522.252409, 1269190522.2774091], [14, 14])
+   #ax.add_line(l)
+
+   lines = []
+   maxsize = math.log(maxsize)
+   if not minsize:
+      minsize = 0
+   else:
+      minsize = math.log(minsize)
+
+   for node in nodes:
+      y = nodes2y[node]
+      for s in nodes[node]:
+
+         finish = s['finish']
+         start = s['start']
+
+         # Size is a log-scal enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
+         insize = s['inputsize']
+         if insize:
+            insize = math.log(insize)
+         else:
+            insize = 0
+         size = (insize-minsize)/(maxsize-minsize)
+   
+         # CPU is % of wallclock time in user or system CPU time
+         if s['time'] == 0:
+            cpu = 1
+         else:
+            cpu = (s['utime'] + s['stime']) / s['time']
+   
+         l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size)
+         ax.add_line(l)
+         lines.append([ (start,y), (finish,y) ])
+
+   ax.autoscale_view()
+   ax.set_yticks(range(0, i))
+   ax.set_yticklabels(nodenames)
+   ax.set_ylim(ymin=-2)
+
+   canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
+   canvas.print_figure(pngfile, dpi=600)
+
 class MethodOptionParser(optparse.OptionParser):
    """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
 
@@ -1866,6 +2018,28 @@ and the program re-run.
             sys.stdout.writelines(f.stdout)
       procs.collect(ignoreErrors=True)
 
+   def plot(self, args):
+      """Plot run-time of a previous map."""
+      (options, args) = MethodOptionParser(fixed="[infile [outfile]]").parse_args(args)
+      infile = ".fm.stats"
+      pngfile = "fmstats.png"
+
+      if args:
+         infile = args[0]
+      else:
+         print >>sys.stderr, "Using %s as default input file" % infile
+   
+      if len(args) > 1:
+         pngfile = args[1]
+      else:
+         print >>sys.stderr, "Using %s as default output file" % pngfile
+   
+      if len(args) > 2:
+         print >>sys.stderr, "Usage: fm plot [<infile> [<outfile>]]"
+         sys.exit(-1)
+   
+      plot(infile, pngfile)
+
    def _local(self, args):
       """This is for slave (remote) instantiations."""
       return FmLocalCommands(args)
@@ -2016,6 +2190,7 @@ and the program re-run.
                      ls[k][j] = None
    
                # Update the nodelist for this base instance
+               nodes.sort(cmp=numcmp)
                base['nodename'] = nodes
    
                # Print out this file
@@ -2438,16 +2613,6 @@ class FmLocalCommands(CommandSetBase):
             return self.redistribute(nextcmd[1:])
          else:
             print >>sys.stderr, "Unknown command following wait: ", nextcmd
-
-def multiglob(globs):
-   """Take a list of globs and return a list of all of the files that match any of those globs."""
-
-   assert(type(globs) == type([]))
-   ret = []
-   for g in globs:
-      ret += glob.glob(g)
-   return ret
-
 
 if __name__ == "__main__":
    FmCommands(sys.argv[1:])
