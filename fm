@@ -1494,33 +1494,33 @@ class FmJob:
       inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
 
       if self.reduce:
-         exts = [os.path.basename(i) for i in inputs]
-         exts = list(set(exts))  # Get unique extensions
+         parts = [os.path.basename(i) for i in inputs]
+         parts = list(set(parts))  # Get unique partitions
 
-         for ext in exts:
+         for part in parts:
             # Don't process .d directories as named inputs (feedback loop)
-            if ext[-2:] == ".d":
+            if part[-2:] == ".d":
                continue
 
-            # Apply all of the files with the same extension,
-            # but only if that extension belongs on this node.
-            choices = Locations.pickn(ext, n=1)
+            # Apply all of the files with the same partition,
+            # but only if that partition belongs on this node.
+            choices = Locations.pickn(part, n=1)
             if Locations.thisname not in choices:
-               #print >>sys.stderr, Locations.thisname, "hashes", ext, "to", list(choices)
+               #print >>sys.stderr, Locations.thisname, "hashes", part, "to", list(choices)
                continue
 
-            #Get list of files with this extension
-            xlen = len(ext)
+            #Get list of files with this partition
+            xlen = len(part)
             files = []
             for i in inputs:
-               if i[-xlen:] == ext:
+               if os.path.basename(i) == part:
                   files.append(i)
 
-            outfilename = "/reduce/" + self.jobname + "/" + ext
+            outfilename = "/reduce/" + self.jobname + "/" + part
 
             p = self.computeItem(files, outfilename, options, procs)
             if p: 
-               #print >>sys.stderr, "Reduce ext", ext, "on node", Locations.thisname, files, "of", self.inputs
+               #print >>sys.stderr, "Reduce part", part, "on node", Locations.thisname, files, "of", self.inputs
 
                return p
 
