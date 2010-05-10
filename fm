@@ -886,7 +886,11 @@ locations of this instance."""
       return procs
 
    def get(self, args, procs=None, outfile=sys.stdout, relative=False):
-      """Copy files from the cloud to local storage."""
+      """Copy files from the cloud to local storage.
+
+Note that if the source is wildcard, then output will be put in a 
+sub-directory of the destination.  The name of that subdirectory 
+will be the directory name preceding the first wildcard."""
       p = MethodOptionParser(fixed=["src... dst"])
       p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
       p.add_option("-n", "--name", action="store_true", help="Show file name when catting files")
@@ -899,6 +903,13 @@ locations of this instance."""
       rsyncflags = "-rptgo"
       if relative:
          rsyncflags += "R"
+
+      # If relative=True, then ssh -R will build a destination tree for you
+      # If relative=False and there is no wildcard, then the file will be put in dst
+      # If relative=False and you use a wildcard, then you will get a tree built in dst
+      # because we move globs to include/excludes and use --recursive
+      # but if your wildcard matches more than one file and the last path component isn't a wildcard, 
+      # then you probably want the tree or else files of the same basename would stomp on each other
 
       if options.cat:
          dst = tempfile.mkdtemp(prefix="tmp-fm-get-") + "/"
