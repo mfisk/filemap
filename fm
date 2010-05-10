@@ -1986,7 +1986,7 @@ and the program re-run.
          else:
             outputglobs += inglobs
          loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
-         self.get(outputglobs + errglobs + [loc])
+         self.get(outputglobs + errglobs + [loc], relative=True)
 
          for (dirpath, dirnames, filenames) in os.walk(loc):
             for f in filenames:
