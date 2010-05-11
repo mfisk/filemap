@@ -1165,7 +1165,7 @@ class Procs:
 
       return errors, results
 
-   def finalize(self, p):
+   def finalizeProc(self, p):
       # Record compute time
       after = os.times()
       p.time = time.time() - p.start
@@ -1273,7 +1273,7 @@ class Procs:
             p = self.pids[pid]
             p.status = status
             p.starttimes = starttimes
-            return self.finalize(p)
+            return self.finalizeProc(p)
 
       except OSError, e:
          if e.errno == errno.ECHILD:
@@ -1284,14 +1284,14 @@ class Procs:
             for p in self.pids.values():
                # First look for things reaped by the signal handler
                if p.__dict__.has_key('error'):
-                  return self.finalize(p)
+                  return self.finalizeProc(p)
 
                # Since the chils is already reaped, we'll probably measure no CPU time for it. oh well
                starttimes = os.times()
                status = p.poll()
                if status != None: 
                   p.status = status
-                  return self.finalize(p)    
+                  return self.finalizeProc(p)    
 
             print >>sys.stderr, "Unexpected: no child", self.pids
             raise
@@ -1437,12 +1437,13 @@ class JobScheduler:
          #print >>sys.stderr, "WAITPID", block, p
          if p:
             self.freethreads += 1
-            self.finalize(p)
+            self.finalizeItem(p)
          else:
             if not block:
                time.sleep(sleep)
 
-   def finalize(self, p):
+   def finalizeItem(self, p):
+      print >>sys.stderr, "finalize item", p, p.pid
       stats = {}
       stats['status'] = p.status
       stats['time'] = p.time
