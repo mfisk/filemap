@@ -1467,8 +1467,6 @@ class JobScheduler:
 
       os.rename(p.outdirname + "/." + p.outbasename, dst)
       p.job.running -= 1 
-
-      del p
      
 class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
