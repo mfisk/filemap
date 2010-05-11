@@ -2036,7 +2036,7 @@ and the program re-run.
          if options.quiet:
             outputglobs = []
          else:
-            outputglobs += inglobs
+            outputglobs = inglobs
          loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
          self.get(outputglobs + errglobs + [loc], relative=True)
 
@@ -2076,17 +2076,23 @@ and the program re-run.
    def runhost(self, args):
       """Run a command on each unique host and print results."""
       (options, args) = MethodOptionParser(fixed=["cmd..."]).parse_args(args)
+       
 
       self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
 
    def cat(self, args):
       """Concatenate one or more files to stdout."""
       (options, args) = MethodOptionParser(fixed=["files..."]).parse_args(args)
-      self.get(["-c"] + args)
+
+      self._Locations().pickHosts().forAll(["cat"], args)
+      (pcount, rprocs) = procs.collect(ignoreErrors=True)
+
+      for f in rprocs:
+         sys.stdout.writelines(f.stdout)
 
    def plot(self, args):
       """Plot run-time of a previous map."""
-      (options, args) = MethodOptionParser(fixed="[infile [outfile]]").parse_args(args)
+      (options, args) = MethodOptionParser(fixed=["[infile [outfile]]"]).parse_args(args)
       infile = ".fm.stats"
       pngfile = "fmstats.png"
 
