@@ -669,8 +669,9 @@ class FmLocations:
          pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
          l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
          l.processes = int(self.config_get(stanza, "processes", "1000"))
-         l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
          l.inactive = self.config_get(stanza, "inactive", False)
+         l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
+         l.dynamicload = self.config_get(stanza, "dynamicload", True)
 
       return l
    
@@ -1346,6 +1347,10 @@ class JobScheduler:
 
       self.freethreads = self.options.processes
 
+      if options.dynamicload:
+         global cpu
+         cpu = CpuProfile()
+
    def ReadJobDir(self):
       """Check for new/removed jobs"""
 
@@ -1377,9 +1382,14 @@ class JobScheduler:
          jobs = self.jobs.keys()
          random.shuffle(jobs)
          for jobname in jobs:
-            j = self.jobs[jobname] 
-            if j.running >= j.threads:
-               continue
+            j = self.jobs[jobname]
+
+            if self.options.dynamicload:
+               if not cpu.available():
+                  continue
+            else: 
+               if j.running >= j.threads:
+                  continue
 
             proc = j.compute(self.options, self.procs)
             #print >>sys.stderr, "Launched", proc
@@ -1467,6 +1477,41 @@ class JobScheduler:
       os.rename(p.outdirname + "/." + p.outbasename, dst)
       p.job.running -= 1 
      
+class CpuProfile():
+   def __init__(self):
+      self.user = 0
+      self.idle = 0
+      self.iowait = 0
+      self.update()
+ 
+   def update(self):
+      fields = open('/proc/stat').readline().split()
+      assert(fields[0] == "cpu")
+      usercpu = int(fields[1])
+      idlecpu = int(fields[4])
+      ioticks = int(fields[5])
+      
+      self.delta_user = usercpu - self.user
+      self.delta_idle = idlecpu - self.idle
+      self.delta_io = ioticks - self.iowait
+
+      self.user = usercpu
+      self.idle = idlecpu
+      self.iowait = ioticks
+
+      if Verbose > 1:
+         print >>sys.stderr, "CPU user", self.delta_user, "idle", self.delta_idle, "I/O", self.delta_io
+ 
+   def available(self):
+      """Return True iff this job has been I/O bound."""
+      self.update()
+
+      if (self.delta_idle > 0) and (self.delta_io < self.delta_user):
+         return True
+      else:
+         return False
+      
+
 class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
@@ -1494,6 +1539,7 @@ class FmJob:
       else:
          self.threads = 1
       self.threads *= cpusPerJob
+
       self.running = 0
 
       if config.has_option("mrjob", "parent"):
