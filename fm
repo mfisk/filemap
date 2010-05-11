@@ -1502,6 +1502,32 @@ class FmJob:
       else:
          self.parent = None
 
+   def iobound_delayacct(self, procs):
+      """Return True iff this job has been I/O bound."""
+      totalio = 0
+      totaluser = 0
+      print >> sys.stderr, procs
+      for p in procs:
+         if p.job == self:
+            status = open('/proc/%d/stat' % p.pid)
+            fields = status.readline().split()
+            ioticks = int(fields[41])
+            usercpu = int(fields[13])
+            print >>sys.stderr, p, p.pid, "ioticks", ioticks, "usercpu", usercpu
+            totalio += ioticks
+            totaluser += usercpu
+     
+      if totaluser == 0:
+         print >>sys.stderr, "iobound", self.jobname, totalio, totaluser
+         return False
+ 
+      ratio = float(totalio/totaluser)
+      print >>sys.stderr, "job", self.jobname, "ratio", ratio
+      if ratio < 0.5:
+         return False
+      
+      return True
+
    def compute(self, options, procs):
       # First time thru we expand the input globs to a file list
       # Unless this is a continuous job, this will be the only time we enumerate the files
