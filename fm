@@ -397,7 +397,7 @@ def makeVnodes(nodes):
          continue
 
       del nodes[nodename]
-      print "Replacing", nodename, "with", len(vnodes)
+      #print "Replacing", nodename, "with", len(vnodes)
       for i in range(0, len(vnodes)):
          nodes[nodename + "." + str(i)] = vnodes[i]
          #print nodes.keys()
@@ -458,6 +458,7 @@ def plot(filename, pngfile):
 
    for node in nodes:
       y = nodes2y[node]
+
       for s in nodes[node]:
 
          finish = s['finish']
@@ -482,8 +483,19 @@ def plot(filename, pngfile):
          lines.append([ (start,y), (finish,y) ])
 
    ax.autoscale_view()
-   ax.set_yticks(range(0, i))
-   ax.set_yticklabels(nodenames)
+  
+   #ax.set_yticks(range(0, i))
+   #ax.set_yticklabels(nodenames)
+
+   majorlabels = []
+   majorlocs = []
+   for n in nodenames:
+      if n.endswith(".0"):
+         majorlabels.append(n.replace(".0",""))
+         majorlocs.append(nodes2y[n])
+   #print >>sys.stderr, "Yticks", majorlocs, majorlabels
+   ax.set_yticks(majorlocs)
+   ax.set_yticklabels(majorlabels)
    ax.set_ylim(ymin=-2)
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
