@@ -1927,7 +1927,7 @@ and the program re-run.
       p.add_option("-i", "--inputglob", action="append", help="Glob of input files (in root)")
       p.add_option("-c", "--continuous", action="store_true", help="Continue to look for new input files to arrive")
       p.add_option("-f", "--fresh", action="store_true", help="Do not use any cached output")
-      p.add_option("-q", "--quiet", action="store_true", help="Do not fetch and display results")
+      p.add_option("-q", "--quiet", action="count", help="Do not fetch and display stdout (or stderr if -qq)")
       p.add_option("-o", "--optimistic", action="store_true", help="Try to run even if there are many failures submitting job")
       p.add_option("-p", "--procspercpu", action="store", help="Number of processes to run per CPU (default=1)", default=1)
       p.add_option("-s", "--statusonly", action="store_true", help="Don't wait for completion; fetch any available results now")
@@ -2032,7 +2032,7 @@ and the program re-run.
       statsfile.close()
 
       # Fetch stdout/stderr               
-      if not options.statusonly:
+      if (not options.statusonly) and (options.quiet < 2):
          if options.quiet:
             outputglobs = []
          else:
