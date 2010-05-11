@@ -1488,6 +1488,7 @@ class FmJob:
       except:
          self.cmd = self.cmd.split()
       self.inputs = config.get("mrjob", "inputs")
+      self.cachedinputs = []
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config.has_option("mrjob", "reduce")
 
@@ -1504,10 +1505,14 @@ class FmJob:
          self.parent = None
 
    def compute(self, options, procs):
-      inputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
+      # First time thru we expand the input globs to a file list
+      # Unless this is a continuous job, this will be the only time we enumerate the files
+      if not self.cachedinputs:
+         self.cachedinputs = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
+         random.shuffle(self.cachedinputs)
 
       if self.reduce:
-         parts = [os.path.basename(i) for i in inputs]
+         parts = [os.path.basename(i) for i in self.cachedinputs]
          parts = list(set(parts))  # Get unique partitions
 
          for part in parts:
@@ -1525,9 +1530,10 @@ class FmJob:
             #Get list of files with this partition
             xlen = len(part)
             files = []
-            for i in inputs:
+            for i in self.cachedinputs:
                if os.path.basename(i) == part:
                   files.append(i)
+            self.cachedinputs = []
 
             outfilename = "/reduce/" + self.jobname + "/" + part
 
@@ -1539,7 +1545,9 @@ class FmJob:
 
          return None # Nothing to do
 
-      for i in inputs:
+      while self.cachedinputs:
+         i = self.cachedinputs.pop()
+
          if i[-2:] == ".d": 
             # Don't process .d directories as named inputs (feedback loop)
             continue
