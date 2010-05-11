@@ -1962,7 +1962,7 @@ and the program re-run.
             break
 
       inglobs = options.inputglob
-      outglobs = []
+      outdirglobs = []
       statglobs = []
       assert (type(inglobs) == type([]))
 
@@ -1999,7 +1999,7 @@ and the program re-run.
       
             reduce = True
 
-         jobname, inglobs = self._MapComponent(cmd, inglobs, outglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
+         jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
       if not options.statusonly:
          # Install the jobs on each node
@@ -2017,8 +2017,8 @@ and the program re-run.
       wallclock = time.time() - starttime
 
       # Get the output files
-      errglobs = [f + "/.stderr" for f in outglobs]
-      statglobs += [f + "/.status" for f in outglobs]
+      errglobs = [f + "/.stderr" for f in outdirglobs]
+      statglobs += [f + "/.status" for f in outdirglobs]
 
       statlists = self._local_pickles(["localstats"] + statglobs)
       allstats = []
