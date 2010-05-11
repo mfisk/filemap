@@ -1571,11 +1571,12 @@ class FmJob:
       syncfile.write(myname)
       syncfile.close()
 
+      success = False
+
       try:
          os.link(myname, lockfilename)
          success = True
       except OSError, e:
-         success = False
          if e.errno != errno.EEXIST:
             os.unlink(myname)
             raise
@@ -1587,44 +1588,59 @@ class FmJob:
     
    def computeItem(self, inputs, outfilename, options, procs):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
-
       if type(inputs) != type([]):
          inputs = [inputs]
 
-      syncfilename = options.syncdir + "/" + outfilename + "/status"
+      obase = options.rootdir + "/" + outfilename
+      statfile = obase + "/" + ".status"
 
-      invalidate = False
+      # We invalidate outputs if inputs are newer, so find the newest input
+      newestinput = 0
+      for i in inputs:
+         newestinput = max(newestinput, os.path.getmtime(i))
+
+      # First check locally to see if output exists and is current
+      if os.path.exists(statfile):
+         lasttime = os.path.getmtime(statfile)
+         if newestinput <= lasttime:
+            #print >>sys.stderr, "Local results current for", statfile
+            return None
+         #print >>sys.stderr, "Old local results", statfile, lasttime, newestinput
+      else: 
+         #print >>sys.stderr, "No local results", statfile
+         pass
+
+      # If we get here, then we're locally prepared to rerun
+      # Check global syncronization to see if another node already ran it
+      syncfilename = options.syncdir + "/" + outfilename + "/status"
       if not self.atomicLink(syncfilename):
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
-            # this file --- unless the inputs are newer than the outputs
-            try:
-               lasttime = os.path.getmtime(syncfilename)
-               redo = False
-               for i in inputs:
-                  if os.path.getmtime(i) > lasttime:
-                     invalidate = True
-                     break
-            except: 
-               traceback.print_exc()
-               print >>sys.stderr, "Skipping file", outfilename
+            # this file --- unless the inputs are newer than the global outputs
+            lasttime = os.path.getmtime(syncfilename)
+            if newestinput > lasttime:
+               #print >>sys.stderr, "Old global results", syncfilename, lasttime, newestinput
+
+               # Invalidate (nuke) the syncfile
+               try:
+                  offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
+                  os.rename(syncfilename, offname)
+                  os.unlink(offname)
+
+                  if not self.atomicLink(syncfilename):
+                     # Somebody else won
+                     return None
+                     
+               except:
+                  # Somebody else was doing this at the same time, let them have it
+                  return None
+            else:
+               # Didn't get lock, don't want to steal it, give up
                return None
 
-            if not invalidate:
-               return None
-               
-            # Invalidate (nuke) the syncfile
-            try:
-               offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
-               os.rename(syncfilename, offname)
-               os.unlink(offname)
-               self.atomicLink(syncfilename)
-            except:
-               # Somebody else was doing this at the same time, let them have it
-               return None
+      #print >>sys.stderr, "Got lock", syncfilename
 
       # Now we hold the "lock" on the syncfile, so proceed...
-      obase = options.rootdir + "/" + outfilename
 
       # Now insert a "." at the beginning of the basename for partial output
       odirname = os.path.dirname(obase)
@@ -1634,9 +1650,15 @@ class FmJob:
       oname = obase + "/stdout"
       ename = obase + "/.stderr"
       mkdirexist(obase)
+      try:
+         os.unlink(obase + "/.status")
+      except:
+         pass
+
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
 
+      # Make a local copy of cmd so we can substitute this input file in it
       cmd = copy.copy(self.cmd)
 
       if '%(input)' in cmd:
