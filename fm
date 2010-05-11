@@ -1443,7 +1443,6 @@ class JobScheduler:
                time.sleep(sleep)
 
    def finalizeItem(self, p):
-      print >>sys.stderr, "finalize item", p, p.pid
       stats = {}
       stats['status'] = p.status
       stats['time'] = p.time
