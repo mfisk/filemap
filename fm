@@ -2285,7 +2285,11 @@ and the program re-run.
 
       keys = ls.keys()
       keys.sort()
-      if not options.long:
+
+      if not sys.stdout.isatty():
+         for i in keys:
+            print i
+      elif not options.long:
          tabulate(keys, int(os.environ.get("COLUMNS", 80)))
 
       else:
