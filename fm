@@ -380,7 +380,6 @@ def numcmp(x, y):
    # Turn each input in to a tokenized list that we can cmp() natively
    xlist = tokenize(x)
    ylist = tokenize(y)
-   print ylist
    r = cmp(xlist, ylist)
    return r
 
