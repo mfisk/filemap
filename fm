@@ -1500,7 +1500,7 @@ class JobScheduler:
       os.rename(p.outdirname + "/." + p.outbasename, dst)
       p.job.running -= 1 
      
-class CpuProfile():
+class CpuProfile:
    def __init__(self):
       self.user = 0
       self.idle = 0
