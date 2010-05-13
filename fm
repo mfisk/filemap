@@ -347,20 +347,39 @@ def multiglob(globs):
    return ret
 
 
-num_re = re.compile('(\d+)')
+num_re = re.compile('^(([\D]+)|(\d+))')
+
+def tokenize(x):
+   xlist = []
+
+   while x:
+      xn = num_re.match(x)
+      if not xn:
+         return x
+      xlen = len(xn.group(0))
+      token = x[:xlen]
+      try:
+         token = int(token)
+      except:
+         pass
+      xlist.append(token)
+      x = x[xlen:]
+
+   return xlist
+
 
 def numcmp(x, y):
-   xn = num_re.match(x)
-   if not xn: return cmp(x,y)
+   """Determine order of x and y (like cmp()), but with special handling for 
+      strings that have non-numeric and/or numeric substrings.  Numeric 
+      substrings are ordered numerically even if they have differing numbers 
+      of digits."""
    
-   yn = num_re.match(y)
-   if not yn: return cmp(x,y)
-  
-   r = cmp(float(xn.group(0)), float(yn.group(0)))
-   if r == 0:
-      return cmp(x,y)
-   else:
-      return r
+   # Turn each input in to a tokenized list that we can cmp() natively
+   xlist = tokenize(x)
+   ylist = tokenize(y)
+   print ylist
+   r = cmp(xlist, ylist)
+   return r
 
 def statOverlap(joba, jobb):
    """Return true iff duration of joba does not overlap with duration of jobb."""
@@ -385,10 +404,12 @@ def makeVnodes(nodes):
                   conflict = True
                   break
             if not conflict:
+               # Does not overlap with any job in this vnode, so put it here
                vnode.append(job)
                found = True
                break
          if not found:
+            # Make new node
             vnodes.append([job])
          #print "now", vnodes
 
