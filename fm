@@ -325,13 +325,16 @@ def coallesce(outputs, labels):
 
    for i in range(0, len(outputs)):
       if outputs[i]:
-         header = ""
-         header = labels[i]
+         header = [labels[i]]
          for j in range(i+1, len(outputs)):
             if outputs[j] and outputs[i].getvalue() == outputs[j].getvalue():
-               header += "," + labels[j]
+               header.append(labels[j])
                outputs[j] = None
+
+         header.sort(cmp=numcmp)
+         header = string.join(header, ',')
          header += ": "
+         
          for line in outputs[i]:
             result += header + line
 
@@ -2368,7 +2371,7 @@ and the program re-run.
          if len(nodes) == len(self._Locations().locs):
             nodes = '*'
          else:
-            nodes.sort()
+            nodes.sort(cmp=numcmp)
             nodes = string.join(nodes,',')
       else:
          nodes = len(nodes)
