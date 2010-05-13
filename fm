@@ -845,7 +845,7 @@ locations of this instance."""
 
       return self.procs
    
-   def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False):
+   def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False, all2all=False):
       origdst = dst
       if not procs:
          procs = Procs()
@@ -911,13 +911,27 @@ locations of this instance."""
 
             qname[d] = loc.qname
 
-      for dst in bydst:
-         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr] + bydst[dst] + [dst]
-         procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
+      dsts = bydst.keys()
+      random.shuffle(dsts)
+      for dst in dsts:
+         if all2all:
+            queue = "all2all"
+         else:
+            queue = qname[dst]  
 
-      for dst in bydstrel:
+         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr] + bydst[dst] + [dst]
+         procs.Popen(cmd, queue=queue, node=qname[dst], tag="put %s %s" % (srclist, origdst))
+
+      dsts = bydstrel.keys()
+      random.shuffle(dsts)
+      for dst in dsts:
+         if all2all:
+            queue = "all2all"
+         else:
+            queue = qname[dst]  
+
          cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
-         procs.Popen(cmd, queue=qname[dst], tag="put %s %s" % (srclist, origdst))
+         procs.Popen(cmd, queue=queue, node=qname[dst], tag="put %s %s" % (srclist, origdst))
 
       return procs
 
@@ -1052,7 +1066,7 @@ class Procs:
       proc.kwargs = kwargs
       return proc
 
-   def PopenNow(self, cmdv=[], prefix=None, stderr=subprocess.PIPE, stdout=subprocess.PIPE, call=False, tag=None, queue=None, stdinstr=None, cwd=None, retries=0):
+   def PopenNow(self, cmdv=[], prefix=None, stderr=subprocess.PIPE, stdout=subprocess.PIPE, call=False, tag=None, queue=None, node=None, stdinstr=None, cwd=None, retries=0):
       # This function should only be called by PopenSave
 
       # Note, we prefer to have a stdout so that poll() can tell when it closes and then reap the child
@@ -1091,9 +1105,14 @@ class Procs:
       r.tag = tag
       r.start = time.time()
       r.queue = queue
+
+      if queue and not node:
+         node = queue
+      r.node = node
+
       self.pids[r.pid] = r
       if Verbose > 2:
-         print >>sys.stderr, r.pid, cmdv, r.queue
+         print >>sys.stderr, r.pid, cmdv, r.node
 
       if stdinstr:
          r.stdin.write(stdinstr)
@@ -1162,7 +1181,7 @@ class Procs:
             for p in results:
                deviations = (p.time - mean) / stddev
                if deviations > 2:
-                  print >>sys.stderr, "Node %s slow by %g standard deviations" % (p.queue, deviations)
+                  print >>sys.stderr, "Node %s slow by %g standard deviations" % (p.node, deviations)
 
             print >>sys.stderr, "Average time %gs, stddev %gs %s" % (mean, stddev, tag)
 
@@ -1176,9 +1195,9 @@ class Procs:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
             
       if labelPrint:
-         sys.stdout.write(coallesce([f.stdout for f in results], [f.queue for f in results]))
+         sys.stdout.write(coallesce([f.stdout for f in results], [f.node for f in results]))
       if labelPrint or Verbose > 0:
-         sys.stderr.write(coallesce([f.stderr for f in results], [f.queue for f in results]))
+         sys.stderr.write(coallesce([f.stderr for f in results], [f.node for f in results]))
 
       if Verbose > 0:
          print >>sys.stderr, "---"
@@ -2557,12 +2576,12 @@ class FmLocalCommands(CommandSetBase):
 
    def replicate(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, all2all=True).collect()
       return errors
 
    def redistribute(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=1, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=1, all2all=True, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
