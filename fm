@@ -1701,7 +1701,10 @@ class FmJob:
 
       # If we get here, then we're locally prepared to rerun
       # Check global syncronization to see if another node already ran it
-      syncfilename = options.syncdir + "/" + outfilename + "/status"
+      filenamehash = printableHash(outfilename)
+      topdir = filenamehash[:2]
+      secdir = filenamehash[2:4]
+      syncfilename = options.syncdir + "/" + topdir + "/" + secdir + "/" + outfilename + "/status"
       if not self.atomicLink(syncfilename):
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
