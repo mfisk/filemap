@@ -2027,12 +2027,19 @@ and the program re-run.
 
       cmdwords = shlex.split(string.join(cmd))
       cmds = []
+      # parse/replace pipe and reduce operators         
+      # |>  redistribute, then reduce; reduce inputs on argv
+      # |<  redistribute, then reduce; reduce inputs on argv
+      # |>. redistribute, then reduce; reduce inputs on stdin
+      # |<. redistribute, then reduce; reduce inputs on stdin
+      # |<> cmd and |<.> cmd lead to |< cmd |> cmd and |<. cmd |>. cmd respectively
       while True:
-         if "|>" in cmdwords:
-            idx = cmdwords.index("|>")
-            cmdwords.insert(idx+1, ">")
-            cmdwords[idx] = "|"
-            continue
+         for (longsymbol, shortsymbol) in [("|>",">"),("|<","<"), ("|>.",">."),("|<.","<."), ("|<>","<>"), ("|<.>","<.>")]:
+            if longsymbol in cmdwords:
+               idx = cmdwords.index(longsymbol)
+               cmdwords.insert(idx+1, shortsymbol)
+               cmdwords[idx] = "|"
+               continue
         
          if "|" in cmdwords:
             idx = cmdwords.index("|")
@@ -2047,6 +2054,19 @@ and the program re-run.
                break
             cmds.append(cmdwords)
             break
+
+      # fix that syntactic sugar mentioned above
+      for unit in cmds:
+         if unit[0] == "<.>":
+            idx = cmds.index(unit)
+            cmds.insert(idx+1, copy.copy(unit))
+            cmds[idx][0] = "<."
+            cmds[idx+1][0] = ">."
+         if unit[0] == "<>":
+            idx = cmds.index(unit)
+            cmds.insert(idx+1, copy.copy(unit))
+            cmds[idx][0] = "<"
+            cmds[idx+1][0] = ">"
 
       inglobs = options.inputglob
       outdirglobs = []
@@ -2066,8 +2086,13 @@ and the program re-run.
       for cmd in cmds:
          reduce = False
 
-         if cmd[0] == ">":
-            cmd = cmd[1:]
+         if cmd[0] == ">" or cmd[0] == "<":
+            if cmd[1] == ".":
+                reduce = cmd[:2]
+                cmd = cmd[2:]
+            else:
+                reduce = cmd[0]
+                cmd = cmd[1:]
 
             if not options.statusonly:
                # Install the jobs on each node
@@ -2084,7 +2109,6 @@ and the program re-run.
                   print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
       
-            reduce = True
 
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
@@ -2436,7 +2460,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          jobdesc += "continuous = True\n"
 
       if reduce:
-         jobdesc += "reduce = True\n"
+         jobdesc += "reduce = %s\n" % (reduce)
 
       h = printableHash(jobdesc)
       jobfilename = tmpdir + h
