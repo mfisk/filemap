@@ -1574,7 +1574,7 @@ class FmJob:
       self.inputs = config.get("mrjob", "inputs")
       self.cachedinputs = []
       self.continuous = config.has_option("mrjob", "continuous")
-      self.reduce = config.has_option("mrjob", "reduce")
+      self.reduce = config.get("mrjob", "reduce")
 
       if config.has_option("mrjob", "procspercpu"):
          self.threads = int(config.get("mrjob", "procspercpu"))
@@ -1599,6 +1599,9 @@ class FmJob:
       if self.reduce:
          parts = [os.path.basename(i) for i in self.cachedinputs]
          parts = list(set(parts))  # Get unique partitions
+         putargs = "argv"
+         if "stdin" in self.reduce:
+            putargs = "stdin"
 
          for part in parts:
             # Don't process .d directories as named inputs (feedback loop)
@@ -1608,9 +1611,11 @@ class FmJob:
             # Apply all of the files with the same partition,
             # but only if that partition belongs on this node.
             choices = Locations.pickn(part, n=1)
-            if Locations.thisname not in choices:
-               #print >>sys.stderr, Locations.thisname, "hashes", part, "to", list(choices)
-               continue
+
+            if "part" in self.reduce:
+                if Locations.thisname not in choices:
+                   #print >>sys.stderr, Locations.thisname, "hashes", part, "to", list(choices)
+                   continue
 
             #Get list of files with this partition
             xlen = len(part)
@@ -1622,10 +1627,9 @@ class FmJob:
 
             outfilename = "/reduce/" + self.jobname + "/" + part
 
-            p = self.computeItem(files, outfilename, options, procs)
+            p = self.computeItem(files, outfilename, options, procs, putargs=putargs)
             if p: 
                #print >>sys.stderr, "Reduce part", part, "on node", Locations.thisname, files, "of", self.inputs
-
                return p
 
          return None # Nothing to do
@@ -1671,7 +1675,7 @@ class FmJob:
 
       return success
     
-   def computeItem(self, inputs, outfilename, options, procs):
+   def computeItem(self, inputs, outfilename, options, procs, putargs="argv"):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
       if type(inputs) != type([]):
          inputs = [inputs]
@@ -1746,19 +1750,25 @@ class FmJob:
       # Make a local copy of cmd so we can substitute this input file in it
       cmd = copy.copy(self.cmd)
 
-      if '%(input)' in cmd:
-         idx = cmd.index('%(input)')
-         cmd[idx:idx+1] = inputs
+      if putargs == "argv":
+          if '%(input)' in cmd:
+             idx = cmd.index('%(input)')
+             cmd[idx:idx+1] = inputs
+          else:
+             cmd += inputs
       else:
-         cmd += inputs
-    
+          inputs = "\n".join(inputs)
+        
       if cmd[0] == "fm":
          cmd = options.fmcmd + cmd[1:]
 
       cmd = [os.path.expanduser(c) for c in cmd]
  
       try:
-         p = procs.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
+         if putargs == "argv":
+             p = procs.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
+         if putargs == "stdin":
+             p = procs.Popen(cmd, stdinstr=inputs, stdout=sout, stderr=serr, cwd=obase)
       except:
          #print >>serr, "Error", sys.exc_value, "executing", cmd
          print >>sys.stderr, "Error", sys.exc_value, "executing", cmd
@@ -2034,7 +2044,7 @@ and the program re-run.
       # |<. redistribute, then reduce; reduce inputs on stdin
       # |<> cmd and |<.> cmd lead to |< cmd |> cmd and |<. cmd |>. cmd respectively
       while True:
-         for (longsymbol, shortsymbol) in [("|>",">"),("|<","<"), ("|>.",">."),("|<.","<."), ("|<>","<>"), ("|<.>","<.>")]:
+         for (longsymbol, shortsymbol) in [("|>","__partargv__"),("|<","__allargv__"), ("|>.","__partstdin__"),("|<.","__allstdin__"), ("|<>","<>"), ("|<.>","<.>")]:
             if longsymbol in cmdwords:
                idx = cmdwords.index(longsymbol)
                cmdwords.insert(idx+1, shortsymbol)
@@ -2060,13 +2070,15 @@ and the program re-run.
          if unit[0] == "<.>":
             idx = cmds.index(unit)
             cmds.insert(idx+1, copy.copy(unit))
-            cmds[idx][0] = "<."
-            cmds[idx+1][0] = ">."
+            cmds[idx][0] = "__allstdin__"
+            cmds[idx+1][0] = "__partstdin__"
+            cmds.insert(idx+1, ["__redistribute__"])
          if unit[0] == "<>":
             idx = cmds.index(unit)
             cmds.insert(idx+1, copy.copy(unit))
-            cmds[idx][0] = "<"
-            cmds[idx+1][0] = ">"
+            cmds[idx][0] = "__allargv__"
+            cmds[idx+1][0] = "__partargv__"
+            cmds.insert(idx+1, ["__redistribute__"])
 
       inglobs = options.inputglob
       outdirglobs = []
@@ -2086,14 +2098,12 @@ and the program re-run.
       for cmd in cmds:
          reduce = False
 
-         if cmd[0] == ">" or cmd[0] == "<":
-            if cmd[1] == ".":
-                reduce = cmd[:2]
-                cmd = cmd[2:]
-            else:
-                reduce = cmd[0]
-                cmd = cmd[1:]
+         if cmd[0] in ["__partargv__","__allargv__","__partstdin__","__allstdin__"]:
+            reduce = cmd[0]
+            cmd = cmd[1:]
 
+         # if reduce is what we're checking for here
+         if cmd[0] == "__redistribute__":
             if not options.statusonly:
                # Install the jobs on each node
                self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
@@ -2108,8 +2118,8 @@ and the program re-run.
                if Verbose > 0:
                   print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
+               continue     # XXX i don't think this works...
       
-
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu))
 
       if not options.statusonly:
