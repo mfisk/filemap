@@ -352,7 +352,7 @@ def multiglob(globs):
 
 num_re = re.compile('^(([\D]+)|(\d+))')
 
-def tokenize(x):
+def numcmptokenize(x):
    xlist = []
 
    while x:
@@ -378,8 +378,8 @@ def numcmp(x, y):
       of digits."""
    
    # Turn each input in to a tokenized list that we can cmp() natively
-   xlist = tokenize(x)
-   ylist = tokenize(y)
+   xlist = numcmptokenize(x)
+   ylist = numcmptokenize(y)
    r = cmp(xlist, ylist)
    return r
 
