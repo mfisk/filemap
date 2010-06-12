@@ -144,6 +144,11 @@ def tabulate(lst, width, ncols=None):
       print line
 
 def rewriteList(lst, f):
+   """Apply a function to each element in a list.
+      If the function returns None, use the original item.
+      If the function returns a Tuple, replace with _contents_ of tuple. 
+      Else replace the element with what the function returns.
+   """
    ret = []
    for l in lst:
       out = f(l)
