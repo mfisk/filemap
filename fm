@@ -691,6 +691,8 @@ class FmLocations:
       # Use global config values by default (thisis() can override later)
       self.this = self.parseLocation("global")
 
+      self.locker = FileSynchronizer(self)
+
    def __del__(self):
       if self.cleanup:
          os.unlink(self.cleanup)
@@ -1411,12 +1413,12 @@ class Procs:
 class JobScheduler:
    """JobScheduler maintains a set of child processes working on a set of jobs."""
 
-   def __init__(self, options):
+   def __init__(self, locs):
       self.jobs = {}  # A dictionary of job objects indexed by job name
       self.procs = Procs(retries=0)
-      self.options = options
-
+      self.options = locs.this
       self.freethreads = self.options.processes
+      self.locker = FileSynchronizer(locs)
 
       if options.dynamicload:
          global cpu
@@ -1439,7 +1441,7 @@ class JobScheduler:
             #print >>sys.stderr, "Skipping job owned by UID %d", jobuid
             continue
          try:
-            self.jobs[j] = FmJob(self.options.jobdir + "/" + j, cpusPerJob=self.options.cpusperjob)
+            self.jobs[j] = FmJob(self.options.jobdir + "/" + j, cpusPerJob=self.options.cpusperjob, locker=self.locker)
          except:
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
@@ -1587,7 +1589,9 @@ class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
     provides methods for identifying and processing inputs for that job."""
 
-   def __init__(self, fname, cpusPerJob = 1):
+   def __init__(self, fname, cpusPerJob = 1, locker = None):
+      self.locker = locker
+
       config = ConfigParser.SafeConfigParser()
 
       processed = config.read(fname)
@@ -1681,29 +1685,6 @@ class FmJob:
 
       return None # Nothing to do
 
-   def atomicLink(self, lockfilename):
-      myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
-      mkdirexist(os.path.dirname(lockfilename))
-
-      syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
-      syncfile.write(myname)
-      syncfile.close()
-
-      success = False
-
-      try:
-         os.link(myname, lockfilename)
-         success = True
-      except OSError, e:
-         if e.errno != errno.EEXIST:
-            os.unlink(myname)
-            raise
-
-      # Get rid of private name for it, successful or not
-      os.unlink(myname)
-
-      return success
-    
    def computeItem(self, inputs, outfilename, options, procs, putargs="argv"):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
       if type(inputs) != type([]):
@@ -1729,36 +1710,9 @@ class FmJob:
          pass
 
       # If we get here, then we're locally prepared to rerun
-      # Check global syncronization to see if another node already ran it
-      filenamehash = printableHash(outfilename)
-      outfilepath, outfilebase = os.path.split(outfilename)
-      topdir = filenamehash[:2]
-      secdir = filenamehash[2:4]
-      syncfilename = options.syncdir + "/" outfilepath + "/" + topdir + "/" + secdir + "/" + outfilebase + "/status"
-      if not self.atomicLink(syncfilename):
-            # This is a common case; somebody has already grabbed
-            # the synchronization file, so we don't need to process
-            # this file --- unless the inputs are newer than the global outputs
-            lasttime = os.path.getmtime(syncfilename)
-            if newestinput > lasttime:
-               #print >>sys.stderr, "Old global results", syncfilename, lasttime, newestinput
-
-               # Invalidate (nuke) the syncfile
-               try:
-                  offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
-                  os.rename(syncfilename, offname)
-                  os.unlink(offname)
-
-                  if not self.atomicLink(syncfilename):
-                     # Somebody else won
-                     return None
-                     
-               except:
-                  # Somebody else was doing this at the same time, let them have it
-                  return None
-            else:
-               # Didn't get lock, don't want to steal it, give up
-               return None
+      # Check global synchronization to see if another node already ran it
+      if not self.locker.lock(outfilename):
+          return None
 
       #print >>sys.stderr, "Got lock", syncfilename
 
@@ -1873,6 +1827,78 @@ their doc strings."""
    def _optionHook(self, optParser):
       pass
 
+class FileSynchronizer:
+    def init(self, locs):
+        self.locs = locs
+        self.syncdir = locs.this.syncdir
+
+    def unlock(self, lst):
+        # Delete sync files so that computation is forced to (re-)execute
+        # These files are shared, so we pick a minimum number of nodes to do this on
+        syncfiles = [self._filename2lock(i) for i in syncfiles]
+        self.locs.pick().forAll(["rm", "-f"], syncfiles, absolute=True, subst=True).collect()
+
+    def lock(self, filename):
+        syncfilename = _filename2lock(filename)
+        if not self._atomicLink(syncfilename):
+            # This is a common case; somebody has already grabbed
+            # the synchronization file, so we don't need to process
+            # this file --- unless the inputs are newer than the global outputs
+            lasttime = os.path.getmtime(syncfilename)
+            if newestinput > lasttime:
+               #print >>sys.stderr, "Old global results", syncfilename, lasttime, newestinput
+
+               # Invalidate (nuke) the syncfile
+               try:
+                  offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
+                  os.rename(syncfilename, offname)
+                  os.unlink(offname)
+
+                  if not self.atomicLink(syncfilename):
+                     # Somebody else won
+                     return None
+                     
+               except:
+                  # Somebody else was doing this at the same time, let them have it
+                  return None
+            else:
+               # Didn't get lock, don't want to steal it, give up
+               return None
+
+
+    def _atomicLink(self, lockfilename):
+        myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
+        mkdirexist(os.path.dirname(lockfilename))
+
+        syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
+        syncfile.write(myname)
+        syncfile.close()
+  
+        success = False
+  
+        try:
+            os.link(myname, lockfilename)
+            success = True
+        except OSError, e:
+            if e.errno != errno.EEXIST:
+                os.unlink(myname)
+                raise
+
+        # Get rid of private name for it, successful or not
+        os.unlink(myname)
+  
+        return success
+   
+    def _filename2lock(filename):
+        outfilepath, outfilebase = os.path.split(filename)
+
+        filenamehash = printableHash(filename)
+        topdir = filenamehash[:2]
+        secdir = filenamehash[2:4]
+
+        syncfilename = self.syncdir + "/" + outfilepath + "/" + topdir + "/" + secdir + "/" + outfilebase + "/status"
+        return syncfilename
+        
 class FmCommands(CommandSetBase):
    def __init__(self, args):
       """FileMap is a file-based map-reduce system.  
@@ -2475,10 +2501,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       else:
          options = []
 
-      # Assumes shared space
       self._Locations().forAll(["rm", "-f"] + options, args).collect()
-      self._Locations().pick(n=1).forAll(["rm", "-f"] + options + ["%(SYNCDIR)/" + f for f in args], subst=True).collect()
-
+      self._Locations().locker.unlock(args)
 
    def init(self, args):
       """Create/correct directory structure.
@@ -2523,13 +2547,9 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          #XXX lower latency to accumulate these up to map() and let it do a bulk delete
 
          if reduce:
-            syncfiles = ["%(SYNCDIR)/reduce/" + h + "/*"]
+            self._Locations().locker.unlock(['/reduce/' + h + '/*'])
          else:
-            syncfiles = ["%(SYNCDIR)/" + g + ".d/" + escape(cmd) + "/status" for g in inglobs] 
-
-         # Delete sync files so that computation is forced to (re-)execute
-         # These files are shared, so we pick a minimum number of nodes to do this on
-         self._Locations().pick().forAll(["rm", "-f"], syncfiles, absolute=True, subst=True).collect()
+            self._Locations().locker.unlock([g + ".d/" + escape(cmd) + "/status" for g in inglobs])
 
          # Also delete previous output so that it doesn't keep getting used
          # (In the case of replication, a node may not replace the old output with new output
@@ -2775,7 +2795,7 @@ class FmLocalCommands(CommandSetBase):
       """Start a scheduler for this node."""
 
       sl = SchedLock(self.Locations.this.rootdir)
-      s = JobScheduler(self.Locations.this)
+      s = JobScheduler(self.Locations)
 
       f = file(os.devnull)
       os.dup2(f.fileno(), 0)
