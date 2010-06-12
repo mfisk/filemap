@@ -143,6 +143,30 @@ def tabulate(lst, width, ncols=None):
       line = line.rstrip()
       print line
 
+def rewriteList(lst, f):
+   ret = []
+   for l in lst:
+      out = f(l)
+      if out == None:
+         ret.append(l)
+      elif type(out) == type(()):
+         for i in out:
+            ret.append(i)
+      else:
+         ret.append(out)
+   return ret
+
+if RegressionTest:
+   def rewriteTest(item):
+      if item == 1: return 2
+      if item == 2: return 'a','b'
+      if item == 3: return ['a', 'b']
+      if item == 4: return ()
+      return
+
+   assert( rewriteList([1,2,3,4,5], rewriteTest1) == [2, 'a', 'b', ['a', 'b'], 5])
+
+  
 def collapseIntervals(lst):
    """Take list of (start,end) interval tuples and return a similar list with all overlapping intervals combined."""
    intervals = []
