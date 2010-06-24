@@ -284,9 +284,10 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
                if end < starttime:
                   cacheduration += (end-start)
 
-            rate = bytes[1]/MB/cacheduration
-            scaling = swtime/cacheduration
-            print >>sys.stderr, "Cached: %g MB/s, %gs, %.1fx" % (rate, cacheduration, scaling)
+            if cacheduration:
+               rate = bytes[1]/MB/cacheduration
+               scaling = swtime/cacheduration
+               print >>sys.stderr, "Cached: %g MB/s, %gs, %.1fx" % (rate, cacheduration, scaling)
 
          if True or sbytes and wallclock:
             rate = sbytes/MB/wallclock
@@ -709,10 +710,11 @@ class FmLocations:
       l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync -tO", raw=True), comments=True)
       l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
 
+      l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
+
       if l.name != "global": 
          l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
          l.hostname = self.config_get(stanza, "hostname")
-         l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
 
          l.jobdir = l.rootdir + "/jobs"
          if qbyhost:
@@ -1420,7 +1422,7 @@ class JobScheduler:
       self.freethreads = self.options.processes
       self.locker = FileSynchronizer(locs)
 
-      if options.dynamicload:
+      if self.options.dynamicload:
          global cpu
          cpu = CpuProfile()
 
@@ -1607,7 +1609,9 @@ class FmJob:
       self.inputs = config.get("mrjob", "inputs")
       self.cachedinputs = []
       self.continuous = config.has_option("mrjob", "continuous")
-      self.reduce = config.get("mrjob", "reduce")
+      self.reduce = None
+      if config.has_option("mrjob", "reduce"):
+         self.reduce = config.get("mrjob", "reduce")
 
       if config.has_option("mrjob", "procspercpu"):
          self.threads = int(config.get("mrjob", "procspercpu"))
@@ -1711,7 +1715,7 @@ class FmJob:
 
       # If we get here, then we're locally prepared to rerun
       # Check global synchronization to see if another node already ran it
-      if not self.locker.lock(outfilename):
+      if not self.locker.lock(outfilename, newestinput):
           return None
 
       #print >>sys.stderr, "Got lock", syncfilename
@@ -1828,18 +1832,19 @@ their doc strings."""
       pass
 
 class FileSynchronizer:
-    def init(self, locs):
+    def __init__(self, locs):
         self.locs = locs
         self.syncdir = locs.this.syncdir
 
     def unlock(self, lst):
         # Delete sync files so that computation is forced to (re-)execute
         # These files are shared, so we pick a minimum number of nodes to do this on
-        syncfiles = [self._filename2lock(i) for i in syncfiles]
+        syncfiles = [self._filename2lock(i) for i in lst]
         self.locs.pick().forAll(["rm", "-f"], syncfiles, absolute=True, subst=True).collect()
 
-    def lock(self, filename):
-        syncfilename = _filename2lock(filename)
+    def lock(self, filename, newestinput):
+        filename = filename.replace("//", "/")
+        syncfilename = self._filename2lock(filename)
         if not self._atomicLink(syncfilename):
             # This is a common case; somebody has already grabbed
             # the synchronization file, so we don't need to process
@@ -1865,6 +1870,8 @@ class FileSynchronizer:
                # Didn't get lock, don't want to steal it, give up
                return None
 
+        return True
+
 
     def _atomicLink(self, lockfilename):
         myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
@@ -1889,12 +1896,16 @@ class FileSynchronizer:
   
         return success
    
-    def _filename2lock(filename):
+    def _filename2lock(self, filename):
         outfilepath, outfilebase = os.path.split(filename)
 
         filenamehash = printableHash(filename)
-        topdir = filenamehash[:2]
-        secdir = filenamehash[2:4]
+        if '*' in filename:
+           topdir = '*'
+           secdir = '*'
+        else:
+           topdir = filenamehash[:2]
+           secdir = filenamehash[2:4]
 
         syncfilename = self.syncdir + "/" + outfilepath + "/" + topdir + "/" + secdir + "/" + outfilebase + "/status"
         return syncfilename
@@ -2231,6 +2242,8 @@ and the program re-run.
                      print >>sys.stderr, '===', fname, '==='
                      sys.stderr.writelines(fh)
                      print >>sys.stderr, '====='
+               elif f == ".status":
+                  pass
                else:
                   sys.stdout.writelines(fh)
                
@@ -2549,7 +2562,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          if reduce:
             self._Locations().locker.unlock(['/reduce/' + h + '/*'])
          else:
-            self._Locations().locker.unlock([g + ".d/" + escape(cmd) + "/status" for g in inglobs])
+            self._Locations().locker.unlock([g + ".d/" + escape(cmd) for g in inglobs])
 
          # Also delete previous output so that it doesn't keep getting used
          # (In the case of replication, a node may not replace the old output with new output
