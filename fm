@@ -919,7 +919,12 @@ locations of this instance."""
                   seed = dst + "/" + src
                else:
                   seed = dst + "/" + seed
-            choices = self.pickn(seed=seed, n=pickn)
+
+            if n == True: # use default n
+               choices = self.pickn(seed=seed, n=pickn)
+            else:
+               choices = self.pickn(seed=seed)
+
             choices = [self.locs[c] for c in choices]
          else:
             choices = self.locs.values()
