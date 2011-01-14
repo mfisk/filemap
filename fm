@@ -920,9 +920,10 @@ locations of this instance."""
                else:
                   seed = dst + "/" + seed
 
-            if n == True: # use default n
+            if pickn != True: 
                choices = self.pickn(seed=seed, n=pickn)
             else:
+               # use default n
                choices = self.pickn(seed=seed)
 
             choices = [self.locs[c] for c in choices]
