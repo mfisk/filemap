@@ -1561,9 +1561,7 @@ class JobScheduler:
 class CpuProfile:
    def __init__(self, interval):
       self.interval = interval
-      self.user = 0
       self.idle = 0
-      self.iowait = 0
       self.total = 0
       self.HZ = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
 
@@ -1576,21 +1574,20 @@ class CpuProfile:
       total = sum(fields)
 
       # Make sure our update is large enough to be meaningful
-      # Arbitrarily use 100 jiffies for now
-      duration = (total - self.total)/self.HZ
-      if duration < self.interval:
+      duration = float(total - self.total)
+      if duration/self.HZ < self.interval:
          if Verbose > 2:
-            print >>sys.stderr, "DynamicLoad: Sleeping to gather more stats"
-	 time.sleep(self.interval - duration)
-	 return self.update()
+            print >>sys.stderr, "DynamicLoad: Waiting to gather more stats"
+            # We don't sleep since we're called by RunOnce which is an event management loop
+	 return False
       
       idlecpu = fields[3]
 
-      self.idle_fraction = (idlecpu - self.idle) / float(duration)
+      self.idle_fraction = (idlecpu - self.idle) / duration
 
       if Verbose > 1:
 	 duration = total - self.total
-         print >>sys.stderr, "DynamicLoad: CPU ", self.idle_fraction * 100, "% idle over ", duration, "seconds"
+         print >>sys.stderr, "DynamicLoad: CPU ", self.idle_fraction * 100, "% idle over ", duration/HZ, "seconds"
 
       self.idle = idlecpu
       self.total = total
