@@ -727,7 +727,7 @@ class FmLocations:
          l.processes = int(self.config_get(stanza, "processes", "1000"))
          l.inactive = self.config_get(stanza, "inactive", False)
          l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
-         l.dynamicload = self.config_get(stanza, "dynamicload", True)
+         l.dynamicload = float(self.config_get(stanza, "dynamicload", "2"))
 
       return l
    
@@ -1424,7 +1424,7 @@ class JobScheduler:
 
       if self.options.dynamicload:
          global cpu
-         cpu = CpuProfile()
+         cpu = CpuProfile(self.options.dynamicload)
 
    def ReadJobDir(self):
       """Check for new/removed jobs"""
@@ -1451,6 +1451,11 @@ class JobScheduler:
    def RunOnce(self):
          """Try to launch a work item and return True on success (None->nothing to do)"""
 
+	 if self.options.dynamicload and not self.procs.isempty() and not cpu.available():
+		# If using dynamic scheduling and something is running and system is not idle, 
+                # then don't schedule more work.
+		return None
+
          self.freethreads -= 1
 
          # Look for something with work to do
@@ -1459,12 +1464,8 @@ class JobScheduler:
          for jobname in jobs:
             j = self.jobs[jobname]
 
-            if self.options.dynamicload:
-               if not cpu.available():
-                  continue
-            else: 
-               if j.running >= j.threads:
-                  continue
+            if (not self.options.dynamicload) and (j.running >= j.threads):
+               continue
 
             proc = j.compute(self.options, self.procs)
             #print >>sys.stderr, "Launched", proc
@@ -1553,39 +1554,80 @@ class JobScheduler:
       p.job.running -= 1 
      
 class CpuProfile:
-   def __init__(self):
+   def __init__(self, interval):
+      self.interval = interval
       self.user = 0
       self.idle = 0
       self.iowait = 0
+      self.total = 0
+      self.HZ = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+
       self.update()
  
    def update(self):
       fields = open('/proc/stat').readline().split()
       assert(fields[0] == "cpu")
-      usercpu = int(fields[1])
-      idlecpu = int(fields[4])
-      ioticks = int(fields[5])
-      
-      self.delta_user = usercpu - self.user
-      self.delta_idle = idlecpu - self.idle
-      self.delta_io = ioticks - self.iowait
+      fields = [int(x) for x in fields[1:]]
+      total = sum(fields)
 
-      self.user = usercpu
-      self.idle = idlecpu
-      self.iowait = ioticks
+      # Make sure our update is large enough to be meaningful
+      # Arbitrarily use 100 jiffies for now
+      duration = (total - self.total)/self.HZ
+      if duration < self.interval:
+         if Verbose > 2:
+            print >>sys.stderr, "DynamicLoad: Sleeping to gather more stats"
+	 time.sleep(self.interval - duration)
+	 return self.update()
+      
+      idlecpu = fields[3]
+
+      self.idle_fraction = (idlecpu - self.idle) / float(duration)
 
       if Verbose > 1:
-         print >>sys.stderr, "CPU user", self.delta_user, "idle", self.delta_idle, "I/O", self.delta_io
+	 duration = total - self.total
+         print >>sys.stderr, "DynamicLoad: CPU ", self.idle_fraction * 100, "% idle over ", duration, "seconds"
+
+      self.idle = idlecpu
+      self.total = total
+
  
    def available(self):
-      """Return True iff this job has been I/O bound."""
+      """Return True iff the system is neither CPU nor I/O bound."""
       self.update()
 
-      if (self.delta_idle > 0) and (self.delta_io < self.delta_user):
+      # Check for idle CPU time
+      # XXX: < (1/ncpus) might be better for very large SMPs
+      if self.idle_fraction < 0.02: 
+         if Verbose > 2:
+            print >>sys.stderr, "DynamicLoad: Waiting for CPU to be more idle"
+         return False
+
+      # Account for D state:
+      # If we're in I/O wait (e.g. for a write), then we're not idle,
+      # so that's already accounted for.  But if we're in D, then we are
+      # idle, but we don't want more D.  The kernel only seems to tally D
+      # in the loadavg, but that's exponentially slow, we need to go tally it
+      # ourself
+
+      unint = 0
+      for f in os.listdir('/proc'):
+         if unicode(f).isnumeric(): # looks like a pid
+	    try:
+                line = open('/proc/' + f + '/stat').readline().split()
+            except:
+                # probably finished, just ignore
+                continue
+
+            if line[2] == 'D':
+                unint += 1
+
+      if not unint:
          return True
       else:
+         if Verbose > 1:
+            print >>sys.stderr, "DynamicLoad: Waiting for less D state (currently %d)" % (unint)
          return False
-      
+
 
 class FmJob:
    """Each FmJob object represents a job, as specified in a job file, and
