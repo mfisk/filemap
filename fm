@@ -1457,10 +1457,10 @@ class JobScheduler:
    def RunOnce(self):
          """Try to launch a work item and return True on success (None->nothing to do)"""
 
-	 if self.options.dynamicload and not self.procs.isempty() and not cpu.available():
-		# If using dynamic scheduling and something is running and system is not idle, 
-                # then don't schedule more work.
-		return None
+         if self.options.dynamicload and not self.procs.isempty() and not cpu.available():
+            # If using dynamic scheduling and something is running and system is not idle, 
+            # then don't schedule more work.
+	    return None
 
          self.freethreads -= 1
 
@@ -1474,6 +1474,11 @@ class JobScheduler:
                continue
 
             proc = j.compute(self.options, self.procs)
+
+            if self.options.dynamicload:
+               # Restart our checking of idleness
+               cpu.update(force=True)
+
             #print >>sys.stderr, "Launched", proc
             if proc: 
                proc.jobname = jobname
@@ -1530,6 +1535,7 @@ class JobScheduler:
          if p:
             self.freethreads += 1
             self.finalizeItem(p)
+            cpu.update(force=True)
          else:
             if not block:
                time.sleep(sleep)
@@ -1564,11 +1570,11 @@ class CpuProfile:
       self.interval = interval
       self.idle = 0
       self.total = 0
-      self.HZ = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+      self.HZ = os.sysconf('SC_CLK_TCK')
+      self.ncpus = os.sysconf('SC_NPROCESSORS_ONLN')
 
-      self.update()
- 
-   def update(self):
+   def update(self, force=False):
+      """Try to update CPU idle figures.  Return True iff we updated the idle figures."""
       fields = open('/proc/stat').readline().split()
       assert(fields[0] == "cpu")
       fields = [int(x) for x in fields[1:]]
@@ -1576,9 +1582,10 @@ class CpuProfile:
 
       # Make sure our update is large enough to be meaningful
       duration = float(total - self.total)
-      if duration/self.HZ < self.interval:
+      duration_wallclock = duration / self.HZ / self.ncpus
+      if (not force) and duration_wallclock < self.interval:
          if Verbose > 2:
-            print >>sys.stderr, "DynamicLoad: Waiting to gather more stats"
+            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting to gather more stats"
             # We don't sleep since we're called by RunOnce which is an event management loop
 	 return False
       
@@ -1586,23 +1593,25 @@ class CpuProfile:
 
       self.idle_fraction = (idlecpu - self.idle) / duration
 
-      if Verbose > 1:
-	 duration = total - self.total
-         print >>sys.stderr, "DynamicLoad: CPU ", self.idle_fraction * 100, "% idle over ", duration/HZ, "seconds"
+      if (not force) and Verbose > 1:
+         print >>sys.stderr, time.asctime(), "DynamicLoad: CPU ", self.idle_fraction * 100, "% idle over ", duration_wallclock, "seconds"
 
       self.idle = idlecpu
       self.total = total
+ 
+      return True
 
  
    def available(self):
       """Return True iff the system is neither CPU nor I/O bound."""
-      self.update()
+      if not self.update(): 
+         return False
 
       # Check for idle CPU time
       # XXX: < (1/ncpus) might be better for very large SMPs
-      if self.idle_fraction < 0.02: 
+      if self.idle_fraction < (1.0 / self.ncpus): 
          if Verbose > 2:
-            print >>sys.stderr, "DynamicLoad: Waiting for CPU to be more idle"
+            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for CPU to be more idle"
          return False
 
       # Account for D state:
@@ -1628,7 +1637,11 @@ class CpuProfile:
          return True
       else:
          if Verbose > 1:
-            print >>sys.stderr, "DynamicLoad: Waiting for less D state (currently %d)" % (unint)
+            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for less D state (currently %d)" % (unint)
+
+         #Restart accounting so we don't include previous D time
+         self.update(force=True) 
+
          return False
 
 
