@@ -1593,7 +1593,10 @@ class CpuProfile:
       
       idlecpu = fields[3]
 
-      self.idle_fraction = (idlecpu - self.idle) / duration
+      if duration:
+         self.idle_fraction = (idlecpu - self.idle) / duration
+      else:
+         self.idle_fraction = 0
 
       if (not force) and Verbose > 1:
          print >>sys.stderr, time.asctime(), "DynamicLoad: CPU ", self.idle_fraction * 100, "% idle over ", duration_wallclock, "seconds"
