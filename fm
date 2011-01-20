@@ -247,7 +247,7 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          else:
             errstr += "; %d x %s" % (errcodes[k], k)
       if not errstr:
-         errstr = 'No processes ran'
+         errstr = 'No processes completed'
 
       print >>sys.stderr, errstr
 
