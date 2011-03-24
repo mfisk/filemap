@@ -1922,7 +1922,7 @@ class FileSynchronizer:
                   os.rename(syncfilename, offname)
                   os.unlink(offname)
 
-                  if not self.atomicLink(syncfilename):
+                  if not self._atomicLink(syncfilename):
                      # Somebody else won
                      return None
                      
