@@ -880,7 +880,7 @@ locations of this instance."""
 
       return self.procs
    
-   def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False, all2all=False):
+   def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False, serialize=False):
       origdst = dst
       if not procs:
          procs = Procs()
@@ -955,8 +955,8 @@ locations of this instance."""
       dsts = bydst.keys()
       random.shuffle(dsts)
       for dst in dsts:
-         if all2all:
-            queue = "all2all"
+         if serialize:
+            queue = "serialize"
          else:
             queue = qname[dst]  
 
@@ -966,8 +966,8 @@ locations of this instance."""
       dsts = bydstrel.keys()
       random.shuffle(dsts)
       for dst in dsts:
-         if all2all:
-            queue = "all2all"
+         if serialize:
+            queue = "serialize"
          else:
             queue = qname[dst]  
 
@@ -2129,14 +2129,16 @@ Has unix "mkdir -p" semantics."""
 
 Copy the specified file(s) into the virtual store.  
 """
-      (options, args) = MethodOptionParser(fixed=["files...", "dst"]).parse_args(args)
+      p = MethodOptionParser(fixed=["files...", "dst"])
+      p.add_option('-s', '--serialize', action='store_true', help="Serialize transfers", default=self._Locations().replication)
+      (options, args) = p.parse_args(args)
 
       dst = args[-1]
       args = args[:-1]
       if len(args) > 1:
          dst += "/"
 
-      self._Locations().put(args, dst, pickn=True).collect()
+      self._Locations().put(args, dst, pickn=True, serialize=options.serialize).collect()
 
    def map(self, args):
       """Launch a computation on a set of input files in the cloud.
@@ -2337,11 +2339,11 @@ and the program re-run.
       self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
 
    def cat(self, args):
-      """Concatenate one or more files to stdout."""
+      """Concatenate one or more files to stdout.  
+Unlike 'get -c', duplicate instances of files will be included."""
       (options, args) = MethodOptionParser(fixed=["files..."]).parse_args(args)
 
-      self._Locations().pickHosts().forAll(["cat"], args)
-      (pcount, rprocs) = procs.collect(ignoreErrors=True)
+      (pcount, rprocs) = self._Locations().pickHosts().forAll(["cat"], args).collect(ignoreErrors=True)
 
       for f in rprocs:
          sys.stdout.writelines(f.stdout)
@@ -2739,12 +2741,12 @@ class FmLocalCommands(CommandSetBase):
 
    def replicate(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, all2all=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, serialize=True).collect()
       return errors
 
    def redistribute(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=1, all2all=True, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=1, serialize=True, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
