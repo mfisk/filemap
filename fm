@@ -1559,6 +1559,8 @@ class JobScheduler:
       f = file(p.outdirname + "/." + p.outbasename + "/.status", "w")
       cPickle.dump(stats, f)
       f.close()
+
+      self.locker.done(p.outrelpath)
    
       dst = p.outdirname + "/" + p.outbasename 
       if os.path.exists(dst): 
@@ -1779,7 +1781,7 @@ class FmJob:
 
       # If we get here, then we're locally prepared to rerun
       # Check global synchronization to see if another node already ran it
-      if not self.locker.lock(outfilename, newestinput):
+      if self.locker.isdone(outfilename, newestinput):
           return None
 
       #print >>sys.stderr, "Got lock", syncfilename
@@ -1836,6 +1838,7 @@ class FmJob:
          p.inputsize += os.path.getsize(i)
       p.outdirname = odirname
       p.outbasename = obasename
+      p.outrelpath = outfilename
       p.job = self
       self.running += 1
 
@@ -1906,38 +1909,20 @@ class FileSynchronizer:
         syncfiles = [self._filename2lock(i) for i in lst]
         self.locs.pick().forAll(["rm", "-f"], syncfiles, absolute=True, subst=True).collect()
 
-    def lock(self, filename, newestinput):
-        filename = filename.replace("//", "/")
+    def isdone(self, filename, newestinput):
         syncfilename = self._filename2lock(filename)
-        if not self._atomicLink(syncfilename):
-            # This is a common case; somebody has already grabbed
-            # the synchronization file, so we don't need to process
-            # this file --- unless the inputs are newer than the global outputs
-            lasttime = os.path.getmtime(syncfilename)
-            if newestinput > lasttime:
-               #print >>sys.stderr, "Old global results", syncfilename, lasttime, newestinput
+        if not os.path.exists(syncfilename): return False
 
-               # Invalidate (nuke) the syncfile
-               try:
-                  offname = syncfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
-                  os.rename(syncfilename, offname)
-                  os.unlink(offname)
+	lasttime = os.path.getmtime(syncfilename)
+	if newestinput > lasttime: return False
 
-                  if not self._atomicLink(syncfilename):
-                     # Somebody else won
-                     return None
-                     
-               except:
-                  # Somebody else was doing this at the same time, let them have it
-                  return None
-            else:
-               # Didn't get lock, don't want to steal it, give up
-               return None
+	return True
 
-        return True
+    def done(self, filename):
+        syncfilename = self._filename2lock(filename)
+        return self._atomicCreate(syncfilename)
 
-
-    def _atomicLink(self, lockfilename):
+    def _atomicCreate(self, lockfilename):
         myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
         mkdirexist(os.path.dirname(lockfilename))
 
@@ -1946,7 +1931,13 @@ class FileSynchronizer:
         syncfile.close()
   
         success = False
-  
+ 
+        try: 
+            os.unlink(lockfilename)
+	except:
+            # may not have existed anyway
+            pass
+
         try:
             os.link(myname, lockfilename)
             success = True
@@ -1954,6 +1945,7 @@ class FileSynchronizer:
             if e.errno != errno.EEXIST:
                 os.unlink(myname)
                 raise
+            # Otherwise, somebody just beat us to it -- let hem have it
 
         # Get rid of private name for it, successful or not
         os.unlink(myname)
@@ -1961,6 +1953,7 @@ class FileSynchronizer:
         return success
    
     def _filename2lock(self, filename):
+        filename = filename.replace("//", "/")
         outfilepath, outfilebase = os.path.split(filename)
 
         filenamehash = printableHash(filename)
