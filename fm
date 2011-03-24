@@ -1537,7 +1537,8 @@ class JobScheduler:
          if p:
             self.freethreads += 1
             self.finalizeItem(p)
-            cpu.update(force=True)
+            if self.options.dynamicload: 
+               cpu.update(force=True)
          else:
             if not block:
                time.sleep(sleep)
