@@ -303,49 +303,17 @@ def mkdirexist(path):
       else:
          raise
 
-def rsyncDeWildcard(pth):
-   """Take a path, potentially including wildcards, and reduce to rsync args that can't expand."""
-   pth = pth.replace('//', '/').replace('/./','/')
-
-   origpath = pth
-
-   # Reduce pth to a non-wildcard path
-   while '*' in pth or '?' in pth:
-      pth = os.path.dirname(pth)
-
-   # Find the wildcard portion of the original path and make it a glob
-   if len(pth) < len(origpath):
-      includes = [origpath[len(pth):].lstrip("/")]
-   else:
-      includes = []
-
-   # Include all parents of the wildcard pattern
-   if includes:
-      x = includes[0]
-      while True:
-         dir = os.path.dirname(x)
-         if dir == x:
-            break
-         x = dir
-         includes.append(x + "/")
-
-   # Now include the _destination_ sub-path of the base path
-   # For non-relative, this is just the basename
-   includes.append(os.path.basename(pth))
-
-   return (includes, [pth])
-
-def rsyncSimplify(lst):
-   includes = []
-   paths = []
+def rsyncFilter(rootdir, lst):
+   includes = ["/"]
    for l in lst:
-         [newi, newp] = rsyncDeWildcard(l)
-         includes += newi
-         paths += newp
+      while l != "/":
+         includes.append(l)
+         l = os.path.dirname(l)
       
-   includes = ["--include=" + x for x in includes] 
+   includes = ["--include=" + rootdir + "/" + x for x in includes] 
+   includes = [i.replace('//','/') for i in includes]
    includes.append("--exclude=*")
-   return [includes, paths]
+   return includes
   
 def coallesce(outputs, labels):
    """Take a list of multi-line strings and an equally long list of labels and return a string summarizing which labels had what output."""
@@ -1015,20 +983,17 @@ will be the directory name preceding the first wildcard."""
       for loc in self.locs.values():
          if loc.inactive: continue
 
-         # To make relative paths shorter in rsync >= 2.6.7 , put "/./" 
-         # in the path between the rootdir and the relative path
-         s = [loc.rootdir + "/./" + f for f in src]
+         s = ["/" + f for f in src]
 
-         # Cleanup the path to encourage rsync to get "/./" magic right
          s = [i.replace('//','/') for i in s]
 
          #print loc.rootdir, src, s
 
-         # Take the specified paths/globs and turn them into a list of simple (non-glob) paths and --include/exclude options
-         [includes, s] = rsyncSimplify(s)
+         # Take the specified paths/globs and turn them into a list of --include/exclude options
+         includes = rsyncFilter(loc.rootdir, s)
 
          if isremote(loc.hostname):
-            s = [loc.hostname + ":" + string.join(s)]
+            s = [loc.hostname + ":" + loc.rootdir]
          else:
             s = multiglob(s)
             if not s:
