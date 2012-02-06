@@ -1630,12 +1630,18 @@ class FmJob:
 
       config = ConfigParser.SafeConfigParser()
 
+      def config_get(field, default=None, raw=False):
+         if config.has_option("mrjob", field):
+            return config.get("mrjob", field, raw=raw)
+         else:
+            return default
+
       processed = config.read(fname)
       if not processed:  
          raise IOError(errno.ENOENT, "Could not open file", fname)
 
       self.jobname = os.path.basename(fname)
-      self.cmd = config.get("mrjob", "cmd", raw=True)
+      self.cmd = config_get("cmd", raw=True)
       try:
          self.cmd = eval(self.cmd)
       except:
@@ -1644,22 +1650,17 @@ class FmJob:
       self.cachedinputs = None
       self.previousinputs = None
       self.continuous = config.has_option("mrjob", "continuous")
-      self.reduce = None
-      if config.has_option("mrjob", "reduce"):
-         self.reduce = config.get("mrjob", "reduce")
+      self.reduce = config_get("reduce")
 
-      if config.has_option("mrjob", "procspercpu"):
-         self.threads = int(config.get("mrjob", "procspercpu"))
-      else:
-         self.threads = 1
+      self.threads = int(config_get("procspercpu", 1))
       self.threads *= cpusPerJob
 
       self.running = 0
 
-      if config.has_option("mrjob", "parent"):
-         self.parent = config.get("mrjob", "parent")
-      else:
-         self.parent = None
+      self.parent = config_get("parent")
+      self.checkexit = config_get("checkexit")
+      if self.checkexit != None:
+         self.checkexit = int(self.checkexit)
 
    def compute(self, options, procs):
       # First time thru we expand the input globs to a file list
