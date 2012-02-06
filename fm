@@ -2155,7 +2155,7 @@ Has unix "mkdir -p" semantics."""
 Copy the specified file(s) into the virtual store.  
 """
       p = MethodOptionParser(fixed=["files...", "dst"])
-      p.add_option('-s', '--serialize', action='store_true', help="Serialize transfers", default=self._Locations().replication)
+      p.add_option('-s', '--serialize', action='store_true', help="Serialize transfers", default=False)
       (options, args) = p.parse_args(args)
 
       dst = args[-1]
