@@ -2757,6 +2757,8 @@ class SchedLock:
          else:
             raise
 
+      return False #shouldn't get here
+
    def unlock(self):
       #XXX: doesn't check that we still hold the lock
       os.unlink(self.lockname)
