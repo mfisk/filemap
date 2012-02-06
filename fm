@@ -1894,11 +1894,17 @@ class FileSynchronizer:
         self.locs = locs
         self.syncdir = locs.this.syncdir
 
-    def unlock(self, lst):
+    def unlock(self, lst, delList=False):
         # Delete sync files so that computation is forced to (re-)execute
         # These files are shared, so we pick a minimum number of nodes to do this on
-        syncfiles = [self._filename2lock(i) for i in lst]
-        self.locs.pick().forAll(["rm", "-f"], syncfiles, absolute=True, subst=True).collect()
+	if delList:
+	   syncfiles = []
+	   for i in lst:
+              syncfiles += self._filename2lock(i, delList=True)
+        else:
+           syncfiles = [self._filename2lock(i) for i in lst]
+	#print >>sys.stderr, "unlockrm", syncfiles
+        self.locs.pick().forAll(["rm", "-Rf"], syncfiles, absolute=True, subst=True).collect()
 
     def isdone(self, filename, newestinput, invalid=False):
         syncfilename = self._filename2lock(filename)
@@ -1946,20 +1952,51 @@ class FileSynchronizer:
   
         return success
    
-    def _filename2lock(self, filename):
+    def _filename2lock(self, filename, delList=False):
+        # This converts to an output directory path (that will contain .status, stdout, etc. files)
+        # to a unique filename in the syncdir.  The path is mostly the same,
+        # except since the syncdir is a single directory across all nodes
+
+        # Consider a virtual directory structure like the following
+        #    /data/<timestamp>.d/cmd
+        # with numerous <timestamp> values stored across nodes.
+        # We convert that to:
+        #    /data/XX/YY/<timestamp>.d/cmd 
+        # to avoid running out of diretory entries in /data/ in the syncdir
+        # Where XX and YY are derived from hash(<timestamp>.d)
+
+
         filename = filename.replace("//", "/")
         outfilepath, outfilebase = os.path.split(filename)
+        outfilepath, outfileparent = os.path.split(outfilepath)
 
-        filenamehash = printableHash(filename)
-        if '*' in filename:
-           topdir = '*'
-           secdir = '*'
-        else:
-           topdir = filenamehash[:2]
-           secdir = filenamehash[2:4]
+        filenamehash = printableHash(outfileparent)
+        topdir = filenamehash[:2]
+        secdir = filenamehash[2:4]
 
-        syncfilename = self.syncdir + "/" + outfilepath + "/" + topdir + "/" + secdir + "/" + outfilebase + "/status"
-        return syncfilename
+        syncfilename = self.syncdir + "/" + outfilepath + "/" + topdir + "/" + secdir + "/" + outfileparent + "/" + outfilebase + "/status"
+
+        if not delList:
+        	return syncfilename
+
+        # However a user may delete any of these: 
+        #    1. /data
+        #    2. /data/<timestamp>* 
+        #    3. /data/<timestamp>.d 
+        #    4. /data/<timestamp>.d/cmd
+        #    5. /data/<timestamp>.d/cmd*
+        # which should cause us to also delete the corresponding sync file.
+        # Case 1 is fine by deleting the path verbatim: /data  
+        # Case 2 requires that we glob the hash directories: /data/??/??/<timestamp>*
+        # Case 3 requres that we hash the specified basename, rather than its parent: /data/XX'/YY'/<timestamp>.d
+        # Case 4 is fine if we map like we do when locking: /data/XX/YY/<timestamp>.d/cmd
+        # Case 5 is fine if we map like we do when locking: /data/XX/YY/<timestamp>.d/cmd*
+
+        # If we always glob the has to support #2, then #3 is dealt with. 
+        # Thus, there are 3 things we must delete:
+        return [syncfilename, 
+                self.syncdir + "/" + filename, 
+                self.syncdir + "/" + outfilepath + "/" + outfileparent + "/??/??/" + outfilebase]
         
 class FmCommands(CommandSetBase):
    def __init__(self, args):
@@ -2583,7 +2620,9 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          options = []
 
       self._Locations().forAll(["rm", "-f"] + options, args).collect()
-      self._Locations().locker.unlock(args)
+
+      # Now clean-up the syncdir 
+      self._Locations().locker.unlock(args, delList=True)
 
    def init(self, args):
       """Create/correct directory structure.
