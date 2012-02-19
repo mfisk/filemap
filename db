@@ -1,60 +1,186 @@
-#!/bin/bash
-cmd="$1"
-shift
+#!/usr/bin/env python
 
-pragmas="pragma synchronous=off; pragma locking_mode=exclusive; pragma journal_mode=OFF;"
-case "$cmd" in
-q) 
-	# Re-order and quote arguments to make it easier to run sqlite commands in fm
-	last=`expr $# - 1`
-	db="${!#}"
-	qstr="${*:1:$last}"
-	#echo "$qstr" 1>&2
-	if [ "`basename $db`" != "db" ]; then
-		exit 0
-	fi
-	sqlite3 -header -bail -separator '	' ${!#} <<EOM 
-$pragmas
-attach database 'db' as output;
-$qstr
-;
-EOM
-	status=$?
-	if [ "$status" != "0" ]; then
-		echo "sqlite3 returned $status; removing output db" 1>&2 
-		rm -f db
-	fi
-	exit $status
-	;;
-cat)
-	# Take a list of databases on stdin and cat them together using the schema and table name found in the first database. 
+import os
+import sqlite3
+import sys
 
-	output=db
-	while read line; do
-		if [ "`basename $line`" != "db" ]; then
-			continue
-        	fi
-		echo "attach database '$line' as input;"
-		if [ "$first" = "" ]; then
-			table=`sqlite3 "$line" ".tables" | head -1`
-			echo "Using table $table" 1>&2
-			echo "$pragmas"
-			echo "create table $table as select * from input.$table;"
-			first=no
-		else
-			echo "insert into $table select * from input.$table;"
-		fi
-		echo 'detach database input;'
-	done | tee .query | sqlite3 -bail $output 
-	status=$?
-	if [ "$status" != "0" ]; then
-		rm -f $output
-	fi
-	exit $status
-	;;
-*)
-	echo "Usage: $0 (q|cat)"
-	exit 1
-	;;
-esac
+def connect(db):
+    connection = sqlite3.connect(db)#, isolation_level='EXCLUSIVE')
+    connection.text_factory = str
+    cursor = connection.cursor()
+    cursor.execute('PRAGMA journal = OFF') # Don't make a separate journal file
+    cursor.execute('PRAGMA cache_size = 1048576') # Cache more.
+    cursor.execute('PRAGMA synchronous = OFF') # Don't wait for disk sync.
+    cursor.execute('PRAGMA temp_store = 2') # Use memory for temp work.
+    cursor.execute('PRAGMA locking_mode = exclusive') # Don't spend time locking and unlocking a lot
+    
+    return connection, cursor
 
+def tablename(cursor, db=None):
+    # I assume there is only one table in the database.
+    if db:
+        db += "."
+    cursor.execute("SELECT name FROM %ssqlite_master WHERE type = 'table' LIMIT 1" % (db))
+    name = cursor.fetchone()
+    if not name:
+        print >>sys.stderr, "No table in input file"
+	return None
+    name = name[0]
+    return name
+
+def cat():
+    # Take a list of databases on stdin and cat them together using the schema and table name found in the first database. 
+
+    success = False
+    try:    
+        connection, cursor = connect("db")
+        first = True
+        for line in sys.stdin:
+            line = line.strip()
+	    print line
+            if os.path.basename(line) == "stdin":
+                continue
+            cursor.execute("attach database '%s' as input;" % line)
+            if first:
+                table = tablename(cursor, 'input')
+                cursor.execute("create table %s as select * from input.%s;" % (table,table))
+                first = False
+            else:
+                cursor.execute("insert into %s select * from input.%s;" % (table, table))
+                
+            cursor.execute('detach database input;')
+
+            connection.commit()
+            success = True
+    except:
+        if not success:
+            os.unlink("db")
+        raise
+
+    return 0
+
+def q(db, qstr):
+    # Re-order and quote arguments to make it easier to run sqlite commands in fm
+    if os.path.basename(db) == "stdin":
+        sys.exit(0)
+    conn,cursor = connect(db)
+    cursor.execute("attach database 'db' as output;")
+    try:
+        cursor.execute(' '.join(qstr))
+        for row in cursor:
+            # User may have done something with visible results
+            print "\t".join([str(i) for i in row])
+        conn.commit()
+    except:
+        os.unlink("db")
+	raise
+
+    return 0
+
+def usage():
+    print >>sys.stderr, "Usage: %s (q|cat|partition)" % (sys.argv[0])
+    return 1
+    
+def main():
+    if len(sys.argv) < 2:
+        return usage()
+
+    cmd = sys.argv.pop(1)
+    if cmd == "q":
+        db = sys.argv.pop()
+        qstr = sys.argv[1:]
+        return(q(db,qstr))
+    
+    elif cmd == "cat":
+        return cat()
+    
+    elif cmd == "partition":
+        return partition()
+    
+    else:
+        return usage()
+
+
+def partition():
+    """Partition a single sqlite database into multiple databases
+    using the value of a user-supplied expression OR by time binning.
+    """
+
+    import hashlib
+    import optparse
+    import struct
+
+    usage = '%prog [-e EXPR|-c COLUMN] [options] [databases]'
+    parser = optparse.OptionParser(usage=usage)
+    
+    parser.add_option('-n', '--bins', action='store', type='int', 
+                      dest='bins', default=1024,
+                      help='the name of a timestamp column to partition by')
+    parser.add_option('-m', '--mod', type='int', action='store',
+                      dest='mod',
+                      help='bin values into partitions of fixed size')
+    
+    options, args = parser.parse_args()
+    
+    if len(args) < 2:
+        parser.error('no query specified')
+
+    qstr = ' '.join(args[:-1])
+    db = args.pop()
+            
+    connection, cursor = connect(db)
+    name = tablename(cursor)
+
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type = 'table'" + \
+                       ' AND name = ? LIMIT 1', (name,))
+    createsql = cursor.fetchone()[0]
+
+    if options.mod:
+        qstr = 'CAST((%s) AS int) - (CAST((%s) AS int) %% %d)' % \
+            (qstr, qstr, options.mod)
+
+    cursor.execute('SELECT *, %s AS _part_ FROM %s' %
+                   (qstr, name))
+    print ('SELECT *, %s AS _part_ FROM %s' %
+           (qstr, name))
+
+    outputs = {}
+    success = False
+
+    try:
+        for row in cursor:
+            part = row[-1]
+            hash = hashlib.sha1(str(part))
+            hash = struct.unpack_from("!Q",hash.digest())[0] % options.bins
+            
+            if not outputs.has_key(hash):
+                oconn,ocur = connect(str(hash) + ".db")
+                outputs[hash] = oconn,ocur
+                ocur.execute(createsql)
+            else:
+                oconn,ocur = outputs[hash]
+
+            query = 'INSERT INTO %s VALUES (%s)' % \
+                (name, ','.join(['?'] * (len(row)-1)))
+            ocur.execute(query, row[:-1])
+
+        for p in outputs:
+            oconn,ocur = outputs[p]
+            oconn.commit()
+            ocur.close()
+            oconn.close()
+            
+        cursor.close()
+        connection.close()
+
+        success = True
+
+    except:
+        if not success:
+            for p in outputs:
+                os.unlink("%s.db" % p)
+
+        raise
+
+
+sys.exit(main())
