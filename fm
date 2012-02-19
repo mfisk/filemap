@@ -437,6 +437,7 @@ def plot(filename, pngfile):
 
    # Load all stats and keep track of min and max inputsizes along the way
    nodes = {}
+   jobs = set()
    minsize = 2**31
    maxsize = 0
    for s in stats:
@@ -448,8 +449,15 @@ def plot(filename, pngfile):
 
       minsize = min(minsize, s['inputsize'])
       maxsize = max(maxsize, s['inputsize'])
+      jobs.add(s['jobname'])
 
    nodes = makeVnodes(nodes)
+   jobs = list(jobs)
+   colormap = ['r','g','b']
+   color = {}
+   for j in jobs:
+      color[j] = jobs.index(j)
+      color[j] = colormap[color[j] % len(colormap)]
          
    nodenames = nodes.keys()
    nodenames.sort(cmp=numcmp)
@@ -465,13 +473,12 @@ def plot(filename, pngfile):
    ax = fig.add_subplot(111)
    ax.set_autoscale_on(True)
   
-   #l = matplotlib.lines.Line2D([1, 0.8e9], [2,2])
-   #ax.add_line(l)
-   #l = matplotlib.lines.Line2D([1269190522.252409, 1269190522.2774091], [14, 14])
-   #ax.add_line(l)
-
    lines = []
-   maxsize = math.log(maxsize)
+   if not maxsize:
+      maxsize = 0
+   else:
+      maxsize = math.log(maxsize)
+
    if not minsize:
       minsize = 0
    else:
@@ -485,7 +492,7 @@ def plot(filename, pngfile):
          finish = s['finish']
          start = s['start']
 
-         # Size is a log-scal enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
+         # Size is a log-scale enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
          insize = s['inputsize']
          if insize:
             insize = math.log(insize)
@@ -499,7 +506,7 @@ def plot(filename, pngfile):
          else:
             cpu = (s['utime'] + s['stime']) / s['time']
    
-         l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size)
+         l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size, color=color[s['jobname']])
          ax.add_line(l)
          lines.append([ (start,y), (finish,y) ])
 
