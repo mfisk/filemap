@@ -8,14 +8,16 @@ q)
 	# Re-order and quote arguments to make it easier to run sqlite commands in fm
 	last=`expr $# - 1`
 	db="${!#}"
+	qstr="${*:1:$last}"
+	#echo "$qstr" 1>&2
 	if [ "`basename $db`" != "db" ]; then
 		exit 0
 	fi
-	sqlite3 -separator '	' ${!#} <<EOM  | egrep -v '^(exclusive|off)$'
-.bail ON
+	sqlite3 -header -bail -separator '	' ${!#} <<EOM 
 $pragmas
 attach database 'db' as output;
-${*:1:$last};
+$qstr
+;
 EOM
 	status=$?
 	if [ "$status" != "0" ]; then
@@ -36,7 +38,6 @@ cat)
 		if [ "$first" = "" ]; then
 			table=`sqlite3 "$line" ".tables" | head -1`
 			echo "Using table $table" 1>&2
-			echo ".bail ON"
 			echo "$pragmas"
 			echo "create table $table as select * from input.$table;"
 			first=no
@@ -44,7 +45,7 @@ cat)
 			echo "insert into $table select * from input.$table;"
 		fi
 		echo 'detach database input;'
-	done | tee .query | sqlite3 $output | egrep -v '^(exclusive|off)$'
+	done | tee .query | sqlite3 -bail $output 
 	status=$?
 	if [ "$status" != "0" ]; then
 		rm -f $output
