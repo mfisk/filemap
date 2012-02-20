@@ -20,6 +20,8 @@ def tablename(cursor, db=None):
     # I assume there is only one table in the database.
     if db:
         db += "."
+    else:
+        db = ""
     cursor.execute("SELECT name FROM %ssqlite_master WHERE type = 'table' LIMIT 1" % (db))
     name = cursor.fetchone()
     if not name:
@@ -38,7 +40,7 @@ def cat():
         for line in sys.stdin:
             line = line.strip()
 	    print line
-            if os.path.basename(line) == "stdin":
+            if os.path.basename(line) == "stdout":
                 continue
             cursor.execute("attach database '%s' as input;" % line)
             if first:
@@ -61,7 +63,7 @@ def cat():
 
 def q(db, qstr):
     # Re-order and quote arguments to make it easier to run sqlite commands in fm
-    if os.path.basename(db) == "stdin":
+    if os.path.basename(db) == "stdout":
         sys.exit(0)
     conn,cursor = connect(db)
     cursor.execute("attach database 'db' as output;")
@@ -127,6 +129,9 @@ def partition():
 
     qstr = ' '.join(args[:-1])
     db = args.pop()
+
+    if os.path.basename(db) == "stdout":
+        return 0
             
     connection, cursor = connect(db)
     name = tablename(cursor)
