@@ -289,7 +289,7 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
                scaling = swtime/cacheduration
                print >>sys.stderr, "Cached: %g MB/s, %gs, %.1fx" % (rate, cacheduration, scaling)
 
-         if True or sbytes and wallclock:
+         if sbytes and wallclock:
             rate = sbytes/MB/wallclock
             cached = 100*bytes[1]/sbytes
             print >>sys.stderr, "Filemap: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
@@ -390,21 +390,16 @@ def statOverlap(joba, jobb):
 
 def makeVnodes(nodes):
    # We may have multiple jobs at a time per node (e.g. SMP nodes), so 
-   # treat those as multiple nodes.  Since we don't have an explicity thread id, 
+   # treat those as multiple nodes.  Since we don't have an explicit thread id, 
    # just assign them arbitrarily in a non-overlapping way
    for nodename in nodes.keys():
       vnodes = []
+      nodes[nodename].sort(lambda a,b: cmp(a['start'], b['start']))
       for job in nodes[nodename]:
          found = False
          for vnode in vnodes:
-            conflict = False
-            for j in vnode:
-               if statOverlap(job, j):
-                  #print "Conflict", job, "\nwith", j
-                  conflict = True
-                  break
-            if not conflict:
-               # Does not overlap with any job in this vnode, so put it here
+            if not statOverlap(job, vnode[-1]):
+               # Does not overlap with last job in this vnode, so append it here
                vnode.append(job)
                found = True
                break
@@ -439,7 +434,9 @@ def plot(filename, pngfile):
    nodes = {}
    jobs = set()
    minsize = 2**31
+   mintime = 2**31
    maxsize = 0
+   maxtime = 0
    for s in stats:
       s['start'] = s['timestamp'] - s['time']
       s['finish'] = s['timestamp']
@@ -449,11 +446,17 @@ def plot(filename, pngfile):
 
       minsize = min(minsize, s['inputsize'])
       maxsize = max(maxsize, s['inputsize'])
+      mintime = min(mintime, s['start'])
+      maxtime = max(maxtime, s['finish'])
       jobs.add(s['jobname'])
 
+   print >>sys.stderr, "Data spans", maxtime-mintime, "seconds"
    nodes = makeVnodes(nodes)
+   print >>sys.stderr, "Packed into", len(nodes), "timelines"
+
    jobs = list(jobs)
-   colormap = ['r','g','b']
+   print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
+   colormap = ['r','g','b','cyan','magenta','black','yellow','purple']
    color = {}
    for j in jobs:
       color[j] = jobs.index(j)
@@ -487,18 +490,20 @@ def plot(filename, pngfile):
    for node in nodes:
       y = nodes2y[node]
 
+      print >>sys.stderr, "Plotting line", node, "with", len(nodes[node]), "elements"
       for s in nodes[node]:
 
          finish = s['finish']
          start = s['start']
 
-         # Size is a log-scale enumber between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
+         # Size is a log-scale number between 0 and 1 where 0 is the minimum size seen in this run and 1 is the max size seen in this run
          insize = s['inputsize']
          if insize:
             insize = math.log(insize)
          else:
             insize = 0
          size = (insize-minsize)/(maxsize-minsize)
+         size = size * 0.7 + 0.3 #Makem min size be 30%
    
          # CPU is % of wallclock time in user or system CPU time
          if s['time'] == 0:
@@ -506,9 +511,11 @@ def plot(filename, pngfile):
          else:
             cpu = (s['utime'] + s['stime']) / s['time']
    
-         l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size, color=color[s['jobname']])
-         ax.add_line(l)
-         lines.append([ (start,y), (finish,y) ])
+         #l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size, color=color[s['jobname']])
+         #ax.add_line(l)
+         ax.broken_barh([(start-mintime, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['jobname']])
+         #ax.errorbar(finish, y, yerr=1, fmt=None, elinewidth=(1 + 2*size), color=color[s['jobname']])
+         #lines.append([ (start,y), (finish,y) ])
 
    ax.autoscale_view()
   
@@ -526,8 +533,10 @@ def plot(filename, pngfile):
    ax.set_yticklabels(majorlabels)
    ax.set_ylim(ymin=-2)
 
+   ax.set_xlim(xmax=maxtime-mintime)
+
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
-   canvas.print_figure(pngfile, dpi=600)
+   canvas.print_figure(pngfile, antialias=False, dpi=600)
 
 class MethodOptionParser(optparse.OptionParser):
    """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
