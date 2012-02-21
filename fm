@@ -1145,7 +1145,7 @@ class Procs:
       if stdinstr:
          stdin = subprocess.PIPE
       else:
-         stdin = file('/dev/null','w')
+         stdin = file('/dev/null')
 
       r = subprocess.Popen(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd)
 
@@ -1186,7 +1186,13 @@ class Procs:
          print >>sys.stderr, r.pid, cmdv, r.node
 
       if stdinstr:
-         r.stdin.write(stdinstr)
+         try:
+            # Child could quit before we get it all out
+            r.stdin.write(stdinstr)
+         except:
+            # assume that child exit status will tell the story
+            # if it ignored some input and exited with 0, we'll be oblivious
+            pass
          r.stdin.close()
 
       return r
