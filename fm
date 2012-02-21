@@ -1516,8 +1516,6 @@ class JobScheduler:
                proc.jobname = jobname
                return True
             else:
-               if j.continuous and not j.running:
-                  self.cachedinputs = None # Look for new inputs now
                # No more work to do, check to see if job is complete
                # Note, job cannot be complete if parent is still active
                if not j.continuous and not j.running and (not j.parent or not self.jobs.has_key(j.parent)):
@@ -1737,10 +1735,13 @@ class FmJob:
    def compute(self, options, procs):
       # First time thru we expand the input globs to a file list
       # Unless this is a continuous job, this will be the only time we enumerate the files
-      if self.cachedinputs == None:
+      if not self.cachedinputs:
          glob = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
          if self.previousinputs: # Updating list for continuous job
             self.cachedinputs = list( set(glob) - self.previousinputs )
+            if (not self.cachedinputs):
+               # parent might have invalidated some things we already examined, so ignore previousinputs
+               self.cachedinputs = glob
          else: # First pass
             self.cachedinputs = glob
 
