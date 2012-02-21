@@ -40,7 +40,7 @@ def cat():
         for line in sys.stdin:
             line = line.strip()
 	    print line
-            if os.path.basename(line) == "stdout":
+            if not os.path.basename(line).endswith("db"):
                 continue
             cursor.execute("attach database '%s' as input;" % line)
             if first:
@@ -63,8 +63,8 @@ def cat():
 
 def q(db, qstr):
     # Re-order and quote arguments to make it easier to run sqlite commands in fm
-    if os.path.basename(db) == "stdout":
-        sys.exit(0)
+    if not os.path.basename(db).endswith("db"):
+        return 1
     conn,cursor = connect(db)
     cursor.execute("attach database 'db' as output;")
     try:
@@ -116,7 +116,7 @@ def partition():
     parser = optparse.OptionParser(usage=usage)
     
     parser.add_option('-n', '--bins', action='store', type='int', 
-                      dest='bins', default=1024,
+                      dest='bins', default=300,
                       help='the name of a timestamp column to partition by')
     parser.add_option('-m', '--mod', type='int', action='store',
                       dest='mod',
@@ -130,8 +130,8 @@ def partition():
     qstr = ' '.join(args[:-1])
     db = args.pop()
 
-    if os.path.basename(db) == "stdout":
-        return 0
+    if not os.path.basename(db).endswith("db"):
+        return 1
             
     connection, cursor = connect(db)
     name = tablename(cursor)
@@ -146,8 +146,6 @@ def partition():
 
     cursor.execute('SELECT *, %s AS _part_ FROM %s' %
                    (qstr, name))
-    print ('SELECT *, %s AS _part_ FROM %s' %
-           (qstr, name))
 
     outputs = {}
     success = False
@@ -169,6 +167,9 @@ def partition():
                 (name, ','.join(['?'] * (len(row)-1)))
             ocur.execute(query, row[:-1])
 
+        success = True
+
+    finally:
         for p in outputs:
             oconn,ocur = outputs[p]
             oconn.commit()
@@ -178,14 +179,12 @@ def partition():
         cursor.close()
         connection.close()
 
-        success = True
-
-    except:
         if not success:
             for p in outputs:
-                os.unlink("%s.db" % p)
-
-        raise
+                try:
+                    os.unlink("%s.db" % p)
+		except:
+                    pass
 
 
 sys.exit(main())
