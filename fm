@@ -2315,6 +2315,8 @@ and the program re-run.
             pipeline.append([])
          if w[0] != "|":
             pipeline[len(pipeline)-1].append(w)
+      if pipeline[0] == []:
+         pipeline.pop(0)
 
       #print >>sys.stderr, "Pipeline:", pipeline
 
