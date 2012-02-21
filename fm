@@ -69,6 +69,12 @@ except:
 
 nonalphanumre = re.compile('\W')
 
+def dictListAppend(map, key, value):
+   if not map.has_key(key):
+      map[key] = [value]
+   else:
+      map[key].append(value)
+
 def printableHash(s):
    h = sha(s).digest()
    h = base64.b64encode(h, '+_')  # Normal b64 but / is _
@@ -864,48 +870,106 @@ locations of this instance."""
 
 
       return self.procs
-   
-   def put(self, srclist, dst, relative=False, procs=None, pickn=False, hashbasename=False, serialize=False):
-      origdst = dst
+
+   def expanddir(path):
+            items = [] 
+            for root,dirs,files in os.walk(path):
+               for f in files:
+                  fp = os.path.join(root, f)
+                  items.append(fp)
+            return items
+
+   def put(self, srclist, dst, relativeroot=False, procs=None, pickn=False, hashbasename=False, serialize=False):
+      # We will glob this ourselves since we implicitly expand directories to the next level and, in the case of hashbasename, have to get the final filenames rather than globs in order to know where to put them.
+
       if not procs:
          procs = Procs()
 
-      if relative:
-         srclist = [s.lstrip("/") for s in srclist]
-         os.chdir(self.this.rootdir)
+      relative = {}
 
-      srcs = multiglob(srclist)
+      # When "relativeroot" is true, we're copying between nodes within the virtual filesystem and want to preserve paths
+      if relativeroot:
+         assert(dst == "/")
+         # An intervening /./ in the path is how we denote the leading part that shouldn't be duplicated on the destination
+         srcs = [self.this.rootdir + "/./" + s for s in srclist]
+      else:
+         srcs = []
+         for s in srclist:
+            if not s.startswith("/"):
+               s = os.getcwd() + "/" + s
+            srcs.append(s)
+
+      srcs = multiglob(srcs)
       if not srcs:
          print >>sys.stderr, "No such file:", srclist
          return procs
 
-      # We always specify a seed when calling pick() so there is stability in which nodes work is mapped to.
-      # It's nice if they go to nodes that might have already received the store in a previous execution.
-
-      items = []
+      # Pull out any directories we have to recurse.
+      # Imagine a list like the following:
+      #   a   (a,)
+      #   /b/ (/b/c,b)
+      #       (b/c/d,b/c)
+      #   /e  (/e,)
+      #   /f/ (/f/g,f)
+      #       (/f/h,f)
+      #   i/  (i/j,i)
+      #       (i/k,i
+      # We cannot process this in a single rsync.
+      # We can do (a and /e) or (/b) or (/f)
+      # We will use rsync -Rd to make destination subdirs, but only for things that share a common source parent
+      srcfiles = []
       for a in srcs:
          # Convert directory arguments to lists of files
          if os.path.isdir(a):
-            for root,dirs,files in os.walk(a):
-               for f in files:
-                  fp = os.path.join(root, f)
-                  dstfile = os.path.join(dst, root[0:]) + "/" + os.path.basename(fp)
-                  items.append([fp, dst, True])
-         else:
-            items.append([a, dst, relative])
+            if "/./" not in a:
+               a += "/./"
+            srcsfiles += expanddir(a)
 
-      bydst = {}
-      bydstrel = {}
-      qname = {}
-      for i in items:
-         src, dst, relative = i
+         else:
+            if "/./" not in a:
+               a = os.path.dirname(a) + "/./" + os.path.basename(a)
+            srcfiles.append(a)
+
+      tag = "put %s %s" % (srclist, dst) 
+      self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize)
+
+      return procs
+
+   def pickput(self, srcs, dst, procs, tag, pickn, hashbasename, serialize):
+      nodesrcs = {}
+      relative = None
+      for s in srcs:
+         if hashbasename:
+            seed = os.path.basename(s)
+         elif "/./" in s:
+            # Relative path
+            seed = "/".join([dst, s.split("/./")[1], os.path.basename(s)])
+            assert(relative != False)
+            relative = True
+         else:
+            seed = "/".join([dst, os.path.basename(s)])
+            assert(not relative)
+            relative = False
+
+         choices = self.pickdstnodes(seed, pickn, hashbasename)
+         for c in choices:
+            if c.inactive: continue
+
+            dictListAppend(nodesrcs, c.name, s)
+
+      return self.rsync(nodesrcs, dst, serialize, procs, tag)
+
+   def pickdstnodes(self, dst, pickn, hashbasename):
+         # We always specify a seed when calling pick() so there is stability in which nodes work is mapped to.
+         # It's nice if they go to nodes that might have already received the store in a previous execution.
+         dst = dst.replace("/./","/")
+         dst = dst.replace("//","/")
          if pickn:
-            seed = os.path.basename(src)
-            if not hashbasename:
-               if relative:
-                  seed = dst + "/" + src
-               else:
-                  seed = dst + "/" + seed
+            # Pick which nodes get this file
+            if hashbasename:
+               seed = os.path.basename(dst)
+            else:
+               seed = dst
 
             if pickn != True: 
                choices = self.pickn(seed=seed, n=pickn)
@@ -913,53 +977,37 @@ locations of this instance."""
                # use default n
                choices = self.pickn(seed=seed)
 
-            choices = [self.locs[c] for c in choices]
+            return [self.locs[c] for c in choices]
          else:
-            choices = self.locs.values()
+            # Use all destinations
+            return self.locs.values()
 
-         for loc in choices:
-            if loc.inactive: continue
+   def rsync(self, nodesrcs, dstdir, serialize, procs, tag):
+      # nodesrcs is a dictionary indexed by nodenames each containing a list of fully-qualified local srcs.
+      # Iff relative is True, then the local source should contain a /./ element and path elements after /./ will be created in the dst.
+      # Iff serialize is True, then do one node at a time.
+      # tag is used solely for verbose status reporting.
 
-            if isremote(loc.hostname):
-               d = loc.hostname + ":" + loc.rootdir 
-            else:
-               d = loc.rootdir
-
-            d = d + "/" + dst
-            d = d.replace("//","/")
- 
-            if relative:
-               if not bydstrel.get(d): bydstrel[d] = []
-               bydstrel[d].append(src)
-            else:
-               if not bydst.get(d): bydst[d] = []
-               bydst[d].append(src)
-
-            qname[d] = loc.qname
-
-      dsts = bydst.keys()
+      dsts = nodesrcs.keys()
       random.shuffle(dsts)
       for dst in dsts:
          if serialize:
             queue = "serialize"
          else:
-            queue = qname[dst]  
+            queue = dst  
 
-         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr] + bydst[dst] + [dst]
-         procs.Popen(cmd, queue=queue, node=qname[dst], tag="put %s %s" % (srclist, origdst))
+         # Build rsync style "hostname:/path/to/root" specifications
+         loc = self.locs[dst]
+         dstpath = loc.rootdir + "/"
+         if isremote(loc.hostname):
+            dstpath = loc.hostname + ":" + dstpath
+         dstpath = "/".join([dstpath, dstdir])
 
-      dsts = bydstrel.keys()
-      random.shuffle(dsts)
-      for dst in dsts:
-         if serialize:
-            queue = "serialize"
-         else:
-            queue = qname[dst]  
+         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr, "--files-from=-", "--no-d", "/", dstpath]
+         inputlist = '\n'.join(nodesrcs[dst])
+         #print >>sys.stderr, "inputlist:", nodesrcs[dst]
+         procs.Popen(cmd, queue=queue, stdinstr=inputlist, node=queue, tag=tag)
 
-         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr, "-R"] + bydstrel[dst] + [dst]
-         procs.Popen(cmd, queue=queue, node=qname[dst], tag="put %s %s" % (srclist, origdst))
-
-      return procs
 
    def get(self, args, procs=None, outfile=sys.stdout, relative=False):
       """Copy files from the cloud to local storage.
@@ -1541,9 +1589,16 @@ class JobScheduler:
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
 
-      f = file(p.outdirname + "/." + p.outbasename + "/.status", "w")
+      dir = p.outdirname + "/." + p.outbasename 
+      f = file(dir + "/.status", "w")
       cPickle.dump(stats, f)
       f.close()
+
+      # Remove empty outputs to avoid unnecessary downstream processing
+      for f in "stdout", ".stderr":
+         outf = dir + "/" + f
+         if os.path.getsize(outf) == 0:
+            os.unlink(outf)
 
       self.locker.done(p.outrelpath)
    
@@ -2467,9 +2522,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
          for f in pkls[nodename]:
             fname = f['name']
             f['nodename'] = nodename
-            if not listing.has_key(fname): 
-               listing[fname] = []
-            listing[fname] += [f]
+            dictListAppend(listing, fname, f)
 
       return listing
 
@@ -2804,12 +2857,12 @@ class FmLocalCommands(CommandSetBase):
 
    def replicate(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, serialize=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True).collect()
       return errors
 
    def redistribute(self, args):
       procs = Procs(retries=7)
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relative=True, pickn=True, serialize=True, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
