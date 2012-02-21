@@ -539,7 +539,7 @@ def plot(filename, pngfile):
    ax.set_yticklabels(majorlabels)
    ax.set_ylim(ymin=-2)
 
-   ax.set_xlim(xmax=maxtime-mintime)
+   ax.set_xlim(xmin=0, xmax=maxtime-mintime)
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
    canvas.print_figure(pngfile, antialias=False, dpi=600)
