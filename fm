@@ -1751,33 +1751,39 @@ class FmJob:
       if self.reduce:
          parts = [os.path.basename(i) for i in self.cachedinputs]
          parts = list(set(parts))  # Get unique partitions
+         #print >>sys.stderr, "Cachedinputs", len(self.cachedinputs), "in", len(parts), "parts"
          putargs = "argv"
          if "-" in self.reduce:
             putargs = "stdin"
 
          for part in parts:
+            #print >>sys.stderr, "PART", part
             # Don't process .d directories as named inputs (feedback loop)
             if part[-2:] == ".d":
                continue
 
-            # Apply all of the files with the same partition,
-            # but only if that partition belongs on this node.
-            choices = Locations.pickn(part, n=1)
-
-            if "part" in self.reduce:
-                if Locations.thisname not in choices:
-                   #print >>sys.stderr, Locations.thisname, "hashes", part, "to", list(choices)
-                   continue
-
             #Get list of files with this partition
-            xlen = len(part)
             files = []
+            remaininginputs = []
             for i in self.cachedinputs:
                if os.path.basename(i) == part:
                   files.append(i)
-            self.cachedinputs = []
+               else:
+                  remaininginputs.append(i)
 
-            outfilename = "/reduce/" + self.jobname + "/" + part
+            # Remove these from the list of inputs to process later
+            self.cachedinputs = remaininginputs
+
+            # Apply all of the files with the same partition,
+            # but only if that partition belongs on this node.
+            choices = list(Locations.pickn(part))
+
+            if Locations.thisname not in choices:
+                #print >>sys.stderr, Locations.thisname, "only hashes", part, "to", list(choices)
+                continue
+
+            #print >>sys.stderr, part, "processes on this node", list(choices)
+            outfilename = "/reduce/" + self.jobname + "/" + part + ".d"
 
             p = self.computeItem(files, outfilename, options, procs, putargs=putargs)
             if p: 
