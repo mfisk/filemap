@@ -53,7 +53,9 @@ def cat():
             cursor.execute('detach database input;')
 
             connection.commit()
-            success = True
+        success = True
+        if not line: print >>sys.stderr, "db cat finishing with empty stdin"
+
     except:
         if not success:
             os.unlink("db")
