@@ -456,7 +456,23 @@ def plot(filename, pngfile):
       maxtime = max(maxtime, s['finish'])
       jobs.add(s['jobname'])
 
-   print >>sys.stderr, "Data spans", maxtime-mintime, "seconds"
+   # Reduce to overlapping windows
+   stats.sort(lambda a,b: cmp(a['start'], b['start']))
+   intervals = [(i['start'], i['finish']) for i in stats]
+   intervals = collapseIntervals(intervals)
+   active = sum([i[1] - i[0] for i in intervals])
+   if intervals:
+      prev = intervals.pop(0)
+      gaps = []
+      for i in intervals:
+         # If more than 10% of the total duration is skipped here, then edit it out
+         if i[0] - prev[1] >  0.1*(active):
+            # A noticeable gap occurs between these
+            gaps.append((prev[1], i[0]))
+            #print >>sys.stderr, "Gap between", prev[1], i[0]
+         prev = i
+
+   print >>sys.stderr, "Data spans", maxtime-mintime, "seconds with", active, "active"
    nodes = makeVnodes(nodes)
    print >>sys.stderr, "Packed into", len(nodes), "timelines"
 
@@ -516,17 +532,33 @@ def plot(filename, pngfile):
             cpu = 1
          else:
             cpu = (s['utime'] + s['stime']) / s['time']
-   
-         #l = matplotlib.lines.Line2D([start, finish], [y,y], marker='|', alpha=0.25+cpu, lw=1 + 2*size, color=color[s['jobname']])
-         #ax.add_line(l)
-         ax.broken_barh([(start-mintime, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['jobname']])
+
+         # Adjust for time gaps
+         delta = 0
+         for g in gaps:
+            if g[1] < start:
+               delta += g[1] - g[0]   
+
+         ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['jobname']])
          #ax.errorbar(finish, y, yerr=1, fmt=None, elinewidth=(1 + 2*size), color=color[s['jobname']])
-         #lines.append([ (start,y), (finish,y) ])
 
    ax.autoscale_view()
   
    #ax.set_yticks(range(0, i))
    #ax.set_yticklabels(nodenames)
+
+   xticks = [0]
+   xlabels = [0]
+   delta = 0
+   for g in gaps:
+      xticks.append(g[0] - delta - mintime)
+      xlabels.append(seconds2human(g[1]-g[0]) + " idle")
+      delta += g[1] - g[0]
+   xticks.append(maxtime-mintime-delta)
+   xlabels.append(seconds2human(maxtime-mintime-delta))
+   ax.set_xlim(xmin=0, xmax=maxtime-mintime-delta)
+   ax.set_xticks(xticks)
+   ax.set_xticklabels(xlabels, rotation=30, ha='right')
 
    majorlabels = []
    majorlocs = []
@@ -539,11 +571,22 @@ def plot(filename, pngfile):
    ax.set_yticklabels(majorlabels)
    ax.set_ylim(ymin=-2)
 
-   ax.set_xlim(xmin=0, xmax=maxtime-mintime)
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
    canvas.print_figure(pngfile, antialias=False, dpi=600)
 
+def seconds2human(s):
+   if s < 60:
+     return "%.0ds" % s
+   if s < 3600:
+     return "%.0dm" % (s/60)
+   if s < 86400:
+     return "%.0dh" % (s/3600)
+   if s < 604800:
+     return "%.0dd" % (s/86400)
+   else:
+     return "%.0dw" % (s/604800)
+   
 class MethodOptionParser(optparse.OptionParser):
    """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
 
