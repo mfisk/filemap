@@ -310,13 +310,21 @@ def mkdirexist(path):
          raise
 
 def rsyncFilter(rootdir, lst):
-   includes = ["/"]
+   r = os.path.basename(rootdir) + "/" 
+
+   includes = [r]
    for l in lst:
       while l != "/":
-         includes.append(l)
+         includes.append(r + l)
          l = os.path.dirname(l)
+
+   
+   #l = rootdir   
+   #while l != "/":
+      #includes.append(l)
+      #l = os.path.dirname(l)
       
-   includes = ["--include=" + rootdir + "/" + x for x in includes] 
+   includes = ["--include=" + x for x in includes] 
    includes = [i.replace('//','/') for i in includes]
    includes.append("--exclude=*")
    return includes
