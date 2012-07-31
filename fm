@@ -270,8 +270,8 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          sbytes = sum(bytes)
          sutime = sum(utime)
          sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %g MB/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
-            % (sbytes/MB/swtime, swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
+         print >>sys.stderr, "Serial performance: %g MB, %g MB/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+            % (sbytes/MB, sbytes/MB/swtime, swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
 
          if bytes[0] and wallclock:
             rate = bytes[0]/MB/wallclock
