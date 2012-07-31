@@ -1543,7 +1543,7 @@ class JobScheduler:
             traceback.print_exc()
             print >>sys.stderr, "Error parsing job description", j, "; skipping"
 
-   def RunOnce(self):
+   def RunOnce(self, invalidateOnly=False):
          """Try to launch a work item and return True on success (None->nothing to do)"""
 
          if self.options.dynamicload and not self.procs.isempty() and not cpu.available():
@@ -1562,7 +1562,9 @@ class JobScheduler:
             if (not self.options.dynamicload) and (j.running >= j.threads):
                continue
 
-            proc = j.compute(self.options, self.procs)
+            proc = j.compute(self.options, self.procs, invalidateOnly)
+            if invalidateOnly:
+               continue
 
             if self.options.dynamicload:
                # Restart our checking of idleness
@@ -1594,6 +1596,8 @@ class JobScheduler:
       didSomething = False
       sleep = 0.01
 
+      self.RunOnce(invalidateOnly=True)
+
       while True:
          if self.freethreads:
             self.ReadJobDir()
@@ -1608,6 +1612,13 @@ class JobScheduler:
                # Don't return because we're still working,
                # but wait before we look for more work to do.
                #print >>sys.stderr, "Wait for completion (and/or more work)"
+
+               # XXX. Check syncfiles for all active procs and see if somebody
+               # finishes before us.  If so, abort (we may be the a slow node).
+               # Only check here since that's when we're on our last work item (no more work to do)
+               # and could accelerate our wait finishing sooner by terminating.
+               #for p in self.procs:
+               #   check to see if somebody beat us
 
                # Sleeping hurts latency for detecting new inputs, but avoids busy waits.
                # So we do an exponential backoff in how long we sleep with a max of 1 second
@@ -1658,11 +1669,17 @@ class JobScheduler:
       self.locker.done(p.outrelpath)
    
       dst = p.outdirname + "/" + p.outbasename 
+      new = p.outdirname + "/." + p.outbasename
       if os.path.exists(dst): 
-          shutil.rmtree(dst)
+          tmp = p.outdirname + "/.del." + p.outbasename
+          os.rename(dst, tmp)
+          os.rename(new, dst)
+          shutil.rmtree(tmp)
           # By removing this dst, we're invalidating any previously derived data, but our redo-if-newer-than logic will handle the compute.
+          # XXX. There is still a chance for a race if a child already was in process on the old dir and in between multiple files.
+      else:
+          os.rename(p.outdirname + "/." + p.outbasename, dst)
 
-      os.rename(p.outdirname + "/." + p.outbasename, dst)
       p.job.running -= 1 
      
 class CpuProfile:
@@ -1789,20 +1806,19 @@ class FmJob:
       if self.checkexit != None:
          self.checkexit = int(self.checkexit)
 
-   def compute(self, options, procs):
+   def compute(self, options, procs, invalidateOnly):
       # First time thru we expand the input globs to a file list
       # Unless this is a continuous job, this will be the only time we enumerate the files
       if not self.cachedinputs:
          glob = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
-         if self.previousinputs: # Updating list for continuous job
+         if self.previousinputs: # Updating list 
             self.cachedinputs = list( set(glob) - self.previousinputs )
-            if (not self.cachedinputs):
-               # parent might have invalidated some things we already examined, so ignore previousinputs
-               self.cachedinputs = glob
          else: # First pass
             self.cachedinputs = glob
 
-         self.previousinputs = set(glob)
+         if not invalidateOnly:
+            self.previousinputs = set(glob)
+
          random.shuffle(self.cachedinputs)
 
       if self.reduce:
@@ -1842,7 +1858,7 @@ class FmJob:
             #print >>sys.stderr, part, "processes on this node", list(choices)
             outfilename = "/reduce/" + self.jobname + "/" + part + ".d"
 
-            p = self.computeItem(files, outfilename, options, procs, putargs=putargs)
+            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, putargs=putargs)
             if p: 
                #print >>sys.stderr, "Reduce part", part, "on node", Locations.thisname, files, "of", self.inputs
                return p
@@ -1856,18 +1872,16 @@ class FmJob:
             # Don't process .d directories as named inputs (feedback loop)
             continue
 
-         bname = os.path.basename(i)
-
          relativename = i[len(options.rootdir):]
          outfilename = relativename + ".d/" + escape(self.cmd)
         
-         p = self.computeItem(i, outfilename, options, procs)
+         p = self.computeItem(i, outfilename, options, procs, invalidateOnly)
          if p:
             return p
 
       return None # Nothing to do
 
-   def computeItem(self, inputs, outfilename, options, procs, putargs="argv"):
+   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, putargs="argv"):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
       if type(inputs) != type([]):
          inputs = [inputs]
@@ -1880,8 +1894,6 @@ class FmJob:
       for i in inputs:
          newestinput = max(newestinput, os.path.getmtime(i))
 
-      invalid = False
-
       # First check locally to see if output exists and is current
       if os.path.exists(statfile):
          lasttime = os.path.getmtime(statfile)
@@ -1893,26 +1905,35 @@ class FmJob:
 
             stats = cPickle.load(file(statfile))
             if stats['status'] != self.checkexit:
-               print >>sys.stderr, "Invalidating previous output based on exit status", statfile
-               invalid = True
+               print >>sys.stderr, "Invalidating previous output based on exit status", statfile, stats['status'], "instead of", self.checkexit
             else:
                return None
-         #else:
-            #print >>sys.stderr, "Old local results", statfile, lasttime, newestinput
-            #pass
 
-      else: 
-         #print >>sys.stderr, "No local results", statfile
-         pass
+         print >>sys.stderr, "Removing old local results", statfile, lasttime, newestinput
+         #Remove it now before somebody uses it for something
+         dir = os.path.dirname(statfile)
+         parent = os.path.dirname(dir)
+         dirname = os.path.basename(dir)
+
+         tmp = parent + ".del." + dirname
+         os.rename(dir, tmp)
+         shutil.rmtree(tmp)
+        
+      #else: 
+      #   #print >>sys.stderr, "No local results", statfile
 
       # If we get here, then we're locally prepared to rerun
       # Check global synchronization to see if another node already ran it
-      if self.locker.isdone(outfilename, newestinput, invalid=invalid):
+      if self.locker.isdone(outfilename, newestinput):
           return None
 
-      #print >>sys.stderr, "Got lock", syncfilename
+      if invalidateOnly:
+         # Don't actually do anything right now
+         return None
 
-      # Now we hold the "lock" on the syncfile, so proceed...
+      # Now we proceed to execute.
+      # Lock will only be taken upon completion (in case we're a slow node).
+      # XXX. our scheduler should check and kill us off if somebody finishes first
 
       # Now insert a "." at the beginning of the basename for partial output
       odirname = os.path.dirname(obase)
@@ -2041,16 +2062,28 @@ class FileSynchronizer:
 	#print >>sys.stderr, "unlockrm", syncfiles
         self.locs.pick().forAll(["rm", "-Rf"], syncfiles, absolute=True, subst=True).collect()
 
-    def isdone(self, filename, newestinput, invalid=False):
+    def isdone(self, filename, newestinput):
+        # Locally we want to (re-)create output. 
+        # Return True iff somebody already finished
         syncfilename = self._filename2lock(filename)
         if not os.path.exists(syncfilename): return False
 
-	lasttime = os.path.getmtime(syncfilename)
-	if newestinput > lasttime: return False
-
-        if invalid and file(syncfilename).read() == self.locs.thisname:
+        # If we did it last time, then redo it now
+        if file(syncfilename).read() == self.locs.thisname:
+           # We did it last time, remove our syncfile now
+           os.unlink(syncfilename)
            return False
 
+	lasttime = os.path.getmtime(syncfilename)
+	if newestinput > lasttime: 
+           # Somebody else did it, but we have newer inputs, so redo it
+           # XXX. this doesn't remove the output elsewhere so if we shuffle both, we may get the old input
+           # Hopefully if our input changed, there's will too.   If a node is offline while the input updates
+           # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
+           # things we have current locks for
+           return False
+
+        # Somebody else did it and recently enough that we'll trust their result
 	return True
 
     def done(self, filename):
@@ -2430,7 +2463,7 @@ and the program re-run.
                if Verbose > 0:
                   print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
                self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
-               continue     # XXX i don't think this works...
+               continue
       
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
 
