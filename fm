@@ -2262,7 +2262,7 @@ Has unix "mkdir -p" semantics."""
       """Show free space on each node."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
 
-      self._Locations().forAll(["df", "-h"], ["/"]).collect(labelPrint=True)
+      self._Locations().forAll(["df", "-h"], ["/"], trailer=["|", "grep", "/"]).collect(labelPrint=True)
 
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
