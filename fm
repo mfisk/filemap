@@ -769,7 +769,7 @@ class FmLocations:
             if not first: first = min
          else:
             #singleton
-            expanded.append(int(interval))
+            expanded.append(interval)
             if not first: first = interval
 
       # First is the first example node number string.
@@ -800,7 +800,7 @@ class FmLocations:
             l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
             l.hostname = self.config_get(stanza, "hostname")
             if num: 
-               l.hostname = l.hostname % (num)
+               l.hostname = l.hostname % (int(num))
             
             l.jobdir = l.rootdir + "/jobs"
             if qbyhost:
