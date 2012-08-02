@@ -729,8 +729,19 @@ class FmLocations:
          for s in self.config.sections():
             if s == "global": 
                continue
-            l = self.parseLocation(s)
-            self.locs[s] = l
+            r = self._expandList(s)
+            if r:
+               for (i,name) in r:
+                  self.locs[name] = self.parseLocation(s, name=name, num=i)
+                  nl = os.environ.get("SLURM_JOB_NODELIST")
+                  if nl:
+                     # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
+                     if not self.locs[name].inactive and self.locs[name].hostname not in [i[1] for i in self._expandList(nl)]:
+                        self.locs[name].inactive = True
+                        #print "Marking", name, "inactive per SLURM"
+               
+            else:
+               self.locs[s] = self.parseLocation(s)
 
       # Use global config values by default (thisis() can override later)
       self.this = self.parseLocation("global")
@@ -741,9 +752,37 @@ class FmLocations:
       if self.cleanup:
          os.unlink(self.cleanup)
 
-   def parseLocation(self, stanza):
+   def _expandList(self, liststr):
+      range_re = re.compile("(.*)[\(\[](.*)[\)\]](.*)$")
+      r = range_re.match(liststr)
+      if not r:
+         return None
+      prefix = r.group(1)
+      lst = r.group(2)
+      suffix = r.group(3)
+      expanded = []
+      first = None
+      for interval in lst.split(","):
+         if "-" in interval:
+            (min,max) = interval.split("-")
+            expanded += range(int(min), int(max)+1)
+            if not first: first = min
+         else:
+            #singleton
+            expanded.append(interval)
+            if not first: first = interval
+
+      # First is the first example node number string.
+      # It may be padded with leading zeros, the following will preserve that formatting:
+      expanded = [(i, prefix + first[:-len(str(i))] + str(i) + suffix) for i in expanded]
+      return expanded
+
+   def parseLocation(self, stanza, name=None, num=None):
       l = FmLocation()
-      l.name = stanza
+      if name: 
+         l.name = name
+      else:
+         l.name = stanza
 
       qbyhost = self.config.has_option("global", "queuebyhost")
 
@@ -756,22 +795,25 @@ class FmLocations:
       l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
 
       if l.name != "global": 
-         l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
-         l.hostname = self.config_get(stanza, "hostname")
-
-         l.jobdir = l.rootdir + "/jobs"
-         if qbyhost:
-            l.qname = l.hostname
-         else:
-            l.qname = l.name
-
-         pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
-         l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
-         l.processes = int(self.config_get(stanza, "processes", "1000"))
          l.inactive = self.config_get(stanza, "inactive", False)
-         l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
-         l.dynamicload = float(self.config_get(stanza, "dynamicload", "2"))
-
+         if not l.inactive:
+            l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
+            l.hostname = self.config_get(stanza, "hostname")
+            if num: 
+               l.hostname = l.hostname % (num)
+            
+            l.jobdir = l.rootdir + "/jobs"
+            if qbyhost:
+               l.qname = l.hostname
+            else:
+               l.qname = l.name
+   
+            pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
+            l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
+            l.processes = int(self.config_get(stanza, "processes", "1000"))
+            l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
+            l.dynamicload = float(self.config_get(stanza, "dynamicload", "2"))
+   
       return l
    
    def config_get(self, section, key, defval=None, raw=False):
@@ -792,7 +834,7 @@ class FmLocations:
       hosts = set()
       newlocs = {}
       for l in self.locs.values():
-         if l.hostname in hosts:
+         if l.inactive or l.hostname in hosts:
             continue
          else:
             newlocs[l.name] = l
