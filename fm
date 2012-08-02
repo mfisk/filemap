@@ -2345,7 +2345,7 @@ Has unix "mkdir -p" semantics."""
       """Show free space on each node."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
 
-      self._Locations().forAll(["df", "-h"], ["/"], trailer=["|", "grep", "/"]).collect(labelPrint=True)
+      self._Locations().forAllLocal(["df", "%(ROOTDIR)/"]).collect(labelPrint=True)
 
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
@@ -3013,6 +3013,11 @@ class FmLocalCommands(CommandSetBase):
       else:
            perms[offset] = chr.lower()
       return string.join(perms, '')
+
+   def df(self, args):
+      f = os.popen("df -h " + " ".join(args))
+      f.readline()
+      sys.stderr.write(f.read())
 
    def lsone(self, fname, fs):
       # Construct the dict that is pickled and passed to the client
