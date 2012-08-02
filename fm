@@ -769,7 +769,7 @@ class FmLocations:
             if not first: first = min
          else:
             #singleton
-            expanded.append(interval)
+            expanded.append(int(interval))
             if not first: first = interval
 
       # First is the first example node number string.
