@@ -1111,7 +1111,7 @@ locations of this instance."""
          cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr, "--files-from=-", "--no-d", "/", dstpath]
          inputlist = '\n'.join(nodesrcs[dst])
          #print >>sys.stderr, "inputlist:", nodesrcs[dst]
-         procs.Popen(cmd, queue=queue, stdinstr=inputlist, node=queue, tag=tag)
+         procs.Popen(cmd, queue=queue, stdinstr=inputlist, node=dst, tag=tag)
 
 
    def get(self, args, procs=None, outfile=sys.stdout, relative=False):
