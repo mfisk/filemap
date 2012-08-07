@@ -1026,7 +1026,7 @@ locations of this instance."""
          if os.path.isdir(a):
             if "/./" not in a:
                a += "/./"
-            srcsfiles += expanddir(a)
+            srcfiles += self.expanddir(a)
 
          else:
             if "/./" not in a:
