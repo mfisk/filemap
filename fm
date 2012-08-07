@@ -717,6 +717,10 @@ class FmLocations:
          self.config.readfp(filebuf)
 
          self.replication = int(self.config_get("global", "replication", "1"))
+
+         #All-to-all can hit sshd's MaxStartups limit, so retry a lot
+         self.all2all_retries = int(self.config_get("global", "all2all_retries", "7"))
+
          self.umask = int(self.config_get("global", "umask", "0002"))
          path = self.config_get("global", "pathextras")
          if path:
@@ -1194,7 +1198,7 @@ class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
-   def __init__(self, retries=3):
+   def __init__(self, retries=0):
       self.queues = {}
       self.poll = select.poll()
       self.fd2proc = {}
@@ -1421,9 +1425,9 @@ class Procs:
       # XXX: ssh returns 255 if it can't connect and rsync returns 12
       if p.status and p.kwargs['retries'] and (os.WEXITSTATUS(p.status) == 255 or os.WEXITSTATUS(p.status) == 12):
          # Requeue if retries enabled and child returned 255 (SSH failed to connect)
-         p.kwargs['retries']  -= 1
          if Verbose > 0:
-            print >>sys.stderr, p.kwargs['retries'], "more retries for", p.queue
+            print >>sys.stderr, p.kwargs['retries'], "more retries for", p.node
+         p.kwargs['retries']  -= 1
          time.sleep(2**(self.retries - p.kwargs['retries'] - 4) + 0.5 * random.random())
          self.queues[p.queue].append(p.kwargs)
          self.wakeup(p.queue)
@@ -2997,12 +3001,12 @@ class FmLocalCommands(CommandSetBase):
       CommandSetBase.__init__(self, args, p)
 
    def replicate(self, args):
-      procs = Procs(retries=7)
+      procs = Procs(retries=self.Locations.all2all_retries) 
       errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True).collect()
       return errors
 
    def redistribute(self, args):
-      procs = Procs(retries=7)
+      procs = Procs(retries=self.Locations.all2all_retries) 
       errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True, hashbasename=True).collect()
       return errors
 
