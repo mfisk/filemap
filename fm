@@ -870,6 +870,9 @@ class FmLocations:
       Specify a seed to get deterministic results (e.g. for a given
       extension number.)  The return value is the list of node names."""
 
+      # Try to yield the right $n$ for this seed and if none of those are active, the next replicate after that
+      foundactive = False
+
       if not n: 
          n = self.replication
 
@@ -878,9 +881,12 @@ class FmLocations:
       i = 0
       for l in nodes:
          i += 1
-         if i > n:
+         if i > n and foundactive:
+            # Stop if we've examined $n$ and at least 1 was active
             break
-         yield l
+         if not self.locs[l].inactive: 
+            foundactive = True
+            yield l
 
       if i <= n:
          print >>sys.stderr, "Cannot pick %d locations" % (n)
@@ -1050,8 +1056,6 @@ locations of this instance."""
 
          choices = self.pickdstnodes(seed, pickn, hashbasename)
          for c in choices:
-            if c.inactive: continue
-
             dictListAppend(nodesrcs, c.name, s)
 
       return self.rsync(nodesrcs, dst, serialize, procs, tag)
@@ -1076,8 +1080,12 @@ locations of this instance."""
 
             return [self.locs[c] for c in choices]
          else:
-            # Use all destinations
-            return self.locs.values()
+            # Use all destinations that are active
+            retlist = []
+            for c in self.locs:
+               if not self.locs[c].inactive:
+                  retlist.append(self.locs[c])
+            return retlist
 
    def rsync(self, nodesrcs, dstdir, serialize, procs, tag):
       # nodesrcs is a dictionary indexed by nodenames each containing a list of fully-qualified local srcs.
