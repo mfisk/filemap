@@ -145,7 +145,7 @@ def partition():
         qstr = 'CAST((%s) AS int) - (CAST((%s) AS int) %% %d)' % \
             (qstr, qstr, options.mod)
 
-    cursor.execute('SELECT *, %s AS _part_ FROM %s' %
+    cursor.execute('SELECT *, (%s) AS _part_ FROM %s' %
                    (qstr, name))
 
     outputs = {}
