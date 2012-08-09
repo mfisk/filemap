@@ -114,8 +114,7 @@ def partition():
     import optparse
     import struct
 
-    usage = '%prog [-e EXPR|-c COLUMN] [options] [databases]'
-    parser = optparse.OptionParser(usage=usage)
+    parser = optparse.OptionParser()
     
     parser.add_option('-n', '--bins', action='store', type='int', 
                       dest='bins', default=300,
