@@ -2673,7 +2673,10 @@ Unlike 'get -c', duplicate instances of files will be included."""
 
    def _ls(self, args):
       """generic way to get info about files in a blob"""             
-      if not args: 
+      if args:
+         # Quote these -- they are probably globs and we don't want the remote shell to expand them
+         args = ["'" + a + "'" for a in args]
+      else: 
          args = ["/"]
       pkls = self._local_pickles(["localls"] + args)
 
