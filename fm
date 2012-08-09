@@ -1095,9 +1095,15 @@ locations of this instance."""
 
       dsts = nodesrcs.keys()
       random.shuffle(dsts)
+      i = 0
       for dst in dsts:
          if serialize:
-            queue = "serialize"
+            i += 1
+            if serialize > 1:
+               # Round-robin
+               queue = "rr" + str(i % int(serialize))
+            else:
+               queue = "serialize"
          else:
             queue = dst  
 
@@ -2379,7 +2385,7 @@ Has unix "mkdir -p" semantics."""
 Copy the specified file(s) into the virtual store.  
 """
       p = MethodOptionParser(fixed=["files...", "dst"])
-      p.add_option('-s', '--serialize', action='store_true', help="Serialize transfers", default=False)
+      p.add_option('-s', '--serialize', action='store', help="Number of nodes to store to concurrently", default=False)
       (options, args) = p.parse_args(args)
 
       dst = args[-1]
