@@ -2260,7 +2260,7 @@ http://mfisk.github.com/filemap
       p = MethodOptionParser(fixed=["infile"])
       p.add_option("-n", "--nways", help="Number of output files to use")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
-      p.add_option("-f", "--field", default=1, help="Use field # (starting with 1).")
+      p.add_option("-f", "--field", default=1, help="Use field # or range (numbered starting with 1).")
       (options, args) = p.parse_args(args)
       options.nways = int(options.nways)
 
@@ -2275,7 +2275,12 @@ http://mfisk.github.com/filemap
          options.regex = re.compile(options.regex)
  
       if options.field:
-         options.field = int(options.field) - 1
+         if "-" in options.field:
+            options.field = options.field.split("-")
+            options.field = [int(i)-1 for i in options.field]
+            options.field[1] += 1
+         else:
+            options.field = [int(options.field) - 1, int(options.field)]
 
       files = []
       for i in range(0, options.nways):
@@ -2295,13 +2300,10 @@ http://mfisk.github.com/filemap
                print >>sys.stderr, "Key not found in line:", line.rstrip()
          else:
             words= line.split()
-            if options.field >= len(words):
-               key = None
-            else:
-               #print words[options.field], words
-               key = words[options.field]
+            #print words[options.field[0]:options.field[1]]
+            key = words[options.field[0]:options.field[1]]
 
-         i = hash(key) % options.nways
+         i = hash(str(key)) % options.nways
          files[i].write(line)
 
       for f in files: f.close()
