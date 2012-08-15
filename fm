@@ -1126,9 +1126,10 @@ locations of this instance."""
 Note that if the source is wildcard, then output will be put in a 
 sub-directory of the destination.  The name of that subdirectory 
 will be the directory name preceding the first wildcard."""
-      p = MethodOptionParser(fixed=["src... dst"])
-      p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout")
+      p = MethodOptionParser(fixed=["src... [dst]"])
+      p.add_option("-c", "--cat", action="store_true", help="Cat files to stdout (do not specify a destination)")
       p.add_option("-n", "--name", action="store_true", help="Show file name when catting files")
+      p.add_option("-e", "--errors", action="store_true", help="Handle .stderr files specially")
       (options, args) = p.parse_args(args)
 
       if (not options.cat) and (len(args) < 2):
@@ -1187,13 +1188,21 @@ will be the directory name preceding the first wildcard."""
          empty = True
          for (dirpath, dirnames, filenames) in os.walk(dst):
             for f in filenames:
+               if f == ".status": 
+                  #cat'ing .status files is never(?) the right answer and rsync tends to fetch .* along with *
+                  continue
                fname = os.path.join(dirpath, f)
                if os.path.getsize(fname):
-                  if options.name:
-                     relname = fname[len(dst):]
-                     print >>outfile, "=== %s ===" % relname
-                     empty = False
-                  outfile.writelines(file(fname))
+                  relname = fname[len(dst):]
+                  if f == ".stderr" and options.errors:
+                     print >>sys.stderr, "=== %s ===" % relname
+                     sys.stderr.writelines(file(fname))
+                     print >>sys.stderr, "======" % relname
+                  else:
+                     if options.name:
+                        print >>outfile, "=== %s ===" % relname
+                     outfile.writelines(file(fname))
+                  empty = False
          if options.name and not empty:
             print >>outfile, "======"
 
@@ -2565,28 +2574,8 @@ and the program re-run.
             outputglobs = []
          else:
             outputglobs = inglobs
-         loc = tempfile.mkdtemp(prefix="tmp-fm-status-")
-         self.get(outputglobs + errglobs + [loc], relative=True)
+         self.get(["-ce"] + outputglobs + errglobs, relative=True)
 
-         for (dirpath, dirnames, filenames) in os.walk(loc):
-            for f in filenames:
-               fname = os.path.join(dirpath, f)
-               fh = file(fname)
-
-               if f == ".stderr":
-                  # Do nothing if empty
-                  if os.path.getsize(fname):
-                     print >>sys.stderr, '===', fname, '==='
-                     sys.stderr.writelines(fh)
-                     print >>sys.stderr, '====='
-               elif f == ".status":
-                  pass
-               else:
-                  sys.stdout.writelines(fh)
-               
-         shutil.rmtree(loc)
-
- 
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud to local storage."""
       self._Locations().get(*args, **kwargs)
