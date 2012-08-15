@@ -793,7 +793,7 @@ class FmLocations:
       l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
 
       if l.name != "global": 
-         l.inactive = self.config_get(stanza, "inactive", False)
+         l.inactive = self.config_get(stanza, "inactive", l.inactive)
          l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
          if not l.inactive:
             l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
@@ -1209,6 +1209,7 @@ will be the directory name preceding the first wildcard."""
          
 class FmLocation:
    def __init__(self):
+      self.inactive = False
       pass
 
 class Procs:
