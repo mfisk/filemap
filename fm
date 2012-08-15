@@ -2256,7 +2256,7 @@ http://mfisk.github.com/filemap
          self._locs = FmLocations()
       return self._locs
 
-   def split(self, args):
+   def partition(self, args):
       """Partition an input file.
       Split an inputfile into n pieces.  By default, the first
       whitespace-delimited field is used as the key.  All lines with the
@@ -2313,7 +2313,7 @@ http://mfisk.github.com/filemap
             #print words[options.field[0]:options.field[1]]
             key = words[options.field[0]:options.field[1]]
 
-         i = hash(str(key)) % options.nways
+         i = int(sha(str(key)).hexdigest(), 16) % options.nways
          files[i].write(line)
 
       for f in files: f.close()
