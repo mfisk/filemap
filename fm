@@ -715,6 +715,8 @@ class FmLocations:
          #All-to-all can hit sshd's MaxStartups limit, so retry a lot
          self.all2all_retries = int(self.config_get("global", "all2all_retries", "7"))
 
+         self.slurmfe = self.config_get("global", "slurmfe", None)
+
          self.umask = int(self.config_get("global", "umask", "0002"))
          path = self.config_get("global", "pathextras")
          if path:
@@ -724,25 +726,35 @@ class FmLocations:
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
       if not locs:
+         nl = os.environ.get("SLURM_JOB_NODELIST")
+         if not nl and self.slurmfe:
+            nl = subprocess.Popen(["ssh", self.slurmfe, "./sfm nlist"], stdout=subprocess.PIPE, stdin=None)
+            nl = nl.stdout.read().strip()
+            os.environ["SLURM_JOB_NODELIST"] = nl
+         if nl:
+            # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
+            if Verbose > 0: print >>sys.stderr, "Active SLURM nodes: ", nl
+            nl = self._expandList(nl)
+            nl = [i[1] for i in nl]
+
          for s in self.config.sections():
             if s == "global": 
                continue
             r = self._expandList(s)
-            if r:
-               for (i,name) in r:
-                  self.locs[name] = self.parseLocation(s, name=name, num=i)
-                  nl = os.environ.get("SLURM_JOB_NODELIST")
-                  if nl:
-                     # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
-                     if not self.locs[name].inactive and self.locs[name].hostname not in [i[1] for i in self._expandList(nl)]:
-                        self.locs[name].inactive = True
-                        #print "Marking", name, "inactive per SLURM"
+            for (i,name) in r:
+               self.parseLocation(s, name=name, num=i)
+               if not nl and self.slurmfe:
+                  nl = subprocess.Popen(["ssh", self.slurmfe, "./sfm nlist"], stdout=subprocess.PIPE, stdin=None)
+                  nl = nl.stdout.read().strip()
+                  os.environ["SLURM_JOB_NODELIST"] = nl
+               if nl:
+                  # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
+                  if not self.locs[name].inactive and self.locs[name].hostname not in nl:
+                     self.locs[name].inactive = True
+                     #print "Marking", name, "inactive per SLURM"
                
-            else:
-               self.locs[s] = self.parseLocation(s)
-
       # Use global config values by default (thisis() can override later)
-      self.this = self.parseLocation("global")
+      self.parseLocation("global")
 
       self.locker = FileSynchronizer(self)
 
@@ -754,7 +766,7 @@ class FmLocations:
       range_re = re.compile("(.*)[\(\[](.*)[\)\]](.*)$")
       r = range_re.match(liststr)
       if not r:
-         return None
+         return [(None, liststr)]
       prefix = r.group(1)
       lst = r.group(2)
       suffix = r.group(3)
@@ -776,11 +788,16 @@ class FmLocations:
       return expanded
 
    def parseLocation(self, stanza, name=None, num=None):
-      l = FmLocation()
       if name: 
-         l.name = name
+         nodename = str(name)
       else:
-         l.name = stanza
+         nodename = str(stanza)
+
+      # Reuse (add attributes to) existing Location if we already saw this nodename
+      l = self.locs.get(nodename)
+      if not l:
+         l = FmLocation()
+         l.name = nodename
 
       qbyhost = self.config.has_option("global", "queuebyhost")
 
@@ -811,8 +828,10 @@ class FmLocations:
             l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
             l.processes = int(self.config_get(stanza, "processes", "1000"))
             l.dynamicload = float(self.config_get(stanza, "dynamicload", "2"))
-   
-      return l
+
+         self.locs[nodename] = l
+      else:
+         self.this = l
    
    def config_get(self, section, key, defval=None, raw=False):
       if self.config.has_option(section, key):
