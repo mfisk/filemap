@@ -93,7 +93,7 @@ def isremote(hname):
    else:
       return True
 
-nonalphanumre = re.compile('\W')
+nonalphanumre = re.compile('[^\w\.\-]')
 
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), string.join(s))
