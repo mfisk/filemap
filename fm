@@ -318,12 +318,6 @@ def rsyncFilter(rootdir, lst):
          includes.append(r + l)
          l = os.path.dirname(l)
 
-   
-   #l = rootdir   
-   #while l != "/":
-      #includes.append(l)
-      #l = os.path.dirname(l)
-      
    includes = ["--include=" + x for x in includes] 
    includes = [i.replace('//','/') for i in includes]
    includes.append("--exclude=*")
