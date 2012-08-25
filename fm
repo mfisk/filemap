@@ -687,7 +687,7 @@ class FmLocations:
             if not filename:
                if os.path.isfile("filemap.conf"):
                   filename = "filemap.conf"
-               elif os.path.expanduser("~/.filemap.conf"):
+               elif os.path.isfile(os.path.expanduser("~/.filemap.conf")):
                   filename = os.path.expanduser("~/.filemap.conf")
                else:
                   filename = "/etc/filemap.conf"
