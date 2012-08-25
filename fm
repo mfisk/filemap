@@ -3148,7 +3148,7 @@ class FmLocalCommands(CommandSetBase):
          # So strip the leading ./ that we added to make it relative
          aname = apath[2:].rstrip('/')
 
-         s = os.stat(apath)
+         s = os.lstat(apath)
          if stat.S_ISDIR(s.st_mode):
             for f in os.listdir(apath):
                fpath = apath + "/" + f
@@ -3158,7 +3158,6 @@ class FmLocalCommands(CommandSetBase):
                   s = os.lstat(fpath)
                except:
                   pass
-
                output.append(self.lsone(fname, s))
                 
          else:
