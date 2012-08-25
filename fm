@@ -2007,9 +2007,10 @@ class FmJob:
          parent = os.path.dirname(dir)
          dirname = os.path.basename(dir)
 
-         tmp = parent + ".del." + dirname
+         tmp = parent + "/.del." + dirname
          os.rename(dir, tmp)
          shutil.rmtree(tmp)
+         assert(not os.path.exists(statfile))
         
       #else: 
       #   #print >>sys.stderr, "No local results", statfile
@@ -2161,6 +2162,8 @@ class FileSynchronizer:
         if not os.path.exists(syncfilename): return False
 
         # If we did it last time, then redo it now
+        # isdone() is called iff we have newer inputs than outputs.
+        # We don't compare syncfile's lasttime, but presumably it is stale like the local output
         if file(syncfilename).read() == self.locs.thisname:
            # We did it last time, remove our syncfile now
            os.unlink(syncfilename)
@@ -2282,6 +2285,7 @@ http://mfisk.github.com/filemap
    def _Locations(self):
       if not self._locs: 
          self._locs = FmLocations()
+
       return self._locs
 
    def partition(self, args):
