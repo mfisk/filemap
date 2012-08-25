@@ -963,6 +963,9 @@ locations of this instance."""
          if cmd[0] == "fm":
             cmd = loc.fmcmd + cmd[1:]
          if isremote(loc.hostname):
+            # The remote sshd will use sh, so quote all the individual args
+            s = ["'" + i + "'" for i in s]
+            d = ["'" + i + "'" for i in d]
             cmd = loc.sshcmd + [loc.hostname] + cmd + s + d
 
          else:
@@ -2676,10 +2679,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
 
    def _ls(self, args):
       """generic way to get info about files in a blob"""             
-      if args:
-         # Quote these -- they are probably globs and we don't want the remote shell to expand them
-         args = ["'" + a + "'" for a in args]
-      else: 
+      if not args:
          args = ["/"]
       pkls = self._local_pickles(["localls"] + args)
 
