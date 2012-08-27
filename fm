@@ -877,7 +877,7 @@ class FmLocations:
             newlocs[l.name] = l
             hosts.add(l.hostname)
  
-      newlocs = FmLocations(self.config, locs=newlocs)
+      newlocs = FmLocations(self.config, locs=newlocs, procs=self.procs)
       newlocs.this = self.this
       return newlocs
       
@@ -937,7 +937,7 @@ locations of this instance."""
       for u in used: 
          useddict[u] = self.locs[u]
 
-      picked = FmLocations(self.config, locs=useddict)
+      picked = FmLocations(self.config, locs=useddict, procs=self.procs)
       picked.this = self.this
       return picked
          
@@ -1020,9 +1020,8 @@ locations of this instance."""
 
    def put(self, srclist, dst, relativeroot=False, procs=None, pickn=False, hashbasename=False, serialize=False):
       # We will glob this ourselves since we implicitly expand directories to the next level and, in the case of hashbasename, have to get the final filenames rather than globs in order to know where to put them.
-
       if not procs:
-         procs = Procs()
+         procs = self.procs
 
       relative = {}
 
@@ -1191,7 +1190,7 @@ will be the directory name preceding the first wildcard."""
          src = args[:-1]
 
       if not procs:
-         procs = Procs()
+         procs = self.procs
 
       for loc in self.locs.values():
          if loc.inactive: continue
@@ -2569,7 +2568,7 @@ and the program re-run.
          if cmd[0] == "<":
             if not options.statusonly:
                # Install the jobs on each node
-               self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+               self._Locations().put([tmpdir + "*"], "/jobs/")#.collect(maxErrors=maxErrors)
 
             shutil.rmtree(tmpdir)
             tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
@@ -2587,7 +2586,7 @@ and the program re-run.
 
       if not options.statusonly:
          # Install the jobs on each node
-         self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+         self._Locations().put([tmpdir + "*"], "/jobs/")#.collect(maxErrors=maxErrors)
 
       shutil.rmtree(tmpdir)
       if not starttime:
