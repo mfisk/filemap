@@ -716,6 +716,8 @@ class FmLocations:
          self.all2all_retries = int(self.config_get("global", "all2all_retries", "7"))
 
          self.slurmfe = self.config_get("global", "slurmfe", None)
+         if self.slurmfe == "localhost":
+            self.slurmfe = "sh -c"
 
          self.umask = int(self.config_get("global", "umask", "0002"))
          path = self.config_get("global", "pathextras")
@@ -726,27 +728,14 @@ class FmLocations:
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
       if not locs:
-         nl = os.environ.get("SLURM_JOB_NODELIST")
-         if not nl and self.slurmfe:
-            nl = subprocess.Popen(["ssh", self.slurmfe, "./sfm nlist"], stdout=subprocess.PIPE, stdin=None)
-            nl = nl.stdout.read().strip()
-            os.environ["SLURM_JOB_NODELIST"] = nl
-         if nl:
-            # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
-            if Verbose > 0: print >>sys.stderr, "Active SLURM nodes: ", nl
-            nl = self._expandList(nl)
-            nl = [i[1] for i in nl]
-
+         nl = self._getSlurmNodes(self)
+ 
          for s in self.config.sections():
             if s == "global": 
                continue
             r = self._expandList(s)
             for (i,name) in r:
                self.parseLocation(s, name=name, num=i)
-               if not nl and self.slurmfe:
-                  nl = subprocess.Popen(["ssh", self.slurmfe, "./sfm nlist"], stdout=subprocess.PIPE, stdin=None)
-                  nl = nl.stdout.read().strip()
-                  os.environ["SLURM_JOB_NODELIST"] = nl
                if nl:
                   # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
                   if not self.locs[name].inactive and self.locs[name].hostname not in nl:
@@ -757,6 +746,37 @@ class FmLocations:
       self.parseLocation("global")
 
       self.locker = FileSynchronizer(self)
+
+   def _getSlurmNodes(self, alloc=True):
+      nl = os.environ.get("SLURM_JOB_NODELIST")
+      if not nl and self.slurmfe:
+         nl = subprocess.Popen(self.slurmfe.split() + ["squeue -t RUNNING -u $USER -o %i/%j/%N"], stdout=subprocess.PIPE, stdin=None)
+         for line in nl.stdout:
+             line = line.strip()
+             (id,name,nl) = line.split('/')
+             #print >> sys.stderr, "SLURM jobid", id, name, nl
+             if name != "FM": 
+                nl = None
+                continue
+         
+             os.environ["SLURM_JOB_NODELIST"] = nl
+             os.environ["SLURM_JOB_ID"] = str(id)
+             #print >> sys.stderr, "SLURM jobid", id, nl
+
+             break  
+
+         if not nl:
+             print >>sys.stderr, "No active FM job found in SLURM"
+             if alloc:
+                subprocess.Popen(self.slurmfe.split() + ["salloc -k -J FM --nodes 9999 --overcommit --share --ntasks-per-node 2 --no-shell"], stdout=sys.stdout, stderr=sys.stderr, stdin=None).wait()
+                return self._getSlurmNodes(alloc=False)
+
+      assert(nl)
+      # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
+      if Verbose > 0: print >>sys.stderr, "Active SLURM nodes: ", nl
+      nl = self._expandList(nl)
+      nl = [i[1] for i in nl]
+      return nl
 
    def __del__(self):
       if self.cleanup:
