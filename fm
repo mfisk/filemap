@@ -514,7 +514,8 @@ def plot(filename, pngfile):
    for node in nodes:
       y = nodes2y[node]
 
-      print >>sys.stderr, "Plotting line", node, "with", len(nodes[node]), "elements"
+      if Verbose > 0:
+         print >>sys.stderr, "Plotting line", node, "with", len(nodes[node]), "elements"
       for s in nodes[node]:
 
          finish = s['finish']
