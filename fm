@@ -756,6 +756,7 @@ class FmLocations:
    def _getSlurmNodes(self, alloc=True):
       nl = os.environ.get("SLURM_JOB_NODELIST")
       if not nl and not self.slurmfe:
+         # Must not be running under SLURM
          return None
 
       if not nl:
@@ -775,12 +776,16 @@ class FmLocations:
              break  
 
          if not nl:
-             print >>sys.stderr, "No active FM job found in SLURM"
              if alloc:
-                subprocess.Popen(self.slurmfe.split() + ["salloc -k -J FM --nodes 9999 --overcommit --share --ntasks-per-node 2 --no-shell"], stdout=sys.stdout, stderr=sys.stderr, stdin=None).wait()
+                if Verbose > 0: print >>sys.stderr, "Starting new FM job in SLURM"
+                subprocess.Popen(self.slurmfe.split() + ["salloc -k -J FM --nodes 1-9999 --overcommit --share --ntasks-per-node 2 --no-shell"], stdout=sys.stdout, stderr=sys.stderr, stdin=None).wait()
                 return self._getSlurmNodes(alloc=False)
+             else:
+                print >>sys.stderr, "Unable to find or start FM job found in SLURM"
+                sys.exit(2)
 
       assert(nl)
+
       # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
       if Verbose > 0: print >>sys.stderr, "Active SLURM nodes: ", nl
       nl = self._expandList(nl)
