@@ -2335,7 +2335,7 @@ http://mfisk.github.com/filemap
       p = MethodOptionParser(fixed=["infile"])
       p.add_option("-n", "--nways", help="Number of output files to use")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
-      p.add_option("-f", "--field", default=1, help="Use field # or range (numbered starting with 1).")
+      p.add_option("-f", "--field", default="1", help="Use field # or range (numbered starting with 1).")
       (options, args) = p.parse_args(args)
       options.nways = int(options.nways)
 
