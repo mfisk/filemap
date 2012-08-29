@@ -2888,7 +2888,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       else:
          options = []
 
-      self._Locations().forAll(["rm", "-f"] + options, args).collect()
+      self._Locations().forAllLocal(["localrm"] + options + args).collect()
 
       # Now clean-up the syncdir 
       self._Locations().locker.unlock(args, delList=True)
@@ -3156,6 +3156,28 @@ class FmLocalCommands(CommandSetBase):
 
       sys.stdout.write(cPickle.dumps(jobs))
       return
+
+   def localrm(self, args):
+      p = MethodOptionParser(fixed=["files..."])
+      p.add_option('-R', '--recurse', action='store_true', help="recurse")
+      (options, args) = p.parse_args(args)
+
+      os.chdir(self.Locations.this.rootdir)  
+      args = multiglob(["./" + a for a in args])
+
+      for a in args:
+         try:
+            os.unlink(a)
+         except OSError:
+            # Could be a directory
+            if options.recurse:
+               try:
+                  shutil.rmtree(a)
+               except:
+                  pass #-f semantics are to ignore errors
+  
+      if Verbose > 0: print >>sys.stderr, len(args)
+      return 
       
    def localls(self, args):
       os.chdir(self.Locations.this.rootdir)  
