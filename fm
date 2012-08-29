@@ -659,9 +659,13 @@ class MethodOptionParser(optparse.OptionParser):
       return r
 
 class FmLocations:
-   def __init__(self, config=None, locs={}, stdin=False):
+   def __init__(self, config=None, locs={}, stdin=False, procs=None):
       self.locs = locs # Allow pick() to derive an instance with a subset of the classes
-      self.procs = Procs()
+      if not procs:
+         self.procs = Procs()
+      else:
+         self.procs = procs
+
       self.cleanup = None
 
       if config:
