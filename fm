@@ -27,6 +27,7 @@ import errno
 import fcntl
 import glob
 import grp
+import gzip
 import math
 import optparse
 import os
@@ -2349,10 +2350,15 @@ http://mfisk.github.com/filemap
 
       files = []
       for i in range(0, options.nways):
-         fname = str(i+1)
-         files.append(file(fname, "w"))
+         fname = str(i+1) + ".gz"
+         files.append(gzip.GzipFile(fname, "w"))
 
-      for line in file(infile):
+      if infile.endswith("gz"):
+         f = gzip.GzipFile(infile)
+      else:
+         f = file(infile) 
+
+      for line in f:
          if options.regex:
             key = options.regex.search(line)
             if key:
