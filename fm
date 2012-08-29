@@ -750,7 +750,10 @@ class FmLocations:
 
    def _getSlurmNodes(self, alloc=True):
       nl = os.environ.get("SLURM_JOB_NODELIST")
-      if not nl and self.slurmfe:
+      if not nl and not self.slurmfe:
+         return None
+
+      if not nl:
          nl = subprocess.Popen(self.slurmfe.split() + ["squeue -t RUNNING -u $USER -o %i/%j/%N"], stdout=subprocess.PIPE, stdin=None)
          for line in nl.stdout:
              line = line.strip()
