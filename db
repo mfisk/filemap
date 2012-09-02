@@ -36,7 +36,7 @@ def s3_cat(dbs, args):
 
     success = False
     try:    
-        connection, cursor = s3connect("db")
+        connection, cursor = s3connect("s3")
         first = True
         for line in dbs:
             cursor.execute("attach database '%s' as input;" % line)
@@ -55,7 +55,7 @@ def s3_cat(dbs, args):
 
     except:
         if not success:
-            os.unlink("db")
+            os.unlink("s3")
         raise
 
     return 0
@@ -63,26 +63,21 @@ def s3_cat(dbs, args):
 
 def fb_q(db, args):
     qstr = ' '.join(args)
-
-    # Re-order and quote arguments to make it easier to run sqlite commands in fm
-    if not os.path.basename(db).endswith("fb"):
-        return 1
-    return subprocess.call(["ibis", "-q", ' '.join(qstr), "-o", "fb", db])
+    return subprocess.call(["ibis", "-q", qstr, "-output-as-binary", "fb", "-d", db], stderr=sys.stderr, stdout=sys.stdout)
 
 def s3_q(db, qstr):
     # Re-order and quote arguments to make it easier to run sqlite commands in fm
-    if not os.path.basename(db).endswith("db"):
-        return 1
     conn,cursor = s3connect(db)
-    cursor.execute("attach database 'db' as output;")
+    cursor.execute("attach database 's3' as output;")
     try:
-        cursor.execute(' '.join(qstr))
+	qstr = "create table output.db as %s" % ' '.join(qstr)
+        cursor.execute(qstr)
         for row in cursor:
             # User may have done something with visible results
             print "\t".join([str(i) for i in row])
         conn.commit()
     except:
-        os.unlink("db")
+        os.unlink("s3")
         raise
 
     return 0
@@ -282,8 +277,10 @@ def fb_import(db, cols, types):
 				colvals[i].append(int(rowvals[i]))
 			elif types[i].startswith('d'):
 				colvals[i].append(double(rowvals[i]))
+			elif types[i].startswith('b'):
+				colvals[i].append(rowvals[i])
 			else:
-				print >>sys.stderr, "Do not know about type", types[i]
+				print >>sys.stderr, "Unsupported/unknonw type:", types[i]
 				
 
 	    for i in xrange(0, len(cols)):
@@ -292,6 +289,25 @@ def fb_import(db, cols, types):
 
 	fast.cleanup()
 
+def s3_import(db, cols, types):
+        connection, cursor = s3connect(db)
+        cursor.execute('PRAGMA cache_size = 1048576')
+        cursor.execute('PRAGMA synchronous = OFF')
+        cursor.execute('PRAGMA temp_store = 2')
+
+        cursor.execute('CREATE TABLE %s(%s)' % ("db", ','.join(cols)))
+
+	for line in sys.stdin:
+		line = line.strip()
+		v = line.split()
+        	insert = 'INSERT INTO %s VALUES (%s)' % \
+                     ("db", ','.join(['?'] * len(v)))
+
+        	cursor.execute(insert, v)
+        connection.commit()
+        cursor.close()
+        connection.close()
+	
 def fb_print(db, args):
 	import fastbit
 	qh = fastbit.Query(",".join(args), db, args[0] + '=' + args[0])
@@ -301,7 +317,7 @@ def fb_print(db, args):
 	while (rh.has_next() == 0): #More
 		vals = []
 		for i in xrange(0, ncols):
-			if rh.getString(i): vals.append(rh.getString(i))
+			if rh.getString(i): vals.append(rh.getString(i).strip('"'))
 			elif rh.getInt(i): vals.append(rh.getInt(i))
 			elif rh.getLong(i): vals.append(rh.getLong(i))
 			elif rh.getDouble(i): vals.append(rh.getDouble(i))
@@ -309,9 +325,17 @@ def fb_print(db, args):
 			else: print >>sys.stderr, "Unknown type for column", i
 		if vals:
 			print '\t'.join(vals)
+
+def s3_print(db, args):
+        connection, cursor = s3connect(db)
+    	table = s3tablename(cursor)
+        cursor.execute("select %s from %s;" % (','.join(args), table))
+	for row in cursor:
+		row = [str(i) for i in row]
+		print '\t'.join(row)
 		
 dispatch = {
-	's3': {'q': s3_q, 'partition': s3_partition, 'cat': s3_cat, 'import': None},
+	's3': {'q': s3_q, 'partition': s3_partition, 'cat': s3_cat, 'import': s3_import, 'print': s3_print},
 	'fb': {'q': fb_q, 'partition': None, 	     'cat': None,   'import': fb_import, 'print': fb_print},
 }
 
