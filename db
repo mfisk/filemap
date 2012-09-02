@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
 import os
-import sqlite3
+import subprocess
 import sys
 
-def connect(db):
+def s3connect(db):
+    import sqlite3
     connection = sqlite3.connect(db)#, isolation_level='EXCLUSIVE')
     connection.text_factory = str
     cursor = connection.cursor()
@@ -16,7 +17,7 @@ def connect(db):
     
     return connection, cursor
 
-def tablename(cursor, db=None):
+def s3tablename(cursor, db=None):
     # I assume there is only one table in the database.
     if db:
         db += "."
@@ -30,21 +31,17 @@ def tablename(cursor, db=None):
     name = name[0]
     return name
 
-def cat():
+def s3_cat(dbs, args):
     # Take a list of databases on stdin and cat them together using the schema and table name found in the first database. 
 
     success = False
     try:    
-        connection, cursor = connect("db")
+        connection, cursor = s3connect("db")
         first = True
-        for line in sys.stdin:
-            line = line.strip()
-	    print line
-            if not os.path.basename(line).endswith("db"):
-                continue
+        for line in dbs:
             cursor.execute("attach database '%s' as input;" % line)
             if first:
-                table = tablename(cursor, 'input')
+                table = s3tablename(cursor, 'input')
                 cursor.execute("create table %s as select * from input.%s;" % (table,table))
                 first = False
             else:
@@ -63,11 +60,20 @@ def cat():
 
     return 0
 
-def q(db, qstr):
+
+def fb_q(db, args):
+    qstr = ' '.join(args)
+
+    # Re-order and quote arguments to make it easier to run sqlite commands in fm
+    if not os.path.basename(db).endswith("fb"):
+        return 1
+    return subprocess.call(["ibis", "-q", ' '.join(qstr), "-o", "fb", db])
+
+def s3_q(db, qstr):
     # Re-order and quote arguments to make it easier to run sqlite commands in fm
     if not os.path.basename(db).endswith("db"):
         return 1
-    conn,cursor = connect(db)
+    conn,cursor = s3connect(db)
     cursor.execute("attach database 'db' as output;")
     try:
         cursor.execute(' '.join(qstr))
@@ -77,65 +83,125 @@ def q(db, qstr):
         conn.commit()
     except:
         os.unlink("db")
-	raise
+        raise
 
     return 0
 
+CMDS = ['cat','q','partition','import','print']
+
 def usage():
-    print >>sys.stderr, "Usage: %s (q|cat|partition)" % (sys.argv[0])
+    print >>sys.stderr, "Usage: %s (%s)" % (sys.argv[0], '|'.join(CMDS))
     return 1
-    
+
+def checkdbtype(sfx):
+    if sfx != "s3" and sfx != "fb":
+	print >>sys.stderr, "Unsupported db name suffix", sfx
+	sys.exit(4)
+  
 def main():
     if len(sys.argv) < 2:
         return usage()
 
-    cmd = sys.argv.pop(1)
-    if cmd == "q":
-        db = sys.argv.pop()
-        qstr = sys.argv[1:]
-        return(q(db,qstr))
-    
-    elif cmd == "cat":
-        return cat()
-    
-    elif cmd == "partition":
-        return partition()
-    
+    args = sys.argv[1:]
+    cmd = args.pop(0)
+
+    if cmd not in CMDS:
+	return usage()
+
+    if cmd == 'cat':
+        # cat takes list of files on STDIN
+
+	dbs = [i.strip() for i in sys.stdin]
+	sfxs = set()
+	for i in dbs:
+	    sfxs.add(db[-2:])
+
+        if not sfxs:
+	    print >>sys.stderr, "No inputs specified on STDIN"
+	    return 3
+
+	if len(sfxs) > 1:
+	    print >>sys.stderr, "Cannot mix db types:", str(sfxs)
+	    return 4
+
+	checkdbtype(sfxs[0])
+        return dispatch[sfxs[0]]['cat'](dbs, args)
+
     else:
-        return usage()
+	# last argument is a db file (for ease of use with fm or xargs)
 
+	if len(args) < 1:
+		print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<query> <db>"
+		return 1
 
-def partition():
+	db = args.pop() 
+	sfx = db[-2:]
+        checkdbtype(sfx)
+
+	if cmd == 'partition':
+    		import optparse
+
+    		parser = optparse.OptionParser()
+    
+    		parser.add_option('-n', '--bins', action='store', type='int', 
+                      dest='bins', default=300,
+                      help='the name of a timestamp column to partition by')
+    		parser.add_option('-m', '--mod', type='int', action='store',
+                      dest='mod',
+                      help='bin values into partitions of fixed size')
+    
+    		options, args = parser.parse_args()
+    
+    		if len(args) < 2:
+        		parser.error('no query specified')
+
+	 	return dispatch[sfx][cmd](db, args, options)
+
+	elif cmd == 'q':
+		if len(args) < 1:
+			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<query> <db>"
+			return 1
+        	return dispatch[sfx][cmd](db, args)
+
+	elif cmd == 'print':
+		if len(args) < 1:
+			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<columns> <db>"
+			return 1
+		return dispatch[sfx][cmd](db, args)
+
+    	elif cmd == 'import':
+		if len(args) < 1:
+			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<columns> <db>"
+			return 1
+
+		cols = []
+		types = []
+		for a in args:
+			x = a.split(':')
+			cols.append(x[0])
+			if len(x) > 1:
+				types.append(x[1])
+			else:
+				types.append(None)
+
+		return dispatch[sfx][cmd](db, cols, types)
+
+	else:
+		assert(0)
+   
+    assert(0)
+
+def s3_partition(db, args, options):
     """Partition a single sqlite database into multiple databases
     using the value of a user-supplied expression OR by time binning.
     """
 
     import hashlib
-    import optparse
     import struct
+    qstr = ' '.join(args)
 
-    parser = optparse.OptionParser()
-    
-    parser.add_option('-n', '--bins', action='store', type='int', 
-                      dest='bins', default=300,
-                      help='the name of a timestamp column to partition by')
-    parser.add_option('-m', '--mod', type='int', action='store',
-                      dest='mod',
-                      help='bin values into partitions of fixed size')
-    
-    options, args = parser.parse_args()
-    
-    if len(args) < 2:
-        parser.error('no query specified')
-
-    qstr = ' '.join(args[:-1])
-    db = args.pop()
-
-    if not os.path.basename(db).endswith("db"):
-        return 1
-            
-    connection, cursor = connect(db)
-    name = tablename(cursor)
+    connection, cursor = s3connect(db)
+    name = s3tablename(cursor)
 
     cursor.execute("SELECT sql FROM sqlite_master WHERE type = 'table'" + \
                        ' AND name = ? LIMIT 1', (name,))
@@ -158,7 +224,7 @@ def partition():
             hash = struct.unpack_from("!Q",hash.digest())[0] % options.bins
             
             if not outputs.has_key(hash):
-                oconn,ocur = connect(str(hash) + ".db")
+                oconn,ocur = s3connect(str(hash) + ".db")
                 outputs[hash] = oconn,ocur
                 ocur.execute(createsql)
             else:
@@ -187,5 +253,66 @@ def partition():
 		except:
                     pass
 
+def fb_partition(db, args, options):
+	assert(0)
+
+def fb_cat(dbs, args):
+	assert(0)
+
+def fb_import(db, cols, types):
+	import fastbit
+	fast = fastbit.FastBit()
+        while True:
+	    colvals = []
+	    for i in xrange(0, len(cols)):
+		colvals.append([])
+
+	    batch = sys.stdin.readlines(1000000)
+	    if not batch: break
+
+	    for line in batch:
+		line = line.strip()
+		rowvals = line.split()
+		#print line, rowvals, cols
+		assert(len(rowvals) == len(cols))
+		for i in xrange(0, len(cols)):
+			if types[i].startswith('t'):
+				colvals[i].append(rowvals[i])
+			elif types[i].startswith('i'):
+				colvals[i].append(int(rowvals[i]))
+			elif types[i].startswith('d'):
+				colvals[i].append(double(rowvals[i]))
+			else:
+				print >>sys.stderr, "Do not know about type", types[i]
+				
+
+	    for i in xrange(0, len(cols)):
+  	        fast.add_values(cols[i], types[i], colvals[i])
+	    fast.flush_buffer(db)
+
+	fast.cleanup()
+
+def fb_print(db, args):
+	import fastbit
+	qh = fastbit.Query(",".join(args), db, args[0] + '=' + args[0])
+	ncols = qh.get_result_columns()
+	rh = fastbit.ResultSet(qh)
+	#print >>sys.stderr, "Rows:", qh.get_result_rows()
+	while (rh.has_next() == 0): #More
+		vals = []
+		for i in xrange(0, ncols):
+			if rh.getString(i): vals.append(rh.getString(i))
+			elif rh.getInt(i): vals.append(rh.getInt(i))
+			elif rh.getLong(i): vals.append(rh.getLong(i))
+			elif rh.getDouble(i): vals.append(rh.getDouble(i))
+			elif rh.getBytes(i): vals.append(rh.getBytes(i))
+			else: print >>sys.stderr, "Unknown type for column", i
+		if vals:
+			print '\t'.join(vals)
+		
+dispatch = {
+	's3': {'q': s3_q, 'partition': s3_partition, 'cat': s3_cat, 'import': None},
+	'fb': {'q': fb_q, 'partition': None, 	     'cat': None,   'import': fb_import, 'print': fb_print},
+}
 
 sys.exit(main())
