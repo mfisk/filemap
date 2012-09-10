@@ -3,6 +3,22 @@
 import os
 import subprocess
 import sys
+import optparse
+import gzip
+import sha
+import shutil
+
+try:
+   import hashlib # New for python 2.5
+   sha = hashlib.sha1
+except:
+   import sha
+   sha = sha.sha
+
+
+CMDS = ['cat','q','partition','import','print']
+TYPES = ['s3','fb','tsv.gz', 'cz']
+delim = "\t"
 
 def s3connect(db):
     import sqlite3
@@ -60,17 +76,145 @@ def s3_cat(dbs, args):
 
     return 0
 
+def iscolumnname(s):
+    if s[0].isalpha() and (s.replace('_','').isalpha()):
+	return True
+    else:
+	return False
+
+class Query():
+    def __init__(self,  qstr, columns):
+        """Return a dictionary containing parsed information about the query.
+	inputcols is the set of input columns referenced.
+        where_str is the the where string (if any).
+        projection_str is the projection (select) string (if any).
+	projection_list is the list of projection_str elements.
+	parsed_projections is a list of tuples describing each element.
+	groupby is a list of columns to implicitly partition by (if any).
+	"""
+
+        qstr = qstr.strip()
+        where = qstr.lower().find("where ")
+        #Make sure it's a token and not part of column name like, say, "somewhere"
+        #Since "select" is implicit, "where" may be at the beginning of the string
+
+        if (where > 0 and qstr[where-1] == " "):
+	    # Found a good where clause
+	    self.where_str = qstr[where+6:].strip()
+            self.projection_str = qstr[:where].strip()
+        elif where == 0:
+            self.projection_str = ''
+	    self.where_str = qstr.strip()
+        elif where == -1:
+            self.projection_str = qstr.strip()
+	    self.where_str = ''
+
+	if not self.projection_str:
+	    self.projection_str = ','.join(columns)
+   
+        # Now decompose the projection list
+     	if not self.projection_str:
+	    self.projection_list = []
+        else:
+            ps = self.projection_str.split(',')
+            ps = [p.strip() for p in ps]
+            self.projection_list = ps
+
+        self.parsed_projections = []
+    
+        #Now look for expressions
+        parsedp = []
+	self.outputcols = []
+        self.inputcols = set()
+        self.groupby = set()
+        aggregate = False
+
+        for p in self.projection_list:
+		aspos = p.lower().find(' as ')
+		alias = None
+		if aspos > 0:
+			alias = p[aspos+4:]
+			p = p[:aspos]
+			self.outputcols.append(alias)
+	        if iscolumnname(p):
+	            # Is a simple field name containing [a-z][a-z0-9_]*
+		    if columns[0] != '*' and p not in columns:
+			print >>sys.stderr, "Invalid column name", p, " (", ','.join(columns), ")"
+			sys.exit(2)
+	            self.parsed_projections.append(('column', p))
+                    self.inputcols.add(p)
+	            self.groupby.add(p)
+		    if not alias: self.outputcols.append(p)
+                elif p.isdigit():
+                    self.parsed_projections.append(('number', p))
+		    if not alias: self.outputcols.append(p)
+                else:
+	            if '(' in p and p[-1] == ')':
+                        s = p.strip(')').split('(', 1)
+		        fn = s[0].strip()
+		        args = s[1].strip()
+                        if iscolumnname(fn) and (args == "" or args == "*" or iscolumnname(args)):
+			        if fn in ["sum","min","max","avg","count"]:
+					# Aggregate function
+				        self.parsed_projections.append(('aggregate', fn, args))
+				        aggregate = True
+			        else:
+			            	# Simple function
+				        self.parsed_projections.append(('fn', fn, args))
+				        if args != "" and args != "*":
+						self.groupby.add(args)
+			        	
+				if args != "" and args != "*":
+			        	self.inputcols.add(args)
+
+		    		if not alias: self.outputcols.append(fn)
+        
+		        else:
+			        # Must be some arithmetic express instead.  
+			        # XXX. Go no further right now
+            		        self.parsed_projections.append(('expr', p))
+		    		if not alias: self.outputcols.append('expr')
+        if not aggregate: 
+	        self.groupby = []
+        
+      	self.inputcols = tuple(self.inputcols)
+      	self.groupby = tuple(self.groupby)
+
+        #print >>sys.stderr, self.__dict__
+  
+def fbselect(db, args):
+    cols = fbcols(db)
+    q = Query(' '.join(args), cols)
+
+    return q
 
 def fb_q(db, args):
-    qstr = ' '.join(args)
-    return subprocess.call(["ibis", "-q", qstr, "-output-as-binary", "fb", "-d", db], stderr=sys.stderr, stdout=sys.stdout)
+    q = fbselect(db, args)
 
-def s3_q(db, qstr):
-    # Re-order and quote arguments to make it easier to run sqlite commands in fm
+    # Ibis won't respond to a aggregates without a WHERE clause
+    if q.groupby and not q.where_str:
+	q.where_str = "WHERE %s=%s" % (q.groupby[0], q.groupby[0])
+
+    return subprocess.call(["ibis", "-q", "SELECT "+q.projection_str+" "+q.where_str, "-output-as-binary", "fb", "-d", db], stderr=sys.stderr, stdout=sys.stdout)
+
+def s3select(db, args):
+    q = Query(' '.join(args), '*')
+    if q.groupby:
+	group = " GROUP BY " + ",".join(q.groupby)
+    else:
+	group = ""
+
     conn,cursor = s3connect(db)
+    qstr = "select %s from %s %s %s" % (q.projection_str, s3tablename(cursor), q.where_str, group)
+    return conn, cursor, qstr
+
+def s3_q(db, args):
+    conn,cursor,qstr = s3select(db, args)
+    qstr = "create table output.db as " + qstr
+    #print >>sys.stderr, qstr
+
     cursor.execute("attach database 's3' as output;")
     try:
-	qstr = "create table output.db as %s" % ' '.join(qstr)
         cursor.execute(qstr)
         for row in cursor:
             # User may have done something with visible results
@@ -82,109 +226,52 @@ def s3_q(db, qstr):
 
     return 0
 
-CMDS = ['cat','q','partition','import','print']
-
 def usage():
-    print >>sys.stderr, "Usage: %s (%s)" % (sys.argv[0], '|'.join(CMDS))
+    print >>sys.stderr, "Usage: %s (%s) <db>" % (sys.argv[0], '|'.join(CMDS))
+    print >>sys.stderr, "Works on databases of the following types:"
+    print >>sys.stderr, "\ttsv.gz\tTab-separated variable (compressed)"
+    print >>sys.stderr, "\tcz\tDirectorying containing compressed columns"
+    print >>sys.stderr, "\ts3\tSQLite3 tables"
+    print >>sys.stderr, "\tfb\tFastbit column-oriented tables"
+
+    print >>sys.stderr, "\nCommand usage:"
+    print >>sys.stderr, "\timport <columns...> <db>\tImport text data into <db>"
+    print >>sys.stderr, "\tprint [<columns...>] <db>\tPrint some or all columns (or SQL aggregates) from <db>"
+    print >>sys.stderr, "\tcat <db>\t\t\tConcatenate list of databases given on stdin to output <db>"
+    print >>sys.stderr, "\tpartition [-n bins] [-m] <db>\tPartition input <db> into <bins> partitions"
+    print >>sys.stderr, "\tq <query> <db>\t\t\tSQL query on <db> into new database (named cz|s3|fb|tsv.gz)"
+
     return 1
 
-def checkdbtype(sfx):
-    if sfx != "s3" and sfx != "fb":
-	print >>sys.stderr, "Unsupported db name suffix", sfx
-	sys.exit(4)
+def checkdbtype(name):
+    for t in TYPES:
+ 	if name.endswith(t):
+	    return t
+
+    print >>sys.stderr, "Unsupported db name suffix:", name
+    print >>sys.stderr, "Must be one of:", ' '.join(TYPES)
+    sys.exit(4)
   
-def main():
-    if len(sys.argv) < 2:
-        return usage()
+def fb_partition(db, args, options):
+    import fastbit
 
-    args = sys.argv[1:]
-    cmd = args.pop(0)
+    # XXX need way to enumerate all columns or select *
 
-    if cmd not in CMDS:
-	return usage()
-
-    if cmd == 'cat':
-        # cat takes list of files on STDIN
-
-	dbs = [i.strip() for i in sys.stdin]
-	sfxs = set()
-	for i in dbs:
-	    sfxs.add(db[-2:])
-
-        if not sfxs:
-	    print >>sys.stderr, "No inputs specified on STDIN"
-	    return 3
-
-	if len(sfxs) > 1:
-	    print >>sys.stderr, "Cannot mix db types:", str(sfxs)
-	    return 4
-
-	checkdbtype(sfxs[0])
-        return dispatch[sfxs[0]]['cat'](dbs, args)
-
-    else:
-	# last argument is a db file (for ease of use with fm or xargs)
-
-	if len(args) < 1:
-		print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<query> <db>"
-		return 1
-
-	db = args.pop() 
-	sfx = db[-2:]
-        checkdbtype(sfx)
-
-	if cmd == 'partition':
-    		import optparse
-
-    		parser = optparse.OptionParser()
-    
-    		parser.add_option('-n', '--bins', action='store', type='int', 
-                      dest='bins', default=300,
-                      help='the name of a timestamp column to partition by')
-    		parser.add_option('-m', '--mod', type='int', action='store',
-                      dest='mod',
-                      help='bin values into partitions of fixed size')
-    
-    		options, args = parser.parse_args()
-    
-    		if len(args) < 2:
-        		parser.error('no query specified')
-
-	 	return dispatch[sfx][cmd](db, args, options)
-
-	elif cmd == 'q':
-		if len(args) < 1:
-			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<query> <db>"
-			return 1
-        	return dispatch[sfx][cmd](db, args)
-
-	elif cmd == 'print':
-		if len(args) < 1:
-			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<columns> <db>"
-			return 1
-		return dispatch[sfx][cmd](db, args)
-
-    	elif cmd == 'import':
-		if len(args) < 1:
-			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<columns> <db>"
-			return 1
-
-		cols = []
-		types = []
-		for a in args:
-			x = a.split(':')
-			cols.append(x[0])
-			if len(x) > 1:
-				types.append(x[1])
-			else:
-				types.append(None)
-
-		return dispatch[sfx][cmd](db, cols, types)
-
-	else:
-		assert(0)
-   
-    assert(0)
+    qh = fastbit.Query(",".join(args), db, args[0] + '=' + args[0])
+    ncols = qh.get_result_columns()
+    rh = fastbit.ResultSet(qh)
+    #print >>sys.stderr, "Rows:", qh.get_result_rows()
+    while (rh.has_next() == 0): #More
+    	vals = []
+    	for i in xrange(0, ncols):
+    	    if rh.getString(i): vals.append(rh.getString(i).strip('"'))
+    	    elif rh.getInt(i): vals.append(rh.getInt(i))
+    	    elif rh.getLong(i): vals.append(rh.getLong(i))
+    	    elif rh.getDouble(i): vals.append(rh.getDouble(i))
+    	    elif rh.getBytes(i): vals.append(rh.getBytes(i))
+    	    else: print >>sys.stderr, "Unknown type for column", i
+    	if vals:
+    		print '\t'.join(vals)
 
 def s3_partition(db, args, options):
     """Partition a single sqlite database into multiple databases
@@ -204,7 +291,7 @@ def s3_partition(db, args, options):
 
     if options.mod:
         qstr = 'CAST((%s) AS int) - (CAST((%s) AS int) %% %d)' % \
-            (qstr, qstr, options.mod)
+            (qstr, qstr, options.bins)
 
     cursor.execute('SELECT *, (%s) AS _part_ FROM %s' %
                    (qstr, name))
@@ -248,12 +335,6 @@ def s3_partition(db, args, options):
 		except:
                     pass
 
-def fb_partition(db, args, options):
-	assert(0)
-
-def fb_cat(dbs, args):
-	assert(0)
-
 def fb_import(db, cols, types):
 	import fastbit
 	fast = fastbit.FastBit()
@@ -267,24 +348,30 @@ def fb_import(db, cols, types):
 
 	    for line in batch:
 		line = line.strip()
-		rowvals = line.split()
+		rowvals = line.split("\t")
+		rowvals += [None] * (len(cols) - len(rowvals))
 		#print line, rowvals, cols
-		assert(len(rowvals) == len(cols))
 		for i in xrange(0, len(cols)):
 			if types[i].startswith('t'):
 				colvals[i].append(rowvals[i])
 			elif types[i].startswith('i'):
 				colvals[i].append(int(rowvals[i]))
+			elif types[i].startswith('f'):
+				colvals[i].append(float(rowvals[i]))
 			elif types[i].startswith('d'):
-				colvals[i].append(double(rowvals[i]))
+				colvals[i].append(float(rowvals[i]))
 			elif types[i].startswith('b'):
 				colvals[i].append(rowvals[i])
 			else:
-				print >>sys.stderr, "Unsupported/unknonw type:", types[i]
+				print >>sys.stderr, "Unsupported/unknown type:", types[i]
 				
 
 	    for i in xrange(0, len(cols)):
   	        fast.add_values(cols[i], types[i], colvals[i])
+            try:
+		shutil.rmtree(db)
+	    except:
+		pass
 	    fast.flush_buffer(db)
 
 	fast.cleanup()
@@ -299,7 +386,9 @@ def s3_import(db, cols, types):
 
 	for line in sys.stdin:
 		line = line.strip()
-		v = line.split()
+		v = line.split(delim)
+		v += [None]*(len(cols) - len(v))
+		v = v[:len(cols)]
         	insert = 'INSERT INTO %s VALUES (%s)' % \
                      ("db", ','.join(['?'] * len(v)))
 
@@ -307,12 +396,26 @@ def s3_import(db, cols, types):
         connection.commit()
         cursor.close()
         connection.close()
-	
-def fb_print(db, args):
-	import fastbit
-	qh = fastbit.Query(",".join(args), db, args[0] + '=' + args[0])
-	ncols = qh.get_result_columns()
-	rh = fastbit.ResultSet(qh)
+
+def fbcols(db):
+	# FastBit CAPI (and python bindings) don't let you enumerate columns
+	table = file(db + "/-part.txt")
+	incolumn = False
+	cols = []
+	for line in table:
+		line = line.strip()
+		if incolumn:
+		    if line == "End Column":
+			incolumn =False
+		    elif line.startswith("name = "):
+			kv = line.split(" = ")
+			cols.append(kv[1])
+		else:
+		    if line == "Begin Column":
+			incolumn = True
+	return cols
+
+def fbresultgen(ncols, rh):
 	#print >>sys.stderr, "Rows:", qh.get_result_rows()
 	while (rh.has_next() == 0): #More
 		vals = []
@@ -323,20 +426,345 @@ def fb_print(db, args):
 			elif rh.getDouble(i): vals.append(rh.getDouble(i))
 			elif rh.getBytes(i): vals.append(rh.getBytes(i))
 			else: print >>sys.stderr, "Unknown type for column", i
-		if vals:
-			print '\t'.join(vals)
+		yield vals
 
 def s3_print(db, args):
-        connection, cursor = s3connect(db)
-    	table = s3tablename(cursor)
-        cursor.execute("select %s from %s;" % (','.join(args), table))
+        connection, cursor, qstr = s3select(db, args)
+        cursor.execute(qstr)
 	for row in cursor:
-		row = [str(i) for i in row]
-		print '\t'.join(row)
-		
+		print '\t'.join([str(i) for i in row])
+
+	
+def fb_print(db, args):
+	import fastbit
+	q = fbselect(db, args)
+	#print >>sys.stderr, p, db, w
+
+        # Fastbit capi (Query method) doesn't implement aggregations (groupby), so just get the inputcols
+	qh = fastbit.Query(','.join(q.inputcols), db, q.where_str)
+	ncols = qh.get_result_columns();
+	
+	rh = fastbit.ResultSet(qh)
+	# And then apply our internal aggregator to the results
+	for row in vquery(q.inputcols, q, fbresultgen(ncols, rh)):
+		print '\t'.join([str(v) for v in row])
+        
+def tsvcols(db):
+	try:
+		schema = file(db + ".schema")
+		return schema.readline().strip().split(delim)
+	except:
+		return None
+
+def tsv_print(db, args):
+	if not args:
+		# Just display the whole file
+		subprocess.call(["zcat", "-f", db])
+	else:
+		cols = tsvcols(db)
+        	q = Query(' '.join(args), cols)
+		for row in vquery(cols, q, tsvgenerator(db)):
+			print '\t'.join([str(i) for i in row])
+
+def czcols(db):
+	return [i[:-3] for i in os.listdir(db)]
+
+def cz_print(db, args):
+        q = Query(' '.join(args), czcols(db))
+	for row in vquery(q.inputcols, q, czgenerator(q.inputcols, db)):
+		print '\t'.join([str(i) for i in row])
+
+def cz_q(db, args):
+        q = Query(' '.join(args), czcols(db))
+	czwrite("cz", q.outputcols, vquery(q.inputcols, q, czgenerator(q.inputcols, db)))
+
+def tsv_q(db, args):
+	cols = tsvcols(db)
+        q = Query(' '.join(args), cols)
+	tsvwrite("tsv.gz", q.outputcols, vquery(cols, q, tsvgenerator(db)))
+
+def czgenerator(cols, db):			
+	"""Generate a series of tuples with the specified columns"""
+
+	cfh = []
+	if not cols:
+		cols = czcols(db)
+	for col in cols:
+		colfile = db + "/" + col + ".gz"
+		cfh.append(gzip.GzipFile(colfile))
+	for line in cfh[0]:
+		v = [line.strip()] + [c.readline().strip() for c in cfh[1:]]
+		yield v
+
+def tsvgenerator(db):
+	for line in gzip.GzipFile(db):
+		yield line.strip().split(delim)
+
+def to_number(s):
+	n = float(s)
+	if n.is_integer():
+		n = int(n)
+	return n
+
+def vquery(cols, q, gen):
+	# Project certain columns
+	# cols parameter is the ordered list of columns that will be produced by the generator
+
+	groupbycolnums = [cols.index(a) for a in q.groupby]
+
+	partition = {}
+	for row in gen: 	
+		if q.groupby:
+			part = [row[i] for i in groupbycolnums]
+			part = tuple(part)
+			if not partition.has_key(part):
+				partition[part] = []
+			partition[part].append(row)
+		else:
+			vals = []
+			for a in q.parsed_projections:
+				# XXX add support for simple functions and expressions
+		    		assert(a[0] == 'column')
+
+				i = cols.index(a[1])
+				vals.append(row[i])
+
+			yield vals
+
+	for p in partition.values():
+		val = []
+		count = 0
+		for a in q.parsed_projections:
+		    if a[0] == 'column':
+			i = cols.index(a[1])
+			val.append(p[0][i])
+		    elif a[0] == 'aggregate':
+			op,arg = a[1:]
+			if op == "count":
+				val.append(str(len(p)))
+			else:
+				i = cols.index(arg)
+				vec = [to_number(v[i]) for v in p]
+			
+				if op == "sum":
+					f = sum(vec)
+				elif op == "max":
+					f = max(vec)
+				elif op == "min":
+					f = min(vec)
+				elif op == "avg":
+					f = avg(vec)
+				else:
+					print >>sys.stderr, "Unsupported function", op
+					sys.exit(2)
+
+				val.append(f)
+
+		yield val
+    
+def czwrite(db, cols, gen):                 
+	os.mkdir(db)
+	cfh = []
+	for c in cols:
+		cfh.append(gzip.GzipFile(db + "/" + c + ".gz", "w"))
+	for vals in gen:
+		for i in xrange(0,len(cols)):
+			print >>cfh[i], vals[i]
+
+def tsv_fo_generator(cols, fo):
+	for line in fo:
+		vals = line.strip().split(delim)
+		vals += [None] * (len(cols) - len(vals))
+		yield vals
+ 
+def filelist_generator(fl, cols, gen):
+	for f in fl: 
+		for row in gen(cols, f): 
+			yield row
+
+def cz_import(db, cols, types):
+	czwrite(db, cols, tsv_fo_generator(cols, sys.stdin))
+
+def tsvwrite(db, cols, gen):
+	schema = file(db + ".schema", "w")
+	print >>schema, "\t".join(cols)
+	schema.close()
+	
+	fh = gzip.GzipFile(db, "w")
+	for row in gen:
+		print >>fh, '\t'.join([str(i) for i in row])
+	fh.close()
+
+def tsv_import(db, cols, types):
+	tsvwrite(db, cols, tsv_fo_generator(cols, sys.stdin))
+
+def tsv_cat(dbs, args):
+	cols = tsvcols(dbs[0])
+	assert(cols)
+ 	tsvwrite("tsv.gz", cols, filelist_generator(dbs, cols, tsv_fo_generator))
+
+def cz_cat(dbs, args):
+	cols = czcols(dbs[0])
+	assert(cols)
+	czwrite("cz", cols, filelist_generator(dbs, cols, cz_fo_generator))
+
+def tsv_partition(db, args, options):
+      """Partition an input file.
+      Split an inputfile into n pieces.  By default, the first
+      whitespace-delimited field is used as the key.  All lines with the
+      same key will be placed in the same output file.  The -r option can be
+      used to specify a Perl-compatible regular expression that matches the
+      key.  If the regex contains a group, then what matches the group is
+      the key; otherwise, the whole match is the key.
+
+      Output files are numbered 1 to n and created in the current directory.
+      """
+
+      p = optparse.OptionParser()
+      p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
+      p.add_option("-f", "--field", default="1", help="Use field # or range (numbered starting with 1).")
+      (localoptions, args) = p.parse_args(args)
+
+      #print >>sys.stderr, "Writing to", ofile
+
+      if localoptions.regex:
+         localoptions.regex = re.compile(options.regex)
+ 
+      if localoptions.field:
+         if "-" in localoptions.field:
+            localoptions.field = localoptions.field.split("-")
+            localoptions.field = [int(i)-1 for i in localoptions.field]
+            localoptions.field[1] += 1
+         else:
+            localoptions.field = [int(localoptions.field) - 1, int(localoptions.field)]
+
+      files = []
+      for i in range(0, options.bins):
+         fname = str(i+1) + ".tsv.gz"
+         files.append(gzip.GzipFile(fname, "w"))
+
+      if db.endswith("gz"):
+         f = gzip.GzipFile(db)
+      else:
+         f = file(db) 
+
+      for line in f:
+         if localoptions.regex:
+            key = localoptions.regex.search(line)
+            if key:
+               g = key.groups()
+               if len(g):
+                  key = g[0]
+               else:
+                  key = key.group(0)
+            else:
+               print >>sys.stderr, "Key not found in line:", line.rstrip()
+         else:
+            words= line.split("\t")
+            #print words[localoptions.field[0]:localoptions.field[1]]
+            key = words[localoptions.field[0]:localoptions.field[1]]
+
+         if options.mod:
+	    i = int(key) % options.bins
+         else:
+	    # Hash
+            i = int(sha(str(key)).hexdigest(), 16) % options.bins
+
+         files[i].write(line)
+
+      for f in files: f.close()
+
+def main():
+    if len(sys.argv) < 2:
+        return usage()
+
+    args = sys.argv[1:]
+    cmd = args.pop(0)
+
+    if cmd not in CMDS:
+	return usage()
+
+    if cmd == 'cat':
+        # cat takes list of files on STDIN
+
+	dbs = [i.strip() for i in sys.stdin]
+	types = set()
+	for d in dbs:
+		types.add(checkdbtype(d))
+
+        if not types:
+	    print >>sys.stderr, "No inputs specified on STDIN"
+	    return 3
+
+	if len(types) > 1:
+	    print >>sys.stderr, "Cannot mix db types:", str(types)
+	    return 4
+
+	dbtype = list(types)[0]
+        return dispatch[dbtype]['cat'](dbs, args)
+
+    else:
+	# last argument is a db file (for ease of use with fm or xargs)
+
+	if len(args) < 1:
+		print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<query> <db>"
+		return 1
+
+	db = args.pop() 
+
+        dbtype = checkdbtype(db)
+
+	if cmd == 'partition':
+    		parser = optparse.OptionParser()
+    
+    		parser.add_option('-n', '--bins', action='store', type='int', default=256,
+                      help='number of partitions to create')
+    		parser.add_option('-m', '--mod', action='store_true',
+                      help='bin values into partitions of fixed size')
+    
+    		options, args = parser.parse_args()
+    
+    		if len(args) < 2:
+        		parser.error('no query specified')
+
+	 	return dispatch[dbtype][cmd](db, args, options)
+
+	elif cmd == 'q':
+		if len(args) < 1:
+			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<query> <db>"
+			return 1
+        	return dispatch[dbtype][cmd](db, args)
+
+	elif cmd == 'print':
+		return dispatch[dbtype][cmd](db, args)
+
+    	elif cmd == 'import':
+		if len(args) < 1:
+			print >>sys.stderr, "Usage:", sys.argv[0], cmd, "<columns> <db>"
+			return 1
+
+		cols = []
+		types = []
+		for a in args:
+			x = a.split(':')
+			cols.append(x[0])
+			if len(x) > 1:
+				types.append(x[1])
+			else:
+				types.append(None)
+
+		return dispatch[dbtype][cmd](db, cols, types)
+
+	else:
+		assert(0)
+   
+    assert(0)
+
 dispatch = {
 	's3': {'q': s3_q, 'partition': s3_partition, 'cat': s3_cat, 'import': s3_import, 'print': s3_print},
 	'fb': {'q': fb_q, 'partition': None, 	     'cat': None,   'import': fb_import, 'print': fb_print},
+	'tsv.gz': {'q': tsv_q, 'partition': tsv_partition, 'cat': tsv_cat,   'import': tsv_import, 'print': tsv_print},
+	'cz': {'q': cz_q, 'partition': None, 'cat': cz_cat,   'import': cz_import, 'print': cz_print},
 }
 
 sys.exit(main())
