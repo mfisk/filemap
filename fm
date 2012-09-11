@@ -1246,7 +1246,7 @@ will be the directory name preceding the first wildcard."""
                   if f == ".stderr" and options.errors:
                      print >>sys.stderr, "=== %s ===" % relname
                      sys.stderr.writelines(file(fname))
-                     print >>sys.stderr, "======" % relname
+                     print >>sys.stderr, "======"
                   else:
                      if options.name:
                         print >>outfile, "=== %s ===" % relname
@@ -2598,7 +2598,7 @@ and the program re-run.
          if cmd[0] == "<":
             if not options.statusonly:
                # Install the jobs on each node
-               self._Locations().put([tmpdir + "*"], "/jobs/")#.collect(maxErrors=maxErrors)
+               self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
             shutil.rmtree(tmpdir)
             tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
@@ -2616,7 +2616,7 @@ and the program re-run.
 
       if not options.statusonly:
          # Install the jobs on each node
-         self._Locations().put([tmpdir + "*"], "/jobs/")#.collect(maxErrors=maxErrors)
+         self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
 
       shutil.rmtree(tmpdir)
       if not starttime:
@@ -2971,7 +2971,8 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
 
          # Also delete previous output so that it doesn't keep getting used
          # (In the case of replication, a node may not replace the old output with new output
-         self._Locations().forAll(["rm", "-Rf"], newinglobs).collect()
+         #self._Locations().forAllLocal(["localrm"] + newinglobs).collect()
+         self.rm(["-R"] + newinglobs)
 
          # Only force the first stage of the pipeline.  Out-of-date checks will handle downstream.
          options.fresh = False
