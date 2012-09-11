@@ -2438,8 +2438,19 @@ Has unix "mkdir -p" semantics."""
    def df(self, args):
       """Show free space on each node."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
-
       self._Locations().forAllLocal(["df", "%(ROOTDIR)/"]).collect(labelPrint=True)
+
+   def loadavg(self, args):
+      """Show load average."""
+      (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
+      pkls = self._local_pickles(["localload"])
+      loadtotal = [0,0,0]
+      for mx in pkls:
+          loadtotal[0] += float(pkls[mx]['loadavg'][0])
+          loadtotal[1] += float(pkls[mx]['loadavg'][1])
+          loadtotal[2] += float(pkls[mx]['loadavg'][2])
+          #print pkls[mx]['loadavg'] 
+      print "Total load average: %.2f %.2f %.2f" % tuple(loadtotal)
 
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
@@ -3160,6 +3171,17 @@ class FmLocalCommands(CommandSetBase):
 
       sys.stdout.write(cPickle.dumps(statlist))
       return 
+
+   def localload(self, args):
+      loadavg = file("/proc/loadavg").readline().strip().split()
+      diskstats = file("/proc/diskstats")
+      for disk in diskstats:
+         disk = disk.strip()
+         # See if this is our ROOTDIR
+      load = {}
+      load['loadavg'] = loadavg
+      sys.stdout.write(cPickle.dumps(load))
+      return
 
    def localjobs(self, args):
       jobs = {}
