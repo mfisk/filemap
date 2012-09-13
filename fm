@@ -1794,7 +1794,7 @@ class JobScheduler:
          f = file(dir + "/.status", "w")
       except IOError:
          # Perhaps we were invalidated while running.  Don't sweat it.
-         p.job.runnning -= 1
+         p.job.running -= 1
          return
 
       cPickle.dump(stats, f)
