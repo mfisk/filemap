@@ -446,6 +446,7 @@ def plot(filename, pngfile):
    mintime = 2**31
    maxsize = 0
    maxtime = 0
+   totalsize = 0
    for s in stats:
       s['start'] = s['timestamp'] - s['time']
       s['finish'] = s['timestamp']
@@ -457,6 +458,8 @@ def plot(filename, pngfile):
       maxsize = max(maxsize, s['inputsize'])
       mintime = min(mintime, s['start'])
       maxtime = max(maxtime, s['finish'])
+      totalsize += s['inputsize']
+
       jobs.add(s['jobname'])
 
    # Reduce to overlapping windows
@@ -574,10 +577,22 @@ def plot(filename, pngfile):
    ax.set_yticks(majorlocs)
    ax.set_yticklabels(majorlabels)
    ax.set_ylim(ymin=-2)
-
+   ax.set_title("%s processed" % (bytecount2str(totalsize)))
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
    canvas.print_figure(pngfile, antialias=False, dpi=600)
+
+def bytecount2str(i):
+   if i < 1000:
+      return str(i) + "B"
+   elif i < 1e6:
+      return str(int(i/1e3)) + "kB"
+   elif i < 1e9:
+      return str(int(i/1e6)) + "MB"
+   elif i < 1e12:
+      return str(int(i/1e9)) + "GB"
+   else:
+      return str(int(i/1e12)) + "TB"
 
 def seconds2human(s):
    if s < 60:
