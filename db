@@ -100,7 +100,7 @@ class Query():
 
         if (where > 0 and qstr[where-1] == " "):
 	    # Found a good where clause
-	    self.where_str = qstr[where+6:].strip()
+	    self.where_str = qstr[where:].strip()
             self.projection_str = qstr[:where].strip()
         elif where == 0:
             self.projection_str = ''
@@ -247,6 +247,9 @@ def checkdbtype(name):
     for t in TYPES:
  	if name.endswith(t):
 	    return t
+
+    if name.endswith("sqlite"):
+	return 's3'
 
     print >>sys.stderr, "Unsupported db name suffix:", name
     print >>sys.stderr, "Must be one of:", ' '.join(TYPES)
