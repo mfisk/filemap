@@ -582,17 +582,13 @@ def plot(filename, pngfile):
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
    canvas.print_figure(pngfile, antialias=False, dpi=600)
 
-def bytecount2str(i):
-   if i < 1000:
-      return str(i) + "B"
-   elif i < 1e6:
-      return str(int(i/1e3)) + "kB"
-   elif i < 1e9:
-      return str(int(i/1e6)) + "MB"
-   elif i < 1e12:
-      return str(int(i/1e9)) + "GB"
-   else:
-      return str(int(i/1e12)) + "TB"
+def bytecount2str(n):
+   unit = 'B'
+   units = ['kB', 'MB', 'GB', 'TB', 'PB']
+   while n >= 1000 and len(units):
+      n /= 1000
+      unit = units.pop(0)
+   return str(int(n)) + unit
 
 def seconds2human(s):
    if s < 60:
