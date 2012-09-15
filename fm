@@ -2489,6 +2489,16 @@ Copy the specified file(s) into the virtual store.
 
       self._Locations().put(args, dst, pickn=True, serialize=options.serialize).collect()
 
+   def _putJobs(self, tmpdir, maxErrors):
+      errors,results = self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+      failed = [p.node for p in results if p.status]
+      if failed:
+         print >>sys.stderr, "Marking nodes inactive: %s" % ','.join(failed)
+         for f in failed:
+            #print >>sys.stderr, "node %s was %s" % (f, self._Locations().locs[f].inactive)
+            self._Locations().locs[f].inactive = True
+      shutil.rmtree(tmpdir)
+
    def map(self, args):
       """Launch a computation on a set of input files in the cloud.
 Run the specified command on each input file (in the virtual store)
@@ -2585,7 +2595,10 @@ and the program re-run.
       statglobs = []
       assert (type(inglobs) == type([]))
 
-      tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
+      if options.statusonly:
+         tmpdir = None
+      else:
+         tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
       starttime = None
       jobname = None
@@ -2607,10 +2620,10 @@ and the program re-run.
          if cmd[0] == "<":
             if not options.statusonly:
                # Install the jobs on each node
-               self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+               self._putJobs(tmpdir, maxErrors)
 
-            shutil.rmtree(tmpdir)
-            tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
+            if not options.statusonly:
+               tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
             if not starttime:
                starttime = time.time()
@@ -2625,9 +2638,8 @@ and the program re-run.
 
       if not options.statusonly:
          # Install the jobs on each node
-         self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
+         self._putJobs(tmpdir, maxErrors)
 
-      shutil.rmtree(tmpdir)
       if not starttime:
          starttime = time.time()
 
@@ -2957,11 +2969,12 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          jobdesc += "checkexit = 0\n"
 
       h = printableHash(jobdesc)
-      jobfilename = tmpdir + h
-      jobfile = open(jobfilename, "w")
-      jobfile.write(jobdesc)
-      jobfile.close()
-
+      if not options.statusonly:
+         jobfilename = tmpdir + h
+         jobfile = open(jobfilename, "w")
+         jobfile.write(jobdesc)
+         jobfile.close()
+   
       # Each component of pipeline uses previous output as input
       if reduce:
          newinglobs = ["/reduce/" + h + "/*"]
