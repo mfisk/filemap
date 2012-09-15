@@ -258,12 +258,10 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
 
       print >>sys.stderr, errstr
 
-      MB = 10**6
-
       if Verbose > 0:
          for n in nodebytes[0]:
             if nodewtime[0][n]:
-               print >>sys.stderr, "Node %s %g MB/s new work" % (n, nodebytes[0][n]/MB/nodewtime[0][n])
+               print >>sys.stderr, "Node %s %s/s new work" % (n, bytecount2str(nodebytes[0][n]/nodewtime[0][n]))
 
       swtime = sum(wtime)
 
@@ -271,13 +269,13 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          sbytes = sum(bytes)
          sutime = sum(utime)
          sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %g MB, %g MB/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
-            % (sbytes/MB, sbytes/MB/swtime, swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
+         print >>sys.stderr, "Serial performance: %s, %s/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
 
          if bytes[0] and wallclock:
-            rate = bytes[0]/MB/wallclock
+            rate = bytecount2str(bytes[0]/wallclock)
             scaling = (stime[0]+utime[0])/wallclock
-            print >>sys.stderr, "New: %g MB/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
+            print >>sys.stderr, "New: %s/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
          
          # Find intervals we were computing over 
          intervals = [(s['timestamp'] - s['time'], s['timestamp']) for s in statlist]
@@ -292,14 +290,14 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
                   cacheduration += (end-start)
 
             if cacheduration:
-               rate = bytes[1]/MB/cacheduration
+               rate = bytecount2str(bytes[1]/cacheduration)
                scaling = swtime/cacheduration
-               print >>sys.stderr, "Cached: %g MB/s, %gs, %.1fx" % (rate, cacheduration, scaling)
+               print >>sys.stderr, "Cached: %s/s, %gs, %.1fx" % (rate, cacheduration, scaling)
 
          if sbytes and wallclock:
-            rate = sbytes/MB/wallclock
+            rate = bytecount2str(sbytes/wallclock)
             cached = 100*bytes[1]/sbytes
-            print >>sys.stderr, "Filemap: %g MB/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
+            print >>sys.stderr, "Filemap: %s/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
   
 def mkdirexist(path):
    try:
@@ -588,7 +586,7 @@ def bytecount2str(n):
    while n >= 1000 and len(units):
       n /= 1000
       unit = units.pop(0)
-   return str(int(n)) + unit
+   return ("%3.1f" % n) + ' ' + unit
 
 def seconds2human(s):
    if s < 60:
