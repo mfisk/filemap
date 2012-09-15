@@ -269,8 +269,8 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          sbytes = sum(bytes)
          sutime = sum(utime)
          sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %s, %s/s, %.1fs (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
-            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), swtime, 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
+         print >>sys.stderr, "Serial performance: %s, %s/s, %s (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), seconds2human(swtime), 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
 
          if bytes[0] and wallclock:
             rate = bytecount2str(bytes[0]/wallclock)
@@ -292,7 +292,7 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
             if cacheduration:
                rate = bytecount2str(bytes[1]/cacheduration)
                scaling = swtime/cacheduration
-               print >>sys.stderr, "Cached: %s/s, %gs, %.1fx" % (rate, cacheduration, scaling)
+               print >>sys.stderr, "Cached: %s/s, %s, %.1fx" % (rate, seconds2human(cacheduration), scaling)
 
          if sbytes and wallclock:
             rate = bytecount2str(sbytes/wallclock)
@@ -476,7 +476,7 @@ def plot(filename, pngfile):
             #print >>sys.stderr, "Gap between", prev[1], i[0]
          prev = i
 
-   print >>sys.stderr, "Data spans", maxtime-mintime, "seconds with", active, "active"
+   print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
    nodes = makeVnodes(nodes)
    print >>sys.stderr, "Packed into", len(nodes), "timelines"
 
@@ -590,15 +590,15 @@ def bytecount2str(n):
 
 def seconds2human(s):
    if s < 60:
-     return "%.0ds" % s
+     return "%.0fs" % s
    if s < 3600:
-     return "%.0dm" % (s/60)
+     return "%.0fm" % (s/60.)
    if s < 86400:
-     return "%.0dh" % (s/3600)
-   if s < 604800:
-     return "%.0dd" % (s/86400)
+     return "%.1fh" % (s/3600.)
+   if s < 864000:
+     return "%.1fd" % (s/86400.)
    else:
-     return "%.0dw" % (s/604800)
+     return "%.1fwk" % (s/604800.)
    
 class MethodOptionParser(optparse.OptionParser):
    """OptionParser to be instantiated by dispatch methods of a class.  Sets %prog to be the calling function name and epilog to be the doc string for that function.  Also prints options in usage string more like man conventions instead of just [options]."""
