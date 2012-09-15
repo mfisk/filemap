@@ -2647,8 +2647,9 @@ and the program re-run.
          if Verbose > 0:
             print >>sys.stderr, "Waiting for completion.  Job", jobname
          self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
-
-      wallclock = time.time() - starttime
+         wallclock = time.time() - starttime
+      else:
+         wallclock = None
 
       # Get the output files
       errglobs = [f + "/.stderr" for f in outdirglobs]
