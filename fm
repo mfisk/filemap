@@ -2831,66 +2831,87 @@ Unlike 'get -c', duplicate instances of files will be included."""
             fname = fkey
          ls[fname] = listing[fkey]
 
-      keys = ls.keys()
-      keys.sort()
+      fnames = ls.keys()
+      fnames.sort()
 
       if not sys.stdout.isatty():
-         for i in keys:
+         for i in fnames:
             print i
       elif not options.long:
-         tabulate(keys, int(os.environ.get("COLUMNS", 80)))
+         tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
 
       else:
          totalsize = 0
-         for k in keys:
-            for i in range(0,len(ls[k])):
-               if not ls[k][i]:
+         for f in fnames:
+            for i in xrange(len(ls[f])):
+               if not ls[f][i]:
                   continue
 
-               base = ls[k][i]
-               nodes = [base['nodename']]
-               isdir = (base['perms'][0] == 'd')
-               islnk = (base['perms'][0] == 'l')
+               # This is the cumulative attributes combined from multiple nodes
+               attrs = ls[f][i]
+               attrs['mtime'] = list([attrs['mtime']])
+
+               # If you specify the same file twice, we don't want
+               # the node number(s) duplicated in the node list, so make it a set
+               nodes = set([attrs['nodename']])
+
+               isdir = (attrs['perms'][0] == 'd')
+               islnk = (attrs['perms'][0] == 'l')
                criteria = ['perms', 'user', 'group']
                if isdir: 
-                  base['size'] = 0
+                  attrs['size'] = 0
                else: 
                   criteria.append('size')
            
-               # Look for duplicates from other nodes 
-               for j in range(i, len(ls[k])):
-                  if not ls[k][j]:
+               # Look for duplicates from other nodes later in the list
+               for j in range(i+1, len(ls[f])):
+                  if not ls[f][j]:
                      continue
    
                   # See if this node's instance matches the right criteria to be
                   # collapsed into a single output line
                   match = True
                   for a in criteria:
-                     if base[a] != ls[k][j][a]: 
+                     if attrs[a] != ls[f][j][a]: 
                         # Does not match
                         match = False
                         break
    
                   if match:
-                     # If you specify the same file twice, we don't want
-                     # the node number(s) duplicated in the node list
-                     n = ls[k][j]['nodename']
-                     if n not in nodes:
-                        nodes.append(n)
+                     nodes.add(ls[f][j]['nodename'])
+                     attrs['mtime'].append(ls[f][j]['mtime'])
+                     ls[f][j] = None
    
-                     ls[k][j] = None
-   
-               # Update the nodelist for this base instance
+               # Update the nodelist for this attrs instance
+               nodes = list(nodes)
                nodes.sort(cmp=numcmp)
-               base['nodename'] = nodes
+               attrs['nodename'] = nodes
    
                # Print out this file
-               print self._lsline(base, k, listnodes=options.nodes)
+               print self._lsline(attrs, f, listnodes=options.nodes)
 
-            totalsize += base['size']
+            totalsize += attrs['size']
 
          print "%g bytes" % totalsize   
       return 
+
+   def _timemask(self, mtimes):
+      # Find common time string across all instances
+      times = [time.strftime("%Y %b %d %H %M", time.localtime(t)).split() for t in mtimes]
+
+      common = []
+      for i in xrange(5):
+          vec = list(set([t[i] for t in times]))
+          if len(vec) > 1:
+              common.append('-')
+          else:
+              common.append(vec[0])
+
+      # See if it was this year or not
+      if common[0] != '-' and int(common[0]) == time.localtime()[0]:
+         return "%3s %2s %2s:%2s" % (common[1], common[2], common[3], common[4])
+      else:
+         return "%3s %2s  %4s" % (common[1], common[2], common[0])
 
    def _lsline(self, attrs, name, listnodes=False):
       if not long: 
@@ -2903,15 +2924,12 @@ Unlike 'get -c', duplicate instances of files will be included."""
       if type(nodes) != type([]):
          nodes = [nodes]
 
-      if len(nodes) > 1:
-         attrs['mtime'] = '-'
-      else:
-         lt = time.localtime(attrs['mtime'])
-         if lt[0] == time.localtime()[0]:
-            attrs['mtime'] = time.strftime("%b %d %H:%M", lt)
-         else:
-            attrs['mtime'] = time.strftime("%b %d  %Y", lt)
- 
+      if len(nodes) != len(attrs['mtime']):
+	print nodes, attrs['mtime']
+
+      attrs['mtime'] = self._timemask(attrs['mtime'])
+      
+
       if listnodes:
          if len(nodes) == len(self._Locations().locs):
             nodes = '*'
