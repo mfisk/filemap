@@ -296,6 +296,7 @@ def s3_partition(db, args, options):
         qstr = 'CAST((%s) AS int) - (CAST((%s) AS int) %% %d)' % \
             (qstr, qstr, options.bins)
 
+    #print >>sys.stderr, 'SELECT *, (%s) AS _part_ FROM %s' % (qstr, name)
     cursor.execute('SELECT *, (%s) AS _part_ FROM %s' %
                    (qstr, name))
 
@@ -718,16 +719,16 @@ def main():
         dbtype = checkdbtype(db)
 
 	if cmd == 'partition':
-    		parser = optparse.OptionParser()
+    		parser = optparse.OptionParser(usage="db partition [options] <query>")
     
     		parser.add_option('-n', '--bins', action='store', type='int', default=256,
                       help='number of partitions to create')
     		parser.add_option('-m', '--mod', action='store_true',
                       help='bin values into partitions of fixed size')
     
-    		options, args = parser.parse_args()
+    		options, args = parser.parse_args(args=args)
     
-    		if len(args) < 2:
+    		if len(args) < 1:
         		parser.error('no query specified')
 
 	 	return dispatch[dbtype][cmd](db, args, options)
