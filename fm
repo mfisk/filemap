@@ -667,85 +667,111 @@ class MethodOptionParser(optparse.OptionParser):
       print self.Epilog
       return r
 
-class FmLocations:
-   def __init__(self, config=None, locs={}, stdin=False, procs=None):
-      self.locs = locs # Allow pick() to derive an instance with a subset of the classes
-      if not procs:
-         self.procs = Procs()
-      else:
-         self.procs = procs
+class SmartDict(dict):
+	def __getattr__(self, name):
+		try:
+			return self[name]
+		except KeyError as e:
+			raise AttributeError(e)
+	def __setattr__(self, name, value):
+		self[name] = value
 
+class FmLocations:
+   def __init__(self, copyFrom=None, locs={}, slave=False):
+      self.procs = None
+      self.locker = None
       self.cleanup = None
 
-      if config:
-         self.config = config
+      assert(not (copyFrom and slave))
 
+      if copyFrom:
+         assert(locs)
+         self.config = copy.deepcopy(copyFrom.config)
+         self.config.locs = locs
+         self.procs = copyFrom.procs
+         self.locker = copyFrom.locker
+         #self.thisis(copyFrom.thisname)
+
+      elif slave:
+         configstr = sys.stdin.read()
+         self.config = cPickle.loads(configstr)
+         self.thisis(slave)
+
+         # Keep a copy of the config around so our children (like redistribute) can reference it
+         fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-", suffix=".pickle")
+         #print >>sys.stderr, "locations is", name
+         self.cleanup = name
+         os.environ['FMCONFIG'] = name
+         fh = os.fdopen(fd, 'w')
+         fh.write(cPickle.dumps(self.config))
+         fh.close()
       else:
-         self.config = ConfigParser.SafeConfigParser()
+         self.config = SmartDict() # like a named tuple but for older python
+         self.config.locs = {}
 
-         # Get appropriate self.configstr and set FMCONFIG
-         if stdin:
-            # Read config file from stdin
-            self.configstr = sys.stdin.read()
+         filename = os.environ.get('FMCONFIG')
+         #print >>sys.stderr, "Env filename is", filename
+         if not filename:
+            if os.path.isfile("filemap.conf"):
+               filename = "filemap.conf"
+            elif os.path.isfile(os.path.expanduser("~/.filemap.conf")):
+               filename = os.path.expanduser("~/.filemap.conf")
+            else:
+               filename = "/etc/filemap.conf"
 
-            # Keep a copy of the config around so our children can reference it
-            fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-")
-            self.cleanup = name
-            os.environ['FMCONFIG'] = name
-            fh = os.fdopen(fd, 'w')
-            fh.write(self.configstr)
-            fh.close()
+            os.environ['FMCONFIG'] = filename
 
+         try:
+            fh = open(filename)
+         except:
+            raise Exception("Unable to locate config file.  Set FMCONFIG or place filemap.conf in . or /etc")
+
+         if filename.endswith('.pickle'):
+            self.config = cPickle.load(fh)
          else:
-            filename = os.environ.get('FMCONFIG')
-            #print >>sys.stderr, "Env filename is", filename
-            if not filename:
-               if os.path.isfile("filemap.conf"):
-                  filename = "filemap.conf"
-               elif os.path.isfile(os.path.expanduser("~/.filemap.conf")):
-                  filename = os.path.expanduser("~/.filemap.conf")
-               else:
-                  filename = "/etc/filemap.conf"
+            self.parseConfigFile(fh)
 
-               os.environ['FMCONFIG'] = filename
+         #self.thisis('global')
 
-            try:
-               fh = open(filename)
-            except:
-               raise Exception("Unable to locate config file.  Set FMCONFIG or place filemap.conf in . or /etc")
+      if self.config.pathextras:
+         os.environ['PATH'] += ":" + self.config.pathextras
 
-            # Read into a buffer that we can relay to children 
-            self.configstr = fh.read()
+      if self.config.umask:
+         os.umask(self.config.umask)
 
-            #print >>sys.stderr, "Reading config", filename, self.config.sections()
+      if not self.locker:
+         self.locker = FileSynchronizer(self)
 
-         # Parse it
-         filebuf = cStringIO.StringIO()
-         filebuf.write(self.configstr)
-         filebuf.seek(0)
-         self.config.readfp(filebuf)
+      if not self.procs:
+         self.procs = Procs()
 
-         self.replication = int(self.config_get("global", "replication", "1"))
+   def parseConfigFile(self, fh):
+      """Populate self.config from config file."""
 
-         #All-to-all can hit sshd's MaxStartups limit, so retry a lot
-         self.all2all_retries = int(self.config_get("global", "all2all_retries", "7"))
+      # Read from file
+      self.configparser = ConfigParser.SafeConfigParser()
 
-         self.slurmfe = self.config_get("global", "slurmfe", None)
-         if self.slurmfe == "localhost":
-            self.slurmfe = "sh -c"
+      #print >>sys.stderr, "Reading config", filename, self.configparser.sections()
+      self.configparser.readfp(fh)
+  
+      self.config.replication = int(self.config_get("global", "replication", "1"))
 
-         self.umask = int(self.config_get("global", "umask", "0002"))
-         path = self.config_get("global", "pathextras")
-         if path:
-            os.environ['PATH'] += ":" + path
-         os.umask(self.umask)
+      #All-to-all can hit sshd's MaxStartups limit, so retry a lot
+      self.config.all2all_retries = int(self.config_get("global", "all2all_retries", "7"))
+
+      self.config.slurmfe = self.config_get("global", "slurmfe", None)
+      if self.config.slurmfe == "localhost":
+         self.config.slurmfe = "sh -c"
+
+      self.config.umask = int(self.config_get("global", "umask", "0002"))
+      self.config.pathextras = self.config_get("global", "pathextras")
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
-      if not locs:
+      if not self.config.locs:
          nl = self._getSlurmNodes(self)
  
-         for s in self.config.sections():
+         for s in self.configparser.sections():
             if s == "global": 
                continue
             r = self._expandList(s)
@@ -753,23 +779,22 @@ class FmLocations:
                self.parseLocation(s, name=name, num=i)
                if nl:
                   # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
-                  if not self.locs[name].inactive and self.locs[name].hostname not in nl:
-                     self.locs[name].inactive = True
+                  if not self.config.locs[name].inactive and self.config.locs[name].hostname not in nl:
+                     self.config.locs[name].inactive = True
                      #print "Marking", name, "inactive per SLURM"
                
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
-
-      self.locker = FileSynchronizer(self)
+   
 
    def _getSlurmNodes(self, alloc=True):
       nl = os.environ.get("SLURM_JOB_NODELIST")
-      if not nl and not self.slurmfe:
+      if not nl and not self.config.slurmfe:
          # Must not be running under SLURM
          return None
 
       if not nl:
-         nl = subprocess.Popen(self.slurmfe.split() + ["squeue -t RUNNING -u $USER -o %i/%j/%N"], stdout=subprocess.PIPE, stdin=None)
+         nl = subprocess.Popen(self.config.slurmfe.split() + ["squeue -t RUNNING -u $USER -o %i/%j/%N"], stdout=subprocess.PIPE, stdin=None)
          for line in nl.stdout:
              line = line.strip()
              (id,name,nl) = line.split('/')
@@ -787,7 +812,7 @@ class FmLocations:
          if not nl:
              if alloc:
                 if Verbose > 0: print >>sys.stderr, "Starting new FM job in SLURM"
-                subprocess.Popen(self.slurmfe.split() + ["salloc -k -J FM --nodes 1-9999 --overcommit --share --ntasks-per-node 2 --no-shell"], stdout=sys.stdout, stderr=sys.stderr, stdin=None).wait()
+                subprocess.Popen(self.config.slurmfe.split() + ["salloc -k -J FM --nodes 1-9999 --overcommit --share --ntasks-per-node 2 --no-shell"], stdout=sys.stdout, stderr=sys.stderr, stdin=None).wait()
                 return self._getSlurmNodes(alloc=False)
              else:
                 print >>sys.stderr, "Unable to find or start FM job found in SLURM"
@@ -837,12 +862,12 @@ class FmLocations:
          nodename = str(stanza)
 
       # Reuse (add attributes to) existing Location if we already saw this nodename
-      l = self.locs.get(nodename)
+      l = self.config.locs.get(nodename)
       if not l:
          l = FmLocation()
          l.name = nodename
 
-      qbyhost = self.config.has_option("global", "queuebyhost")
+      qbyhost = self.configparser.has_option("global", "queuebyhost")
 
       l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o GSSAPIDelegateCredentials=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -Ax", raw=True))
       l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
@@ -872,35 +897,35 @@ class FmLocations:
             l.processes = int(self.config_get(stanza, "processes", "1000"))
             l.dynamicload = float(self.config_get(stanza, "dynamicload", "2"))
 
-         self.locs[nodename] = l
+         self.config.locs[nodename] = l
       else:
-         self.this = l
+         self.this = l # Assume that we're the head node and use global defaults
    
    def config_get(self, section, key, defval=None, raw=False):
-      if self.config.has_option(section, key):
-         return self.config.get(section, key, raw=raw)
-      elif self.config.has_option("global", key):
-         return self.config.get("global", key, raw=raw)
+      if self.configparser.has_option(section, key):
+         return self.configparser.get(section, key, raw=raw)
+      elif self.configparser.has_option("global", key):
+         return self.configparser.get("global", key, raw=raw)
       else:
          return defval
 
    def thisis(self, nodename):
       self.thisname = nodename
-      self.this = self.locs[nodename]
+      self.this = self.config.locs[nodename]
       self.locker = FileSynchronizer(self)
 
    def pickHosts(self):
       """Return a subset of locations containing only one location per hostname"""
       hosts = set()
       newlocs = {}
-      for l in self.locs.values():
+      for l in self.config.locs.values():
          if l.inactive or l.hostname in hosts:
             continue
          else:
             newlocs[l.name] = l
             hosts.add(l.hostname)
  
-      newlocs = FmLocations(self.config, locs=newlocs, procs=self.procs)
+      newlocs = FmLocations(copyFrom=self, locs=newlocs)
       newlocs.this = self.this
       return newlocs
       
@@ -909,7 +934,7 @@ class FmLocations:
       Specify a seed to get deterministic results (e.g. for a given extension 
       number, file name, path, etc).  Returns a generator of a list of node names."""
 
-      candidates = self.locs.keys()
+      candidates = self.config.locs.keys()
 
       if seed:
          random.seed(seed)
@@ -917,7 +942,7 @@ class FmLocations:
       while candidates:
          l = random.choice(candidates)
          candidates.remove(l)
-         if not self.locs[l].inactive:
+         if not self.config.locs[l].inactive:
             yield l
  
    def pickn(self, seed=None, n=None):
@@ -930,7 +955,7 @@ class FmLocations:
       foundactive = False
 
       if not n: 
-         n = self.replication
+         n = self.config.replication
 
       nodes = self.nodes(seed=seed)
 
@@ -940,7 +965,7 @@ class FmLocations:
          if i > n and foundactive:
             # Stop if we've examined $n$ and at least 1 was active
             break
-         if not self.locs[l].inactive: 
+         if not self.config.locs[l].inactive: 
             foundactive = True
             yield l
 
@@ -958,11 +983,9 @@ locations of this instance."""
 
       useddict = {}
       for u in used: 
-         useddict[u] = self.locs[u]
+         useddict[u] = self.config.locs[u]
 
-      picked = FmLocations(self.config, locs=useddict, procs=self.procs)
-      picked.this = self.this
-      return picked
+      return FmLocations(copyFrom=self, locs=useddict)
          
    def forAllLocal(self, cmd):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
@@ -972,7 +995,7 @@ locations of this instance."""
       else:
          lcmd = ["fm", "_local", "-n", "%(NODE)"] + cmd
 
-      return self.forAll(lcmd, subst=True, stdinstr=self.configstr, tag=string.join(cmd))
+      return self.forAll(lcmd, subst=True, stdinstr=cPickle.dumps(self.config), tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
       if src and type(src) != type([]):
@@ -986,7 +1009,7 @@ locations of this instance."""
       if stdinstr:
          stdin = subprocess.PIPE
 
-      for loc in self.locs.values():
+      for loc in self.config.locs.values():
          if loc.inactive:
             continue
 
@@ -1136,13 +1159,13 @@ locations of this instance."""
                # use default n
                choices = self.pickn(seed=seed)
 
-            return [self.locs[c] for c in choices]
+            return [self.config.locs[c] for c in choices]
          else:
             # Use all destinations that are active
             retlist = []
-            for c in self.locs:
-               if not self.locs[c].inactive:
-                  retlist.append(self.locs[c])
+            for c in self.config.locs:
+               if not self.config.locs[c].inactive:
+                  retlist.append(self.config.locs[c])
             return retlist
 
    def rsync(self, nodesrcs, dstdir, serialize, procs, tag):
@@ -1166,7 +1189,7 @@ locations of this instance."""
             queue = dst  
 
          # Build rsync style "hostname:/path/to/root" specifications
-         loc = self.locs[dst]
+         loc = self.config.locs[dst]
          dstpath = loc.rootdir + "/"
          if isremote(loc.hostname):
             dstpath = loc.hostname + ":" + dstpath
@@ -1215,7 +1238,7 @@ will be the directory name preceding the first wildcard."""
       if not procs:
          procs = self.procs
 
-      for loc in self.locs.values():
+      for loc in self.config.locs.values():
          if loc.inactive: continue
 
          s = ["/" + f for f in src]
@@ -1269,9 +1292,9 @@ will be the directory name preceding the first wildcard."""
       return procs
 
    def processes(self):
-      return sum(i.cpusperjob for i in self.locs.values())
+      return sum(i.cpusperjob for i in self.config.locs.values())
          
-class FmLocation:
+class FmLocation(SmartDict):
    def __init__(self):
       self.inactive = False
       pass
@@ -2495,8 +2518,8 @@ Copy the specified file(s) into the virtual store.
       if failed:
          print >>sys.stderr, "Marking nodes inactive: %s" % ','.join(failed)
          for f in failed:
-            #print >>sys.stderr, "node %s was %s" % (f, self._Locations().locs[f].inactive)
-            self._Locations().locs[f].inactive = True
+            #print >>sys.stderr, "node %s was %s" % (f, self._Locations().config.locs[f].inactive)
+            self._Locations().config.locs[f].inactive = True
       shutil.rmtree(tmpdir)
 
    def map(self, args):
@@ -2606,7 +2629,7 @@ and the program re-run.
       if options.optimistic:
          maxErrors = None
       else:
-         maxErrors = self._Locations().replication
+         maxErrors = self._Locations().config.replication
 
       for cmd in pipeline:
          reduce = False
@@ -2932,7 +2955,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       
 
       if listnodes:
-         if len(nodes) == len(self._Locations().locs):
+         if len(nodes) == len(self._Locations().config.locs):
             nodes = '*'
          else:
             nodes.sort(cmp=numcmp)
@@ -3112,24 +3135,22 @@ class FmLocalCommands(CommandSetBase):
          # If -n is given, then we are a direct slave and 
          # should get our config on stdin
          os.environ['FMNODE'] = options.node
-         self.Locations = FmLocations(stdin=True)
+         self.Locations = FmLocations(slave=options.node)
       else:
          # We are a child of a scheduler and
          # should pick-up the config from an environment variable
          options.node = os.environ['FMNODE']
          self.Locations = FmLocations()
 
-      self.Locations.thisis(options.node)
-
       CommandSetBase.__init__(self, args, p)
 
    def replicate(self, args):
-      procs = Procs(retries=self.Locations.all2all_retries) 
+      procs = Procs(retries=self.Locations.config.all2all_retries) 
       errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True).collect()
       return errors
 
    def redistribute(self, args):
-      procs = Procs(retries=self.Locations.all2all_retries) 
+      procs = Procs(retries=self.Locations.config.all2all_retries) 
       errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True, hashbasename=True).collect()
       return errors
 
