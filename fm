@@ -1414,23 +1414,30 @@ class Procs:
             # Queues was already empty, so now delete it
             del self.queues[qname]
 
-   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None):
-      """Execute any active or queued processes and return, a boolean success scalar and a list of the processes objects that ran."""
+   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None, stopOnError=False):
+      """Execute any active or queued processes and return, a count of the number of errors and a list of the processes objects that ran."""
       results = []
       errors = 0
       total = 0
+      stopping = False
       while True:
-         p = self.waitpid(True)
+         p = self.waitpid(not stopping)
          if p == None:
             break
 
          results.append(p)
          total += 1
+
          if p.status:
             errors += 1 
+            if stopOnError:
+               print >>sys.stderr, "Terminating early due to an error"
+               stopping = True
+
          if Verbose > 1:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
+
             waiting = [l.queue for l in self.pids.values()]
             waiting.sort()
             if waiting and len(waiting) < len(results): 
@@ -1441,7 +1448,7 @@ class Procs:
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
-      if Verbose > 0:
+      if stopping or (Verbose > 0):
          print >>sys.stderr, "--- Report", tag
          tag = ""
          mean = 0.0
@@ -1464,25 +1471,31 @@ class Procs:
 
             print >>sys.stderr, "Average time %gs, stddev %gs %s" % (mean, stddev, tag)
 
-      for k,v in self.queues.items():
-         assert(not v)
-      assert(not self.pids)
-      assert(self.numprocspolling == 0)
-      self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
+      if not stopping:
+         for k,v in self.queues.items():
+            assert(not v)
+         assert(not self.pids)
+         assert(self.numprocspolling == 0)
+
+         self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
          
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
             
       if labelPrint:
          sys.stdout.write(coallesce([f.stdout for f in results], [f.node for f in results]))
-      if labelPrint or Verbose > 0:
+      if stopping or labelPrint or Verbose > 0:
          sys.stderr.write(coallesce([f.stderr for f in results], [f.node for f in results]))
 
       if Verbose > 0:
          print >>sys.stderr, "---"
 
+      if stopping:
+         return None
+
       if not ignoreErrors and errors:
          if maxErrors != None and errors > maxErrors:
+            print >>sys.stderr, "Terminating early due to %d errors", errors
             sys.exit(errors)
 
       return errors, results
@@ -1786,6 +1799,11 @@ class JobScheduler:
          if p:
             self.freethreads += 1
             self.finalizeItem(p)
+            if p.status and p.job.checkexit != None:
+               print >>sys.stderr, "Node terminating job %s due to exit status %d:" % (p.jobname, p.status)
+               sys.stderr.write(file(p.outdirname+"/"+p.outbasename+"/.stderr").read())
+               return
+
             if self.options.dynamicload: 
                cpu.update(force=True)
             sleep = 0.01
@@ -2654,7 +2672,9 @@ and the program re-run.
                # Barrier; Wait for that job (and its parents) to finish:
                if Verbose > 0:
                   print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
-               self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors)
+               r = self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors, stopOnError=True)
+               if not r:
+                  return False
                continue
       
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
@@ -2669,7 +2689,9 @@ and the program re-run.
       if not options.statusonly: 
          if Verbose > 0:
             print >>sys.stderr, "Waiting for completion.  Job", jobname
-         self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors)
+         r = self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors, stopOnError=True)
+         if not r:
+            return False
          wallclock = time.time() - starttime
       else:
          wallclock = None
@@ -2696,6 +2718,8 @@ and the program re-run.
          else:
             outputglobs = inglobs
          self.get(["-ce"] + outputglobs + errglobs, relative=True)
+
+      return True
 
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud to local storage."""
