@@ -1723,7 +1723,7 @@ class JobScheduler:
          for jobname in jobs:
             j = self.jobs[jobname]
 
-            if (not self.options.dynamicload) and (j.running >= j.threads):
+            if (not self.options.dynamicload) and (len(j.running) >= j.threads):
                continue
 
             proc = j.compute(self.options, self.procs, invalidateOnly)
@@ -1823,13 +1823,13 @@ class JobScheduler:
       stats['hostname'] = socket.gethostname()
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
-
+ 
       dir = p.outdirname + "/." + p.outbasename 
       try:
          f = file(dir + "/.status", "w")
       except IOError:
          # Perhaps we were invalidated while running.  Don't sweat it.
-         p.job.running -= 1
+         p.job.running.remove(p)
          return
 
       cPickle.dump(stats, f)
@@ -1855,7 +1855,8 @@ class JobScheduler:
       else:
           os.rename(p.outdirname + "/." + p.outbasename, dst)
 
-      p.job.running -= 1 
+      p.job.running.remove(p) 
+
      
 class CpuProfile:
    def __init__(self, interval):
@@ -1974,7 +1975,7 @@ class FmJob:
       self.threads = int(config_get("procspercpu", 1))
       self.threads *= cpusPerJob
 
-      self.running = 0
+      self.running = []
 
       self.parent = config_get("parent")
       self.checkexit = config_get("checkexit")
@@ -2163,7 +2164,7 @@ class FmJob:
       p.outbasename = obasename
       p.outrelpath = outfilename
       p.job = self
-      self.running += 1
+      self.running.append(p)
 
       sout.close()
       serr.close()
