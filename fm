@@ -465,9 +465,9 @@ def plot(filename, pngfile):
    intervals = [(i['start'], i['finish']) for i in stats]
    intervals = collapseIntervals(intervals)
    active = sum([i[1] - i[0] for i in intervals])
+   gaps = []
    if intervals:
       prev = intervals.pop(0)
-      gaps = []
       for i in intervals:
          # If more than 10% of the total duration is skipped here, then edit it out
          if i[0] - prev[1] >  0.1*(active):
