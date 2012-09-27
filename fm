@@ -2575,6 +2575,15 @@ and the program re-run.
       if not options.inputglob:
          p.error("-i or --inputglob must be specified")
 
+      options.inputglob = set(options.inputglob)
+
+      if "-" in options.inputglob:
+         options.inputglob.update([l.strip() for l in sys.stdin])
+         options.inputglob.remove("-")
+
+      options.inputglob = list(options.inputglob)
+      options.inputglob.sort()
+
       fresh = options.fresh # options.fresh gets rewritten later
 
       cmdwords = shlex.split(string.join(cmd))
