@@ -2784,7 +2784,7 @@ and the program re-run.
 
       nodecount = self._Locations().processes()
       tally = tallyStats(allstats, starttime, wallclock, nodecount)
-      statsfile = open('.fm.stats', 'w')
+      statsfile = gzip.GzipFile('.fm.stats.gz', 'w')
       cPickle.dump(allstats, statsfile)
       statsfile.close()
 
@@ -2834,7 +2834,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
    def plot(self, args):
       """Plot run-time of a previous map."""
       (options, args) = MethodOptionParser(fixed=["[infile [outfile]]"]).parse_args(args)
-      infile = ".fm.stats"
+      infile = ".fm.stats.gz"
       pngfile = "fmstats.png"
 
       if args:
@@ -2850,6 +2850,9 @@ Unlike 'get -c', duplicate instances of files will be included."""
       if len(args) > 2:
          print >>sys.stderr, "Usage: fm plot [<infile> [<outfile>]]"
          sys.exit(-1)
+
+      if type(infile) == type(''):
+         infile = gzip.GzipFile(infile)
    
       plot(infile, pngfile)
 
