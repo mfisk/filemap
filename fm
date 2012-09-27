@@ -682,9 +682,7 @@ class FmLocations:
       self.locker = None
       self.cleanup = None
 
-      assert(not (copyFrom and slave))
-
-      if copyFrom:
+      if copyFrom and not slave:
          assert(locs)
          self.config = copy.deepcopy(copyFrom.config)
          self.config.locs = locs
@@ -693,8 +691,8 @@ class FmLocations:
          #self.thisis(copyFrom.thisname)
 
       elif slave:
-         configstr = sys.stdin.read()
-         self.config = cPickle.loads(configstr)
+         assert(copyFrom)
+         self.config = copyFrom.config
          self.thisis(slave)
 
          # Keep a copy of the config around so our children (like redistribute) can reference it
@@ -991,11 +989,13 @@ locations of this instance."""
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
       if Verbose: 
          verbose = "-" + "v" * Verbose
-         lcmd = ["fm", verbose, "_local", "-n", "%(NODE)"] + cmd
+         lcmd = ["fm", verbose, "_local", "-n", "%(NODE)"] 
       else:
-         lcmd = ["fm", "_local", "-n", "%(NODE)"] + cmd
+         lcmd = ["fm", "_local", "-n", "%(NODE)"] 
 
-      return self.forAll(lcmd, subst=True, stdinstr=cPickle.dumps(self.config), tag=string.join(cmd))
+      inputs = {'cmd': cmd, 'config': self.config}
+
+      return self.forAll(lcmd, subst=True, stdinstr=cPickle.dumps(inputs), tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
       if src and type(src) != type([]):
@@ -3130,19 +3130,18 @@ class FmLocalCommands(CommandSetBase):
       p.set_usage("""fm _local command args...\n""" + self._usage())
       p.add_option("-n", "--node", help="Node name for this node")
       (options, args) = p.parse_args(args)
+      assert(not args)
+      assert(options.node)
+
+      inputs = SmartDict(cPickle.loads(sys.stdin.read()))
 
       if options.node:
          # If -n is given, then we are a direct slave and 
          # should get our config on stdin
          os.environ['FMNODE'] = options.node
-         self.Locations = FmLocations(slave=options.node)
-      else:
-         # We are a child of a scheduler and
-         # should pick-up the config from an environment variable
-         options.node = os.environ['FMNODE']
-         self.Locations = FmLocations()
+         self.Locations = FmLocations(copyFrom=inputs, slave=options.node)
 
-      CommandSetBase.__init__(self, args, p)
+      CommandSetBase.__init__(self, inputs.cmd, p)
 
    def replicate(self, args):
       procs = Procs(retries=self.Locations.config.all2all_retries) 
