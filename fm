@@ -2243,14 +2243,18 @@ class FileSynchronizer:
         # Locally we want to (re-)create output. 
         # Return True iff somebody already finished
         syncfilename = self._filename2lock(filename)
-        if not os.path.exists(syncfilename): return False
 
         # If we did it last time, then redo it now
         # isdone() is called iff we have newer inputs than outputs.
         # We don't compare syncfile's lasttime, but presumably it is stale like the local output
-        if file(syncfilename).read() == self.locs.thisname:
-           # We did it last time, remove our syncfile now
-           os.unlink(syncfilename)
+        try:
+           if file(syncfilename).read() == self.locs.thisname:
+              # We did it last time, remove our syncfile now
+              os.unlink(syncfilename)
+              return False
+        except:
+           # Assume that the status did not exist
+           # XXX. it could have bad permissions or something so that we can't read or unlink
            return False
 
 	lasttime = os.path.getmtime(syncfilename)
