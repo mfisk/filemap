@@ -5,7 +5,6 @@ import subprocess
 import sys
 import optparse
 import gzip
-import sha
 import shutil
 
 try:
@@ -306,7 +305,7 @@ def s3_partition(db, args, options):
     try:
         for row in cursor:
             part = row[-1]
-            hash = hashlib.sha1(str(part))
+            hash = sha(str(part))
             hash = struct.unpack_from("!Q",hash.digest())[0] % options.bins
             
             if not outputs.has_key(hash):
