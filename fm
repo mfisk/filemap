@@ -2568,7 +2568,8 @@ and the program re-run.
       p.add_option("-o", "--optimistic", action="store_true", help="Try to run even if there are many failures submitting job")
       p.add_option("-p", "--procspercpu", action="store", help="Number of processes to run per CPU (default=1)", default=1)
       p.add_option("-s", "--statusonly", action="store_true", help="Don't wait for completion; fetch any available results now")
-      p.add_option("-e", "--checkexit", action="store_true", help="Remove output from any previous run that had a non-zero exit status")
+      p.add_option("-e", "--checkexit", action="store_false", default=True, help="Do NOT stop on error or remove output from any previous run that had a non-zero exit status")
+      p.add_option("-m", "--mail", action="store_true", help="E-mail results")
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
@@ -2577,6 +2578,7 @@ and the program re-run.
       fresh = options.fresh # options.fresh gets rewritten later
 
       cmdwords = shlex.split(string.join(cmd))
+      cmd = ' '.join(cmdwords)
       cmds = []
       # parse/replace pipe and reduce operators         
       # < redistribute
@@ -2636,16 +2638,77 @@ and the program re-run.
 
       #print >>sys.stderr, "Pipeline2:", pipeline
 
-      inglobs = options.inputglob
-      outdirglobs = []
-      statglobs = []
-      assert (type(inglobs) == type([]))
+      if options.mail:
+         import dns.resolver
+         import smtplib
+         import socket
+         import email.mime.multipart
+         import email.mime.image
+         import email.mime.text
 
+         user = pwd.getpwuid(os.getuid()).pw_name
+         host = socket.getfqdn()
+         fromaddr = '@'.join([user,host])
+         domain = '.'.join(host.split('.')[1:])
+         toaddr = '@'.join([user,domain])
+
+         mx = dns.resolver.query(domain, 'MX')[0]
+         print "Results will be in mail from %s to %s via %s" % (fromaddr, toaddr, mx.exchange)
+
+         msg = email.mime.multipart.MIMEMultipart()
+         msg['Subject'] = 'Filemap results for %s' % (cmd)
+         msg['From'] = fromaddr
+         msg['To'] = toaddr
+
+         stdout = cStringIO.StringIO()
+         realstderr = sys.stderr
+         sys.stdout = stdout
+         sys.stderr = stdout
+
+      try:
+         finished = self._domap(options, pipeline)
+
+         if options.mail:
+            body = email.mime.text.MIMEText(stdout.getvalue(), 'plain')
+            msg.attach(body)
+   
+            if finished:
+               try:
+                  imgfile = cStringIO.StringIO()
+                  self.plot([".fm.stats.gz", imgfile])
+      
+                  img = email.mime.image.MIMEImage(imgfile.getvalue())
+                  msg.attach(img)
+                  msg.attach(email.mime.text.MIMEApplication(file(".fm.stats.gz").read()))
+               except:
+                  traceback.print_exc()
+      
+            # Send the email via our own SMTP server.
+            s = smtplib.SMTP(str(mx.exchange))
+            s.sendmail(fromaddr, toaddr, msg.as_string())
+            s.quit()
+
+      except:
+	 if options.mail:
+            sys.stderr = realstderr
+            print >>realstderr, stdout.getvalue()
+
+         raise
+
+      return True
+               
+   
+
+   def _domap(self, options, pipeline):
       if options.statusonly:
          tmpdir = None
       else:
          tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
 
+      inglobs = options.inputglob
+      outdirglobs = []
+      statglobs = []
+      assert (type(inglobs) == type([]))
       starttime = None
       jobname = None
 
