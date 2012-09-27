@@ -967,7 +967,7 @@ class FmLocations:
             foundactive = True
             yield l
 
-      if i <= n:
+      if i < n:
          print >>sys.stderr, "Cannot pick %d locations" % (n)
 
    def pick(self, n=None, seed=None, selfIsNoop=False):
