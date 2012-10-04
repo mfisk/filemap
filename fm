@@ -1795,8 +1795,13 @@ class JobScheduler:
             self.freethreads += 1
             self.finalizeItem(p)
             if p.status and p.job.checkexit != None:
-               print >>sys.stderr, "Node terminating job %s due to exit status %d:" % (p.jobname, p.status)
-               sys.stderr.write(file(p.outdirname+"/"+p.outbasename+"/.stderr").read())
+               print >>sys.stderr, "Node terminating job %s due to exit status %d on input %s:" % (p.jobname, p.status, str(p.inputs))
+               try:
+                  sys.stderr.write(file(p.outdirname+"/"+p.outbasename+"/.stderr").read())
+               except IOError:
+                  # .stderr file might not exist
+                  pass
+               self.JobDone(p.jobname)
                return
 
             if self.options.dynamicload: 
