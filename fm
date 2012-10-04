@@ -426,15 +426,13 @@ def makeVnodes(nodes):
 
    return nodes
    
-def plot(filename, pngfile):
+def plot(inputfile, pngfile):
    import matplotlib.figure
    import matplotlib.collections
    import matplotlib.backends.backend_agg
-   import matplotlib.pyplot as plt
 
-   statsfile = open(filename, 'r')
-   stats = cPickle.load(statsfile)
-   statsfile.close()
+   stats = cPickle.load(inputfile)
+   inputfile.close()
 
    # Load all stats and keep track of min and max inputsizes along the way
    nodes = {}
