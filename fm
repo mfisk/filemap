@@ -1248,12 +1248,10 @@ will be the directory name preceding the first wildcard."""
          includes = rsyncFilter(loc.rootdir, s)
 
          if isremote(loc.hostname):
-            s = [loc.hostname + ":" + loc.rootdir]
+            s = [loc.hostname + ":" + loc.rootdir + "/" + i for i in s]
          else:
+            s = [loc.rootdir + "/" + i for i in s]
             s = multiglob(s)
-            if not s:
-               #print >>sys.stderr, "No such file:", src
-               continue
 
          cmd = loc.rsynccmd + includes
          cmd += [rsyncflags, "--prune-empty-dirs", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
