@@ -40,7 +40,6 @@ import shlex
 import shutil
 import signal
 import socket
-import socket
 import stat
 import string
 import subprocess
