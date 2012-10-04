@@ -2685,8 +2685,12 @@ and the program re-run.
          finished = self._domap(options, pipeline)
 
          if options.mail:
-            body = email.mime.text.MIMEText(stdout.getvalue(), 'plain')
-            msg.attach(body)
+            output = ""
+            for line in stdout.getvalue().split("\n"):
+               if len(line) > 200:
+                   line = line[:200] + "..."
+               output += line + "\n"
+            msg.attach(email.mime.text.MIMEText(output, 'plain'))
    
             if finished:
                try:
@@ -2801,6 +2805,7 @@ and the program re-run.
             outputglobs = []
          else:
             outputglobs = inglobs
+
          self.get(["-ce"] + outputglobs + errglobs, relative=True)
 
       return True
