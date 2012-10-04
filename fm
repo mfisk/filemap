@@ -2123,11 +2123,9 @@ class FmJob:
 
       oname = obase + "/stdout"
       ename = obase + "/.stderr"
+      if os.path.exists(obase): 
+         shutil.rmtree(obase)
       mkdirexist(obase)
-      try:
-         os.unlink(obase + "/.status")
-      except:
-         pass
 
       sout = os.fdopen(os.open(oname, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
       serr = os.fdopen(os.open(ename, os.O_CREAT|os.O_WRONLY|os.O_TRUNC), "w")
