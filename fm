@@ -2068,7 +2068,11 @@ class FmJob:
       # We invalidate outputs if inputs are newer, so find the newest input
       newestinput = 0
       for i in inputs:
-         newestinput = max(newestinput, os.path.getmtime(i))
+         try:
+            newestinput = max(newestinput, os.path.getmtime(i))
+         except OSError:
+            # Input no longer present, so we don't want to rerun
+            return None
 
       # First check locally to see if output exists and is current
       if os.path.exists(statfile):
