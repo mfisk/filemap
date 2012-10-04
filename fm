@@ -1490,7 +1490,7 @@ class Procs:
 
       if not ignoreErrors and errors:
          if maxErrors != None and errors > maxErrors:
-            print >>sys.stderr, "Terminating early due to %d errors", errors
+            print >>sys.stderr, "Terminating early due to %d errors" % errors
             sys.exit(errors)
 
       return errors, results
