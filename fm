@@ -1053,7 +1053,7 @@ locations of this instance."""
 
       return self.procs
 
-   def expanddir(path):
+   def expanddir(self, path):
             items = [] 
             for root,dirs,files in os.walk(path):
                for f in files:
