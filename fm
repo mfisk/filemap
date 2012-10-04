@@ -2089,9 +2089,9 @@ class FmJob:
             else:
                return None
 
-         print >>sys.stderr, "Removing old local results", statfile, lasttime, newestinput
          #Remove it now before somebody uses it for something
          dir = os.path.dirname(statfile)
+         print >>sys.stderr, "Removing old local results", dir, lasttime, newestinput
          parent = os.path.dirname(dir)
          dirname = os.path.basename(dir)
 
