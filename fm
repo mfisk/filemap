@@ -2160,6 +2160,7 @@ class FmJob:
       assert(p)
       #print >>sys.stderr, "JOB RUNNING", self.jobname, p, procs.pids, inputs
       p.inputsize = 0
+      p.inputs = inputs
       for i in inputs:
          p.inputsize += os.path.getsize(i)
       p.outdirname = odirname
@@ -2490,7 +2491,11 @@ Has unix "mkdir -p" semantics."""
        
       for jname,j in jobs.iteritems():
          j.nodes.sort(cmp=numcmp)
-         print fmt % (jname, j.uid, string.join(j.nodes, ','), j.cmd, j.inputs)
+         numinputs = len(j.inputs.split())
+         inputs = "%d: %s"  % (numinputs, j.inputs)
+         if len(inputs) > 100:
+            inputs = inputs[:100] + "..."
+         print fmt % (jname, j.uid, string.join(j.nodes, ','), j.cmd, inputs)
 
    def df(self, args):
       """Show free space on each node."""
