@@ -42,7 +42,7 @@ def s3tablename(cursor, db=None):
     name = cursor.fetchone()
     if not name:
         print >>sys.stderr, "No table in input file"
-	return None
+	sys.exit(-1)
     name = name[0]
     return name
 
@@ -309,7 +309,7 @@ def s3_partition(db, args, options):
             hash = struct.unpack_from("!Q",hash.digest())[0] % options.bins
             
             if not outputs.has_key(hash):
-                oconn,ocur = s3connect(str(hash) + ".db")
+                oconn,ocur = s3connect(str(hash) + ".s3")
                 outputs[hash] = oconn,ocur
                 ocur.execute(createsql)
             else:
@@ -334,7 +334,7 @@ def s3_partition(db, args, options):
         if not success:
             for p in outputs:
                 try:
-                    os.unlink("%s.db" % p)
+                    os.unlink("%s.s3" % p)
 		except:
                     pass
 
