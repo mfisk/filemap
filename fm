@@ -1044,8 +1044,8 @@ locations of this instance."""
             continue
 
          if subst: 
-            cmd = [n.replace("%(ROOTDIR)", loc.rootdir).replace("%(SYNCDIR)", loc.syncdir).replace("%(NODE)", loc.name) for n in Cmdv]
-            src = [n.replace("%(SYNCDIR)", loc.syncdir) for n in src]
+            cmd = loc.subst(Cmdv)
+            src = loc.subst(src)
          else:
             cmd = list(Cmdv)
 
@@ -1326,6 +1326,9 @@ class FmLocation(SmartDict):
    def __init__(self):
       self.inactive = False
       pass
+
+   def subst(self, args):
+       return [n.replace("%(ROOTDIR)", self.rootdir).replace("%(SYNCDIR)", self.syncdir).replace("%(NODE)", self.name) for n in args]
 
 class Procs:
    """This class is used to launch some number of child processes and reap them.
@@ -3290,7 +3293,7 @@ class FmLocalCommands(CommandSetBase):
          os.environ['FMNODE'] = options.node
          self.Locations = FmLocations(copyFrom=inputs, slave=options.node)
 
-      CommandSetBase.__init__(self, inputs.cmd, p)
+      CommandSetBase.__init__(self, self.Locations.this.subst(inputs.cmd), p)
 
    def replicate(self, args):
       procs = Procs(retries=self.Locations.config.all2all_retries) 
