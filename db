@@ -152,7 +152,7 @@ class Query():
                         s = p.strip(')').split('(', 1)
 		        fn = s[0].strip()
 		        args = s[1].strip()
-                        if iscolumnname(fn) and (args == "" or args == "*" or iscolumnname(args)):
+                        if fn and iscolumnname(fn) and (args == "" or args == "*" or iscolumnname(args)):
 			        if fn in ["sum","min","max","avg","count"]:
 					# Aggregate function
 				        self.parsed_projections.append(('aggregate', fn, args))
@@ -169,9 +169,10 @@ class Query():
 		    		if not alias: self.outputcols.append(fn)
         
 		        else:
-			        # Must be some arithmetic express instead.  
-			        # XXX. Go no further right now
+			        # Must be some arithmetic expression instead.  
+			        # XXX. Go no further right now. Assume not aggregate
             		        self.parsed_projections.append(('expr', p))
+	            		self.groupby.add(p)
 		    		if not alias: self.outputcols.append('expr')
         if not aggregate: 
 	        self.groupby = []
