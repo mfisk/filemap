@@ -781,19 +781,6 @@ class FmLocations:
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
    
-      # Build the node points for the Chord algorithm used by nodes()
-      candidates = self.config.locs.keys()
-      mapping = {}
-      for node in candidates:
-          point = sha(node)
-          # For small numbers of nodes, we need multiple points per node in order to have any stability
-          for _ in range(100):
-              mapping[point.hexdigest()] = node
-              # Use a hash feedback loop to generate pseudo-random list of additional points
-              point = sha(point.digest() + node)
-
-      self.config.chord = mapping
-      #print >>sys.stderr, self.config
 
    def _getSlurmNodes(self, alloc=True):
       nl = os.environ.get("SLURM_JOB_NODELIST")
@@ -948,18 +935,35 @@ class FmLocations:
  
       # This Chord approach allows the map of seed->nodes to be fairly stable as nodes are added or deleted
 
-      # Add to Finding 
+      # Build the node points for the Chord algorithm used by nodes()
+      if 'chord' not in self.config:
+          candidates = self.config.locs.keys()
+          mapping = {}
+          for node in candidates:
+              point = sha(node)
+              # For small numbers of nodes, we need multiple points per node in order to have any stability
+              for _ in range(100):
+                  mapping[point.hexdigest()] = node
+                  # Use a hash feedback loop to generate pseudo-random list of additional points
+                  point = sha(point.digest() + node)
+    
+          self.config.chord = mapping
+
+      if not seed:
+          seed = str(random.random())
+
+      #print >>sys.stderr, self.config
+      # Add point to set
       seed_point = sha(seed).hexdigest()
-      print >>sys.stderr, "FOO", self.config
       candidate_points = self.config.chord.keys()
-      candidate_points.append(seed_point)
- 
+
       # Get ordered list of points after seed_point 
+      candidate_points.append(seed_point)
       candidate_points.sort()
       s_idx = candidate_points.index(seed_point)
       candidate_points = candidate_points[s_idx:] + candidate_points[:s_idx]
       candidate_points.pop(0) # Remove seed itself
- 
+
       # Generate nodes without duplicates 
       used_candidates = set()
       for point in candidate_points:
@@ -1010,7 +1014,7 @@ locations of this instance."""
          useddict[u] = self.config.locs[u]
 
       return FmLocations(copyFrom=self, locs=useddict)
-         
+        
    def forAllLocal(self, cmd):
       """Same ase forAll(), but CMD will be run as arguments to "fm _local"."""
       if Verbose: 
