@@ -781,6 +781,19 @@ class FmLocations:
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
    
+      # Build the node points for the Chord algorithm used by nodes()
+      candidates = self.config.locs.keys()
+      mapping = {}
+      for node in candidates:
+          point = sha(node)
+          # For small numbers of nodes, we need multiple points per node in order to have any stability
+          for _ in range(100):
+              mapping[point.hexdigest()] = node
+              # Use a hash feedback loop to generate pseudo-random list of additional points
+              point = sha(point.digest() + node)
+
+      self.config.chord = mapping
+      #print >>sys.stderr, self.config
 
    def _getSlurmNodes(self, alloc=True):
       nl = os.environ.get("SLURM_JOB_NODELIST")
@@ -923,23 +936,39 @@ class FmLocations:
       newlocs = FmLocations(copyFrom=self, locs=newlocs)
       newlocs.this = self.this
       return newlocs
-      
+   
    def nodes(self, seed=None):
       """Generate a list of pseudo-random locations.  
       Specify a seed to get deterministic results (e.g. for a given extension 
-      number, file name, path, etc).  Returns a generator of a list of node names."""
+      number, file name, path, etc).  Generate a list of node names."""
 
-      candidates = self.config.locs.keys()
-
-      if seed:
-         random.seed(seed)
-
-      while candidates:
-         l = random.choice(candidates)
-         candidates.remove(l)
-         if not self.config.locs[l].inactive:
-            yield l
+      # This implementation uses a Chord-like structure where nodes map to points on a ring.
+      # The seed determines a point of interest on the ring.
+      # Yield the nodes closest to that point (but after the point, for implementation simpicity)
  
+      # This Chord approach allows the map of seed->nodes to be fairly stable as nodes are added or deleted
+
+      # Add to Finding 
+      seed_point = sha(seed).hexdigest()
+      print >>sys.stderr, "FOO", self.config
+      candidate_points = self.config.chord.keys()
+      candidate_points.append(seed_point)
+ 
+      # Get ordered list of points after seed_point 
+      candidate_points.sort()
+      s_idx = candidate_points.index(seed_point)
+      candidate_points = candidate_points[s_idx:] + candidate_points[:s_idx]
+      candidate_points.pop(0) # Remove seed itself
+ 
+      # Generate nodes without duplicates 
+      used_candidates = set()
+      for point in candidate_points:
+          node = self.config.chord[point]
+          if node not in used_candidates:
+              used_candidates.add(node)
+              if not self.config.locs[node].inactive:
+                  yield node
+
    def pickn(self, seed=None, n=None):
       """Pick some pseudo-random locations.  The number of locations
       chosen is based on the replication factor in the config.
