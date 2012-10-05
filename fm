@@ -1094,7 +1094,7 @@ locations of this instance."""
                   items.append(fp)
             return items
 
-   def put(self, srclist, dst, relativeroot=False, procs=None, pickn=False, hashbasename=False, serialize=False):
+   def put(self, srclist, dst, relativeroot=False, procs=None, pickn=False, hashbasename=False, serialize=False, remove=False):
       # We will glob this ourselves since we implicitly expand directories to the next level and, in the case of hashbasename, have to get the final filenames rather than globs in order to know where to put them.
       if not procs:
          procs = self.procs
@@ -1145,11 +1145,22 @@ locations of this instance."""
             srcfiles.append(a)
 
       tag = "put %s %s" % (srclist, dst) 
-      self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize)
+      redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove)
+
+      if remove and redundants:
+         errors, results = procs.collect()
+         # If no errors, then remove redundants
+         if results and not errors:
+            print >>sys.stderr, "Removing %d of %d" % (len(redundants), len(srcs))
+            for r in redundants:
+               if os.path.isdir(r):
+                  shutil.rmtree(r)
+               else:
+                  os.unlink(r)
 
       return procs
 
-   def pickput(self, srcs, dst, procs, tag, pickn, hashbasename, serialize):
+   def pickput(self, srcs, dst, procs, tag, pickn, hashbasename, serialize, remove):
       nodesrcs = {}
       relative = None
       for s in srcs:
@@ -1169,7 +1180,16 @@ locations of this instance."""
          for c in choices:
             dictListAppend(nodesrcs, c.name, s)
 
-      return self.rsync(nodesrcs, dst, serialize, procs, tag)
+      if remove:
+         redundants = set(srcs)
+         if self.thisname in nodesrcs:
+            redundants -=  set(nodesrcs[self.thisname])
+      else:
+         redundants = None
+
+      self.rsync(nodesrcs, dst, serialize, procs, tag)
+
+      return redundants
 
    def pickdstnodes(self, dst, pickn, hashbasename):
          # We always specify a seed when calling pick() so there is stability in which nodes work is mapped to.
@@ -3297,7 +3317,7 @@ class FmLocalCommands(CommandSetBase):
 
    def replicate(self, args):
       procs = Procs(retries=self.Locations.config.all2all_retries) 
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True, remove=True).collect()
       return errors
 
    def redistribute(self, args):
