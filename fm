@@ -1637,14 +1637,14 @@ class Procs:
             # This creates some potential latency, but this is not a expected case
             print >>sys.stderr, "Debug: inefficient when only some children have fds we manage"
             waitopts = os.WNOHANG
-            pollopts = 2500 #block
+            pollopts = 2500 # block for 2500ms
          else:
             # In this case poll() is superfluous and we should just do a blocking waitpid()
             waitopts = 0 #block
-            pollopts = 0
+            pollopts = 1 #do not block
       else:
          # Simple case
-         pollopts = 0
+         pollopts = 0 #block
          waitopts = os.WNOHANG
 
       #print >>sys.stderr, "block case", waitopts, pollopts
@@ -1672,7 +1672,7 @@ class Procs:
                if p.__dict__.has_key('error'):
                   return self.finalizeProc(p)
 
-               # Since the chils is already reaped, we'll probably measure no CPU time for it. oh well
+               # Since the child is already reaped, we'll probably measure no CPU time for it. oh well
                starttimes = os.times()
                status = p.poll()
                if status != None: 
@@ -1685,7 +1685,7 @@ class Procs:
             raise
 
       # Look for children that may be blocking on writes to stdout, or that have finished
-      # XXX: this won't catch children that we don't have share a fd with
+      # this won't catch children that we don't have share a fd with
       try:
          # Make sure we get interrupted if a child exits (in case we're not connected to any of its fds)
          l = self.poll.poll(pollopts)
