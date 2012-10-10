@@ -455,7 +455,10 @@ def plot(inputfile, pngfile):
       maxtime = max(maxtime, s['finish'])
       totalsize += s['inputsize']
 
-      jobs.add(s['jobname'])
+      if not s['cmd']:
+         s['cmd'] = s['jobname']
+
+      jobs.add(s['cmd'])
 
    # Reduce to overlapping windows
    stats.sort(lambda a,b: cmp(a['start'], b['start']))
@@ -541,7 +544,7 @@ def plot(inputfile, pngfile):
             if g[1] < start:
                delta += g[1] - g[0]   
 
-         ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['jobname']])
+         ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
          #ax.errorbar(finish, y, yerr=1, fmt=None, elinewidth=(1 + 2*size), color=color[s['jobname']])
 
    ax.autoscale_view()
@@ -1787,7 +1790,6 @@ class JobScheduler:
 
             #print >>sys.stderr, "Launched", proc
             if proc: 
-               proc.jobname = jobname
                return True
             else:
                # No more work to do, check to see if job is complete
@@ -2222,6 +2224,8 @@ class FmJob:
       p.outdirname = odirname
       p.outbasename = obasename
       p.outrelpath = outfilename
+      p.cmd = cmd
+      p.jobname = self.jobname
       p.job = self
       self.running.append(p)
 
