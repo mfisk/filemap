@@ -1266,7 +1266,7 @@ locations of this instance."""
 
       cmd = self.this.rsynccmd + ["-tLde", loc.sshcmdstr] + flags + [srcpath, dstpath]
 
-      print >>sys.stderr, "inputlist:", inputlist
+      #print >>sys.stderr, "inputlist:", inputlist
       procs.Popen(cmd, queue=queue, stdinstr=inputstr, node=node, tag=tag)
 
 
