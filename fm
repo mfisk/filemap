@@ -307,20 +307,6 @@ def mkdirexist(path):
       else:
          raise
 
-def rsyncFilter(rootdir, lst):
-   r = os.path.basename(rootdir) + "/" 
-
-   includes = [r]
-   for l in lst:
-      while l != "/":
-         includes.append(r + l)
-         l = os.path.dirname(l)
-
-   includes = ["--include=" + x for x in includes] 
-   includes = [i.replace('//','/') for i in includes]
-   includes.append("--exclude=*")
-   return includes
-  
 def coallesce(outputs, labels):
    """Take a list of multi-line strings and an equally long list of labels and return a string summarizing which labels had what output."""
    assert(len(outputs) == len(labels))
@@ -1101,23 +1087,6 @@ locations of this instance."""
 
       relative = {}
 
-      # When "relativeroot" is true, we're copying between nodes within the virtual filesystem and want to preserve paths
-      if relativeroot:
-         assert(dst == "/")
-         # An intervening /./ in the path is how we denote the leading part that shouldn't be duplicated on the destination
-         srcs = [self.this.rootdir + "/./" + s for s in srclist]
-      else:
-         srcs = []
-         for s in srclist:
-            if not s.startswith("/"):
-               s = os.getcwd() + "/" + s
-            srcs.append(s)
-
-      srcs = multiglob(srcs)
-      if not srcs:
-         print >>sys.stderr, "No such file:", srclist
-         return procs
-
       # Pull out any directories we have to recurse.
       # Imagine a list like the following:
       #   a   (a,)
@@ -1128,21 +1097,33 @@ locations of this instance."""
       #       (/f/h,f)
       #   i/  (i/j,i)
       #       (i/k,i
-      # We cannot process this in a single rsync.
-      # We can do (a and /e) or (/b) or (/f)
-      # We will use rsync -Rd to make destination subdirs, but only for things that share a common source parent
+      # We can only do this with fully qualified paths
+      # Luckily, we use rsync which allows us to use "/./" elements to show which part of the path to preserve on the other side
+
+      # When "relativeroot" is true, we're copying between nodes within the virtual filesystem and want to preserve paths
+      if relativeroot:
+         assert(dst == "/")
+         # An intervening /./ in the path is how we denote the leading part that shouldn't be duplicated on the destination
+         srcs = [self.this.rootdir + "/./" + s for s in srclist]
+      else:
+         srcs = []
+         for s in srclist:
+            s = s.rstrip('/') 
+            s = os.path.dirname(s) + '/./' + os.path.basename(s)
+            srcs.append(s)
+
+      srcs = multiglob(srcs)
+      if not srcs:
+         print >>sys.stderr, "No such file:", srclist
+         return procs
+
       srcfiles = []
       for a in srcs:
-         # Convert directory arguments to lists of files
+         # Convert directory arguments to lists of files so we can assign them to the proper nodes
          if os.path.isdir(a):
-            if "/./" not in a:
-               a += "/./"
             srcfiles += self.expanddir(a)
-
          else:
-            if "/./" not in a:
-               a = os.path.dirname(a) + "/./" + os.path.basename(a)
-            srcfiles.append(a)
+            srcfiles.add(a)
 
       tag = "put %s %s" % (srclist, dst) 
       redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove)
@@ -1187,7 +1168,7 @@ locations of this instance."""
       else:
          redundants = None
 
-      self.rsync(nodesrcs, dst, serialize, procs, tag)
+      self.rsyncput(nodesrcs, dst, serialize, procs, tag)
 
       return redundants
 
@@ -1218,7 +1199,7 @@ locations of this instance."""
                   retlist.append(self.config.locs[c])
             return retlist
 
-   def rsync(self, nodesrcs, dstdir, serialize, procs, tag):
+   def rsyncput(self, nodesrcs, dstdir, serialize, procs, tag):
       # nodesrcs is a dictionary indexed by nodenames each containing a list of fully-qualified local srcs.
       # Iff relative is True, then the local source should contain a /./ element and path elements after /./ will be created in the dst.
       # Iff serialize is True, then do one node at a time.
@@ -1228,27 +1209,65 @@ locations of this instance."""
       random.shuffle(dsts)
       i = 0
       for dst in dsts:
-         if serialize:
-            i += 1
-            if serialize > 1:
-               # Round-robin
-               queue = "rr" + str(i % int(serialize))
-            else:
-               queue = "serialize"
+         self.rsync(False, dst, nodesrcs[dst], dstdir, serialize, procs, tag)
+
+   def rsync(self, is_get, node, inputlist, dstdir, serialize, procs, tag):
+      if serialize:
+         i += 1
+         if serialize > 1:
+            # Round-robin
+            queue = "rr" + str(i % int(serialize))
          else:
-            queue = dst  
+            queue = "serialize"
+      else:
+         queue = node  
 
-         # Build rsync style "hostname:/path/to/root" specifications
-         loc = self.config.locs[dst]
-         dstpath = loc.rootdir + "/"
-         if isremote(loc.hostname):
-            dstpath = loc.hostname + ":" + dstpath
-         dstpath = "/".join([dstpath, dstdir])
+      # Build rsync style "hostname:/path/to/root" specifications
+      loc = self.config.locs[node]
+      remoteroot = loc.rootdir
+      remotepath = remoteroot
+      if isremote(loc.hostname):
+         remotepath = loc.hostname + ":" + remotepath
 
-         cmd = self.this.rsynccmd + ["-Le", loc.sshcmdstr, "--files-from=-", "--no-d", "/", dstpath]
-         inputlist = '\n'.join(nodesrcs[dst])
-         #print >>sys.stderr, "inputlist:", nodesrcs[dst]
-         procs.Popen(cmd, queue=queue, stdinstr=inputlist, node=dst, tag=tag)
+      if is_get:
+         # The remote paths may contain wildcards, so we have to use --include-from instead of --files-from
+         # Also the remote side might be a directory, so we use -r
+         srcpath = remotepath + "/"
+         dstpath = dstdir
+         flags = ["-rp", "--include-from=-", "--exclude=*"]
+         il = []
+         for name in inputlist:
+            # Clean up double slashes
+            while '//' in name:
+               name = name.replace('//','/')
+
+            # remote source doesn't seem to process /./ relative paths (which we rely on for local source)
+            name = name.replace('/./', '/')
+
+            # Any name could be a directory, so add a recursive mask to get its children
+            il.append(os.path.join(name, "***"))
+
+            while name and name != "/":
+               il.append(name)
+               name = os.path.dirname(name)
+
+         inputlist = il
+         
+      else:
+         # We have resolved all the wildcards for node assignment, so just generate a list of files
+         srcpath = "/"
+         dstpath = remotepath + "/" + dstdir + "/"
+         while '//' in dstpath:
+            dstpath = dstpath.replace('//','/')
+            
+         flags = ["-R", "--files-from=-"]
+
+      inputstr = '\n'.join(inputlist)
+
+      cmd = self.this.rsynccmd + ["-tLde", loc.sshcmdstr] + flags + [srcpath, dstpath]
+
+      print >>sys.stderr, "inputlist:", inputlist
+      procs.Popen(cmd, queue=queue, stdinstr=inputstr, node=node, tag=tag)
 
 
    def get(self, args, procs=None, outfile=sys.stdout, relative=False):
@@ -1266,52 +1285,25 @@ will be the directory name preceding the first wildcard."""
       if (not options.cat) and (len(args) < 2):
          p.print_help()
          return 1
-
-      rsyncflags = "-rptgo"
-      if relative:
-         rsyncflags += "R"
-
-      # If relative=True, then ssh -R will build a destination tree for you
-      # If relative=False and there is no wildcard, then the file will be put in dst
-      # If relative=False and you use a wildcard, then you will get a tree built in dst
-      # because we move globs to include/excludes and use --recursive
-      # but if your wildcard matches more than one file and the last path component isn't a wildcard, 
-      # then you probably want the tree or else files of the same basename would stomp on each other
+      
+      ## rsync really (suprisingly) only supports relative anyway 
+      #if relative:
+      #   args = ["/./" + a for a in args]
+      #else:
+      #   args = [os.path.dirname(a) + '/./' + os.path.basename(a) for a in args]
 
       if options.cat:
          dst = tempfile.mkdtemp(prefix="tmp-fm-get-") + "/"
-         src = args
+         srcs = args
       else:
          dst = args[-1]
-         src = args[:-1]
-
-      if not procs:
-         procs = self.procs
+         srcs = args[:-1]
 
       for loc in self.config.locs.values():
          if loc.inactive: continue
+         self.rsync(True, loc.name, srcs, dst, False, self.procs, "get %s" % (string.join(args)))
 
-         s = ["/" + f for f in src]
-
-         s = [i.replace('//','/') for i in s]
-
-         #print loc.rootdir, src, s
-
-         # Take the specified paths/globs and turn them into a list of --include/exclude options
-         includes = rsyncFilter(loc.rootdir, s)
-
-         if isremote(loc.hostname):
-            s = [loc.hostname + ":" + loc.rootdir + "/" + i for i in s]
-         else:
-            s = [loc.rootdir + "/" + i for i in s]
-            s = multiglob(s)
-
-         cmd = loc.rsynccmd + includes
-         cmd += [rsyncflags, "--prune-empty-dirs", "--copy-unsafe-links", "-e", loc.sshcmdstr] + s + [dst]
-
-         procs.Popen(cmd, queue=loc.qname, tag="get %s" % (string.join(args)))
-
-      procs.collect()
+      self.procs.collect()
 
       if options.cat:
          empty = True
@@ -1337,7 +1329,7 @@ will be the directory name preceding the first wildcard."""
 
          shutil.rmtree(dst)
 
-      return procs
+      return self.procs
 
    def processes(self):
       return sum(i.cpusperjob for i in self.config.locs.values())
