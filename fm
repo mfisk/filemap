@@ -1531,10 +1531,10 @@ class Procs:
          assert(self.numprocspolling == 0)
 
          self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
-         
+
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
-            
+
       if labelPrint:
          sys.stdout.write(coallesce([f.stdout for f in results], [f.node for f in results]))
       if stopping or labelPrint or Verbose > 0:
