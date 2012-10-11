@@ -65,7 +65,7 @@ try:
    select.poll
 except:
    print >>sys.stderr, "select.poll() not implemented.  If MacOS, use DarwinPorts python."
-   sys.exit(-1)
+   sys.exit(1)
 
 nonalphanumre = re.compile('\W')
 
@@ -1490,8 +1490,7 @@ class Procs:
 
          if Verbose > 1:
             ec = os.WEXITSTATUS(p.status)
-            print >>sys.stderr, "%s: %gs status %d for %s" % (p.queue, p.time, ec, p.tag)
-
+            print >>sys.stderr, "%s: %s status %d for %s" % (p.queue, seconds2human(p.time), ec, p.tag)
             waiting = [l.queue for l in self.pids.values()]
             waiting.sort()
             if waiting and len(waiting) < len(results): 
@@ -2750,7 +2749,7 @@ and the program re-run.
                if len(line) > 200:
                    line = line[:200] + "..."
                output += line + "\n"
-            msg.attach(email.mime.text.MIMEText(output, 'plain'))
+            msg.attach(email.mime.text.MIMEText('<pre>' + output + '</pre>', 'html'))
    
             if finished:
                try:
@@ -2795,7 +2794,9 @@ and the program re-run.
       if options.optimistic:
          maxErrors = None
       else:
-         maxErrors = self._Locations().config.replication
+         maxErrors = 0
+         # If replicate uses pickn=True, then use self._Locations().config.replication-1 here
+         # since pickn defaults to false, to default to no errors allowed
 
       for cmd in pipeline:
          reduce = False
@@ -2876,8 +2877,8 @@ and the program re-run.
 
    def replicate(self, args):
       """Replicate the specified files (in the virtual file system) from each node."""
-      (options, args) = MethodOptionParser(fixed=["glob..."]).parse_args(args)
-  
+      (options, args) = MethodOptionParser(fixed=["files.."]).parse_args(args)
+
       self._Locations().forAllLocal(["replicate"] + args).collect(labelPrint=True)
 
    def run(self, args):
@@ -3326,7 +3327,7 @@ class FmLocalCommands(CommandSetBase):
 
    def redistribute(self, args):
       procs = Procs(retries=self.Locations.config.all2all_retries) 
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, serialize=True, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
