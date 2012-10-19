@@ -570,7 +570,7 @@ def bytecount2str(n):
    unit = 'B'
    units = ['kB', 'MB', 'GB', 'TB', 'PB']
    while n >= 1000 and len(units):
-      n /= 1000
+      n /= 1000.0
       unit = units.pop(0)
    return ("%3.1f" % n) + ' ' + unit
 
@@ -1221,7 +1221,7 @@ locations of this instance."""
          else:
             queue = dst
 
-         self.rsync(False, dst, nodesrcs[dst], dstdir, queue, procs, tag, i)
+         self.rsync(False, dst, nodesrcs[dst], dstdir, queue, procs, tag)
 
    def rsync(self, is_get, node, inputlist, dstdir, queue, procs, tag):
       # Build rsync style "hostname:/path/to/root" specifications
@@ -2413,7 +2413,19 @@ class FileSynchronizer:
         return [syncfilename, 
                 self.syncdir + "/" + filename, 
                 self.syncdir + "/" + outfilepath + "/" + outfileparent + "/??/??/" + outfilebase]
-        
+
+def print_df_line(disk, size, available):
+   fmt =  "%20s %10s %10s    %s"
+   if not disk:
+      print fmt % ("Disk     ", "Size ", "Available", "Usage")
+   else:
+      if size:
+         usage = (size-available) * 100.0 /size
+      else:
+         usage = -1
+
+      print fmt % (disk, bytecount2str(size), bytecount2str(available), "%d%%" % usage)
+
 class FmCommands(CommandSetBase):
    def __init__(self, args):
       """FileMap is a file-based map-reduce system.  
@@ -2558,12 +2570,31 @@ Has unix "mkdir -p" semantics."""
          if len(inputs) > 100:
             inputs = inputs[:100] + "..."
          print fmt % (jname, j.uid, string.join(j.nodes, ','), j.cmd, inputs)
-
+      
    def df(self, args):
       """Show free space on each node."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
-      self._Locations().forAllLocal(["df", "%(ROOTDIR)/"]).collect(labelPrint=True)
+      dfs = self._local_pickles(["df"])
 
+      print dfs
+
+      disks = []
+      for mx in dfs:
+         for d in dfs[mx]:
+            size, available = dfs[mx][d]
+            # Really only 1 disk per node, so just use node name
+            disks.append((mx, size, available))
+
+      # Sort by available, reversed
+      disks.sort(lambda a,b: cmp(b[2], a[2]))
+      print_df_line(None, None, None) #Defaults to header
+      for d in disks:
+            print_df_line(*d)
+      
+      print_df_line("Total (%d disks)" % len(disks), 
+                    sum([i[1] for i in disks]),
+                    sum([i[2] for i in disks]))
+               
    def loadavg(self, args):
       """Show load average."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
@@ -3347,9 +3378,12 @@ class FmLocalCommands(CommandSetBase):
       return string.join(perms, '')
 
    def df(self, args):
-      f = os.popen("df -h " + " ".join(args))
-      f.readline()
-      sys.stderr.write(f.read())
+      f = os.popen("df -k " + self.Locations.this.rootdir)
+      f.readline() # Throw away header
+      disk, size, used, available, percent, mount = f.readline().split()
+      disks = {}
+      disks[disk] = (int(size)*1024, int(available)*1024)
+      sys.stdout.write(cPickle.dumps(disks))
 
    def lsone(self, fname, fs):
       # Construct the dict that is pickled and passed to the client
