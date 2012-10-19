@@ -1126,7 +1126,7 @@ locations of this instance."""
          if os.path.isdir(a):
             srcfiles += self.expanddir(a)
          else:
-            srcfiles.add(a)
+            srcfiles.append(a)
 
       tag = "put %s %s" % (srclist, dst) 
       redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove)
@@ -1212,19 +1212,18 @@ locations of this instance."""
       random.shuffle(dsts)
       i = 0
       for dst in dsts:
-         self.rsync(False, dst, nodesrcs[dst], dstdir, serialize, procs, tag)
-
-   def rsync(self, is_get, node, inputlist, dstdir, serialize, procs, tag):
-      if serialize:
          i += 1
-         if serialize > 1:
-            # Round-robin
-            queue = "rr" + str(i % int(serialize))
+         if serialize:
+            if serialize > 1:
+               queue = "rr" + str(i % serialize)
+            else:
+               queue = "serialize"
          else:
-            queue = "serialize"
-      else:
-         queue = node  
+            queue = dst
 
+         self.rsync(False, dst, nodesrcs[dst], dstdir, queue, procs, tag, i)
+
+   def rsync(self, is_get, node, inputlist, dstdir, queue, procs, tag):
       # Build rsync style "hostname:/path/to/root" specifications
       loc = self.config.locs[node]
       remoteroot = loc.rootdir
@@ -1258,8 +1257,12 @@ locations of this instance."""
          
       else:
          # We have resolved all the wildcards for node assignment, so just generate a list of files
-         srcpath = "/"
-         dstpath = remotepath + "/" + dstdir + "/"
+         if inputlist[0][0] == "/":
+            srcpath = "/"
+         else:
+            srcpath = "."
+
+         dstpath = remotepath + "/" + dstdir 
          while '//' in dstpath:
             dstpath = dstpath.replace('//','/')
             
@@ -1304,7 +1307,7 @@ will be the directory name preceding the first wildcard."""
 
       for loc in self.config.locs.values():
          if loc.inactive: continue
-         self.rsync(True, loc.name, srcs, dst, False, self.procs, "get %s" % (string.join(args)))
+         self.rsync(True, loc.name, srcs, dst, loc.name, self.procs, "get %s" % (string.join(args)))
 
       self.procs.collect()
 
@@ -1467,6 +1470,7 @@ class Procs:
       total = 0
       stopping = False
       while True:
+         # Block if not stopping (if stopping, reap everything that's done already and then stop)
          p = self.waitpid(not stopping)
          if p == None:
             break
@@ -1804,6 +1808,7 @@ class JobScheduler:
       didSomething = False
       sleep = 0.01
 
+      # Invalidate anything that is stale from previous runs
       self.RunOnce(invalidateOnly=True)
 
       while True:
@@ -1814,7 +1819,7 @@ class JobScheduler:
                return didSomething
             if self.RunOnce():
                didSomething = True
-               block=False
+               block = False
             else:
                # Nothing to do right now
                # Don't return because we're still working,
@@ -1835,7 +1840,7 @@ class JobScheduler:
                   sleep = 1  # Max out at 1 sec sleep
                block=False # Don't block since new work could arrive before a child finishes
          else:
-            block=True
+            block = True
             assert (not self.procs.isempty())
 
          p = self.procs.waitpid(block=block)
@@ -1850,7 +1855,10 @@ class JobScheduler:
                except IOError:
                   # .stderr file might not exist
                   pass
-               self.JobDone(p.jobname)
+
+               # Do not cleanup job because the presence of jobs after the scheduler exits is how the waiter detects an error
+               #self.JobDone(p.jobname)
+
                return
 
             if self.options.dynamicload: 
@@ -1953,8 +1961,9 @@ class CpuProfile:
          return False
 
       # Check for idle CPU time
-      # XXX: < (1/ncpus) might be better for very large SMPs
       if self.idle_fraction < (1.0 / self.ncpus): 
+         # Less than 1 CPU's worth of resources is available, so don't add more
+
          if Verbose > 2:
             print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for CPU to be more idle"
          return False
@@ -1965,6 +1974,8 @@ class CpuProfile:
       # idle, but we don't want more D.  The kernel only seems to tally D
       # in the loadavg, but that's exponentially slow, we need to go tally it
       # ourself
+
+      # XXX. would like to limit this to just our disk
 
       unint = 0
       for f in os.listdir('/proc'):
