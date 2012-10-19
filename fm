@@ -61,6 +61,30 @@ Verbose = 0
 RegressionTest = False
 Locations = None
 
+ConfigApply = {
+   "ssh": os.path.expanduser,
+   "syncdir": os.path.expanduser,
+   "rootdir": os.path.expanduser,
+   "python": os.path.expanduser,
+   "fm": os.path.expanduser,
+   "share": float,
+   "cpusperjob": int,
+   "processes": int,
+   "dynamicload": float,
+}
+
+ConfigDefaults = {
+   "ssh": "ssh -o GSSAPIDelegateCredentials=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -Ax",
+   "rsync": "rsync -tO",
+   "share": "1",
+   "syncdir": "/tmp/fmsync",
+   "python": "python",
+   "processes": "1000",
+   "dynamicload": "2",
+   "inactive": False,
+   "queuebyhost": False,
+}
+
 try:
    select.poll
 except:
@@ -769,7 +793,13 @@ class FmLocations:
                
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
-   
+
+      # Once all config files settings are imported, pre the location for use (apply defaults, etc.)
+      for l in self.config.locs.values():
+         self.prepLocation(l)
+
+      # Also prep the global section
+      self.prepLocation(self.this)
 
    def _getSlurmNodes(self, alloc=True):
       nl = os.environ.get("SLURM_JOB_NODELIST")
@@ -849,49 +879,74 @@ class FmLocations:
       l = self.config.locs.get(nodename)
       if not l:
          l = FmLocation()
+         if stanza != "global":
+            self.config.locs[nodename] = l
+         else:
+            self.this = l # Assume by default that we're the head node and use global defaults
+
          l.name = nodename
+         l.config = {}
+         l.num = num
 
-      qbyhost = self.configparser.has_option("global", "queuebyhost")
+      # Import all configparser settings into a dictionary
+      for opt,val in self.configparser.items(stanza, raw=True):
+         l[opt] = val
 
-      l.sshcmdstr = os.path.expanduser(self.config_get(stanza, "ssh", "ssh -o GSSAPIDelegateCredentials=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -Ax", raw=True))
-      l.sshcmd = shlex.split(l.sshcmdstr, comments=True)
+   def prepLocation(self, l):
+      # Inherit all hard-coded defaults if not over-ridden
+      for k,v in ConfigDefaults.items():
+         if not l.has_key(k):
+            l[k] = v
 
-      l.rsynccmd = shlex.split(self.config_get(stanza, "rsync", "rsync -tO", raw=True), comments=True)
+      # Inherit all global defaults if not over-ridden
+      for k,v in self.configparser.items("global", raw=True):
+         if not l.has_key(k):
+            l[k] = v
+
+      # Apply conversion/expansion functions
+      for k,f in ConfigApply.items():
+         if l.has_key(k):
+            l[k] = f(l[k])
+
+      l.sshcmd = shlex.split(l.ssh, comments=True)
+      l.rsynccmd = shlex.split(l.rsync, comments=True)
       l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
 
-      l.syncdir = os.path.expanduser(self.config_get(stanza, "syncdir", "/tmp/fmsync"))
-
       if l.name != "global": 
-         l.inactive = self.config_get(stanza, "inactive", l.inactive)
-         l.cpusperjob = int(self.config_get(stanza, "cpusperjob", "1"))
          if not l.inactive:
-            l.rootdir = os.path.expanduser(self.config_get(stanza, "rootdir"))
-            l.hostname = self.config_get(stanza, "hostname")
-            if num: 
-               l.hostname = l.hostname % (int(num))
+            if l.num: 
+               if '%' not in l.hostname:
+                  print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, l.num)
+               l.hostname = l.hostname % (l.num)
             
             l.jobdir = l.rootdir + "/jobs"
-            if qbyhost:
+            if l.queuebyhost:
                l.qname = l.hostname
             else:
                l.qname = l.name
    
-            pythoncmd = os.path.expanduser(self.config_get(stanza, "python", "python"))
-            l.fmcmd = [pythoncmd, os.path.expanduser(self.config_get(stanza, "fm", l.rootdir + "/sys/fm"))]
-            l.processes = int(self.config_get(stanza, "processes", "1000"))
-            l.dynamicload = float(self.config_get(stanza, "dynamicload", "2"))
+            if 'fm' not in l:
+               l.fm = l.rootdir + "/sys/fm"
 
-         self.config.locs[nodename] = l
-      else:
-         self.this = l # Assume that we're the head node and use global defaults
+            l.fmcmd = [l.python, l.fm]
+            
    
-   def config_get(self, section, key, defval=None, raw=False):
+   def config_get(self, section, key, defval=None, raw=False, merge=False, expanduser=False):
       if self.configparser.has_option(section, key):
-         return self.configparser.get(section, key, raw=raw)
-      elif self.configparser.has_option("global", key):
-         return self.configparser.get("global", key, raw=raw)
+         val = self.configparser.get(section, key, raw=raw)
+      elif merge:
+         # Use previous value
+         pass
       else:
-         return defval
+         if self.configparser.has_option("global", key):
+            val = self.configparser.get("global", key, raw=raw)
+         else:
+            val = defval
+
+      if expanduser and val:
+         val = os.path.expanduser(val)
+
+      return val
 
    def thisis(self, nodename):
       self.thisname = nodename
@@ -931,7 +986,7 @@ class FmLocations:
           for node in candidates:
               point = sha(node)
               # For small numbers of nodes, we need multiple points per node in order to have any stability
-              for _ in range(100):
+              for _ in range(int(100 * self.config.locs[node].share)):
                   mapping[point.hexdigest()] = node
                   # Use a hash feedback loop to generate pseudo-random list of additional points
                   point = sha(point.digest() + node)
@@ -1270,7 +1325,7 @@ locations of this instance."""
 
       inputstr = '\n'.join(inputlist)
 
-      cmd = self.this.rsynccmd + ["-tLde", loc.sshcmdstr] + flags + [srcpath, dstpath]
+      cmd = self.this.rsynccmd + ["-tLde", loc.ssh] + flags + [srcpath, dstpath]
 
       #print >>sys.stderr, "inputlist:", inputlist
       procs.Popen(cmd, queue=queue, stdinstr=inputstr, node=node, tag=tag)
@@ -1341,10 +1396,6 @@ will be the directory name preceding the first wildcard."""
       return sum(i.cpusperjob for i in self.config.locs.values())
          
 class FmLocation(SmartDict):
-   def __init__(self):
-      self.inactive = False
-      pass
-
    def subst(self, args):
        return [n.replace("%(ROOTDIR)", self.rootdir).replace("%(SYNCDIR)", self.syncdir).replace("%(NODE)", self.name) for n in args]
 
