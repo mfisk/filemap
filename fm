@@ -2556,7 +2556,7 @@ Has unix "mkdir -p" semantics."""
    def loadavg(self, args):
       """Show load average."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
-      pkls = self._local_pickles(["localload"])
+      pkls = self._local_pickles(["localload"], unique_hosts=True)
       loadtotal = [0,0,0]
       for mx in pkls:
           loadtotal[0] += float(pkls[mx]['loadavg'][0])
@@ -2925,10 +2925,15 @@ Unlike 'get -c', duplicate instances of files will be included."""
       """This is for slave (remote) instantiations."""
       return FmLocalCommands(args)
 
-   def _local_pickles(self, args):
+   def _local_pickles(self, args, unique_hosts=False):
       """Execute a command on each node and return a dict of the unpickled output from each node (node->output)."""
 
-      procs = self._Locations().forAllLocal(args)
+      locs = self._Locations()
+      
+      if unique_hosts:
+         locs = locs.pickHosts()
+
+      procs = locs.forAllLocal(args)
       status, ps = procs.collect()
 
       pickles = {}
