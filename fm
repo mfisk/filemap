@@ -2587,7 +2587,7 @@ http://mfisk.github.com/filemap
       each = args[:-1]
       if len(each) > 1: dst += "/"
  
-      self._Locations().forAll(["mv"], each, dst).collect()
+      self._Locations().forAll(["mv"], each, dst, quote=False).collect()
 
    def mkdir(self, args, absolutes=[], async=False):
       """Make a directory (or directories) on all nodes.  
