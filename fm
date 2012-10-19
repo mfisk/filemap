@@ -2469,9 +2469,9 @@ class FileSynchronizer:
                 self.syncdir + "/" + outfilepath + "/" + outfileparent + "/??/??/" + outfilebase]
 
 def print_df_line(disk, size, available):
-   fmt =  "%20s %10s %10s    %s"
+   fmt =  "%20s %10s %10s  %5s"
    if not disk:
-      print fmt % ("Filesystem", "Size ", "Available", "Usage")
+      print fmt % ("Filesystem", "Size ", "Free  ", "Usage")
    else:
       if size:
          usage = (size-available) * 100.0 /size
@@ -2643,6 +2643,7 @@ Has unix "mkdir -p" semantics."""
       for d in disks:
             print_df_line(*d)
       
+      print_df_line(None, None, None) #Defaults to header
       print_df_line("Total (%d disks)" % len(disks), 
                     sum([i[1] for i in disks]),
                     sum([i[2] for i in disks]))
