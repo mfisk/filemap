@@ -1071,7 +1071,7 @@ locations of this instance."""
 
       return self.forAll(lcmd, subst=True, stdinstr=cPickle.dumps(inputs), tag=string.join(cmd))
 
-   def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None):
+   def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None, quote=True):
       if src and type(src) != type([]):
          src = [src]
       if dst and type(dst) != type([]):
@@ -1103,9 +1103,11 @@ locations of this instance."""
          if cmd[0] == "fm":
             cmd = loc.fmcmd + cmd[1:]
          if isremote(loc.hostname):
-            # The remote sshd will use sh, so quote all the individual args
-            s = ["'" + i + "'" for i in s]
-            d = ["'" + i + "'" for i in d]
+            if quote:
+               # The remote sshd will use sh, so quote all the individual args
+               s = ["'" + i + "'" for i in s]
+               d = ["'" + i + "'" for i in d]
+
             cmd = loc.sshcmd + [loc.hostname] + cmd + s + d
 
          else:
@@ -2659,12 +2661,12 @@ Has unix "mkdir -p" semantics."""
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
       (options, args) = MethodOptionParser(fixed=["mode", "files..."]).parse_args(args)
-      self._Locations().forAll(["chmod", args[0]] + absolutes, args[1:], subst=True).collect(ignoreErrors=ignoreErrors)
+      self._Locations().forAll(["chmod", args[0]] + absolutes, args[1:], subst=True, quote=False).collect(ignoreErrors=ignoreErrors)
 
    def chgrp(self, args, absolutes=[]):
       """Change GID on files in the cloud."""
       (options, args) = MethodOptionParser(fixed=["perm", "files..."]).parse_args(args)
-      self._Locations().forAll(["chgrp", args[0]] + absolutes, args[1:], subst=True).collect()
+      self._Locations().forAll(["chgrp", args[0]] + absolutes, args[1:], subst=True, quote=False).collect()
 
    def store(self, args):
       """Store one or more files into the cloud."""
@@ -2968,14 +2970,14 @@ and the program re-run.
       """Run a command on each node and print results."""
       (options, args) = MethodOptionParser(fixed=["cmd..."]).parse_args(args)
   
-      self._Locations().forAll(args, subst=True).collect(labelPrint=True)
+      self._Locations().forAll(args, subst=True, quote=False).collect(labelPrint=True)
 
    def runhost(self, args):
       """Run a command on each unique host and print results."""
       (options, args) = MethodOptionParser(fixed=["cmd..."]).parse_args(args)
        
 
-      self._Locations().pickHosts().forAll(args).collect(labelPrint=True)
+      self._Locations().pickHosts().forAll(args, quote=False).collect(labelPrint=True)
 
    def cat(self, args):
       """Concatenate one or more files to stdout.  
