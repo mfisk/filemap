@@ -2576,8 +2576,6 @@ Has unix "mkdir -p" semantics."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
       dfs = self._local_pickles(["df"])
 
-      print dfs
-
       disks = []
       for mx in dfs:
          for d in dfs[mx]:
