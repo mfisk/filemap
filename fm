@@ -2471,7 +2471,7 @@ class FileSynchronizer:
 def print_df_line(disk, size, available):
    fmt =  "%20s %10s %10s    %s"
    if not disk:
-      print fmt % ("Disk     ", "Size ", "Available", "Usage")
+      print fmt % ("Filesystem", "Size ", "Available", "Usage")
    else:
       if size:
          usage = (size-available) * 100.0 /size
@@ -3436,7 +3436,7 @@ class FmLocalCommands(CommandSetBase):
       return string.join(perms, '')
 
    def df(self, args):
-      f = os.popen("df -k " + self.Locations.this.rootdir)
+      f = os.popen("df -P " + self.Locations.this.rootdir)
       f.readline() # Throw away header
       disk, size, used, available, percent, mount = f.readline().split()
       disks = {}
