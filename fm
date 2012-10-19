@@ -3139,6 +3139,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
                # This is the cumulative attributes combined from multiple nodes
                attrs = ls[f][i]
                attrs['mtime'] = list([attrs['mtime']])
+               attrs['user'] = set([attrs['user']])
 
                # If you specify the same file twice, we don't want
                # the node number(s) duplicated in the node list, so make it a set
@@ -3146,7 +3147,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
 
                isdir = (attrs['perms'][0] == 'd')
                islnk = (attrs['perms'][0] == 'l')
-               criteria = ['perms', 'user', 'group']
+               criteria = ['perms', 'group']
                if isdir: 
                   attrs['size'] = 0
                else: 
@@ -3169,6 +3170,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
                   if match:
                      nodes.add(ls[f][j]['nodename'])
                      attrs['mtime'].append(ls[f][j]['mtime'])
+                     attrs['user'].add(ls[f][j]['user'])
                      ls[f][j] = None
    
                # Update the nodelist for this attrs instance
@@ -3181,7 +3183,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
 
             totalsize += attrs['size']
 
-         print "%g bytes" % totalsize   
+         print "%s" % bytecount2str(totalsize)
       return 
 
    def _timemask(self, mtimes):
@@ -3217,7 +3219,11 @@ Unlike 'get -c', duplicate instances of files will be included."""
 	print nodes, attrs['mtime']
 
       attrs['mtime'] = self._timemask(attrs['mtime'])
-      
+
+      if len(attrs['user']) == 1:
+         attrs['user'] = attrs['user'].pop()
+      else:
+         attrs['user'] = '*'
 
       if listnodes:
          if len(nodes) == len(self._Locations().config.locs):
