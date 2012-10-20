@@ -488,12 +488,14 @@ def plot(inputfile, pngfile):
             #print >>sys.stderr, "Gap between", prev[1], i[0]
          prev = i
 
-   print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
-   nodes = makeVnodes(nodes)
-   print >>sys.stderr, "Packed into", len(nodes), "timelines"
+   if Verbose > 1:
+      print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
+      nodes = makeVnodes(nodes)
+      print >>sys.stderr, "Packed into", len(nodes), "timelines"
 
    jobs = list(jobs)
-   print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
+   if Verbose > 2:
+      print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
    colormap = ['r','g','b','cyan','magenta','black','yellow','purple']
    color = {}
    for j in jobs:
@@ -528,7 +530,7 @@ def plot(inputfile, pngfile):
    for node in nodes:
       y = nodes2y[node]
 
-      if Verbose > 0:
+      if Verbose > 2:
          print >>sys.stderr, "Plotting line", node, "with", len(nodes[node]), "elements"
       for s in nodes[node]:
 
