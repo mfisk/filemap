@@ -3186,7 +3186,8 @@ Unlike 'get -c', duplicate instances of files will be included."""
                # Print out this file
                print self._lsline(attrs, f, listnodes=options.nodes)
 
-            totalsize += attrs['size']
+            # Sum up unique sizes (don't mutliply-count identical replicas)
+            totalsize += sum(list(set([i['size'] for i in ls[f] if i])))
 
          print "%s" % bytecount2str(totalsize)
       return 
