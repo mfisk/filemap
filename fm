@@ -2808,6 +2808,8 @@ and the program re-run.
          import email.mime.multipart
          import email.mime.image
          import email.mime.text
+         import email.mime.base
+         import email.encoders
 
          user = pwd.getpwuid(os.getuid()).pw_name
          host = socket.getfqdn()
@@ -2838,17 +2840,27 @@ and the program re-run.
                    line = line[:200] + "..."
                output += line + "\n"
             msg.attach(email.mime.text.MIMEText('<pre>' + output + '</pre>', 'html'))
+
+            sys.stderr = realstderr
+            sys.stdout = realstderr
    
             if finished:
-               try:
+               #try:
                   imgfile = cStringIO.StringIO()
                   self.plot([".fm.stats.gz", imgfile])
-      
+
                   img = email.mime.image.MIMEImage(imgfile.getvalue())
+                  img.add_header('Content-Disposition', 'inline', filename="fmstats.png")
                   msg.attach(img)
-                  msg.attach(email.mime.text.MIMEApplication(file(".fm.stats.gz").read()))
-               except:
-                  traceback.print_exc()
+
+                  obj = email.mime.base.MIMEBase('application','octet-stream')
+                  obj.set_payload(file(".fm.stats.gz").read())
+                  email.encoders.encode_base64(obj)
+                  obj.add_header('Content-Disposition', 'attachment', filename="fm.stats.gz")
+                  msg.attach(obj)
+
+               #except:
+                #  traceback.print_exc()
       
             # Send the email via our own SMTP server.
             s = smtplib.SMTP(str(mx.exchange))
