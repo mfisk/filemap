@@ -3288,7 +3288,11 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          jobdesc += "checkexit = 0\n"
 
       h = printableHash(jobdesc)
-      if not options.statusonly:
+
+      if options.statusonly:
+         # Even if the user cut & pasted a -f flag, it never makes since to honor it with -s
+         options.fresh = False
+      else:
          jobfilename = tmpdir + h
          jobfile = open(jobfilename, "w")
          jobfile.write(jobdesc)
