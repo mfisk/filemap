@@ -84,6 +84,7 @@ ConfigDefaults = {
    "inactive": False,
    "queuebyhost": False,
    "hostname": None,
+   "cpusperjob": "1",
 }
 
 try:
@@ -466,7 +467,7 @@ def plot(inputfile, pngfile):
       maxtime = max(maxtime, s['finish'])
       totalsize += s['inputsize']
 
-      if not s['cmd']:
+      if 'cmd' not in s:
          s['cmd'] = s['jobname']
 
       jobs.add(s['cmd'])
