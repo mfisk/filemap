@@ -2662,12 +2662,14 @@ Has unix "mkdir -p" semantics."""
       (options, args) = MethodOptionParser(fixed=[]).parse_args(args)
       pkls = self._local_pickles(["localload"], unique_hosts=True)
       loadtotal = [0,0,0]
+      cpus = 0
       for mx in pkls:
           loadtotal[0] += float(pkls[mx]['loadavg'][0])
           loadtotal[1] += float(pkls[mx]['loadavg'][1])
           loadtotal[2] += float(pkls[mx]['loadavg'][2])
-          #print pkls[mx]['loadavg'] 
-      print "Total load average: %.2f %.2f %.2f" % tuple(loadtotal)
+          cpus += pkls[mx]['cpus']
+          #print pkls[mx]
+      print "Total load average: %.2f (%d%%) %.2f %.2f" % (loadtotal[0], 100.0 * loadtotal[0] / cpus, loadtotal[1], loadtotal[2])
 
    def chmod(self, args, absolutes=[], ignoreErrors=False):
       """Change permissions on files in the cloud."""
@@ -3549,13 +3551,22 @@ class FmLocalCommands(CommandSetBase):
       return 
 
    def localload(self, args):
-      loadavg = file("/proc/loadavg").readline().strip().split()
-      diskstats = file("/proc/diskstats")
-      for disk in diskstats:
-         disk = disk.strip()
-         # See if this is our ROOTDIR
       load = {}
-      load['loadavg'] = loadavg
+      load['loadavg'] = file("/proc/loadavg").readline().strip().split()
+
+      cpus = 0
+      cpuinfo = file("/proc/cpuinfo")
+      for line in cpuinfo:
+         if line.startswith("processor\t"):
+            cpus += 1
+      cpuinfo.close()
+      load['cpus'] = cpus
+      
+      #diskstats = file("/proc/diskstats")
+      #for disk in diskstats:
+         #disk = disk.strip()
+         ## See if this is our ROOTDIR
+
       sys.stdout.write(cPickle.dumps(load))
       return
 
