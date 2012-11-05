@@ -488,9 +488,10 @@ def plot(inputfile, pngfile):
             #print >>sys.stderr, "Gap between", prev[1], i[0]
          prev = i
 
+   nodes = makeVnodes(nodes)
+
    if Verbose > 1:
       print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
-      nodes = makeVnodes(nodes)
       print >>sys.stderr, "Packed into", len(nodes), "timelines"
 
    jobs = list(jobs)
