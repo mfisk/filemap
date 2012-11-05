@@ -1108,12 +1108,17 @@ locations of this instance."""
          if cmd[0] == "fm":
             cmd = loc.fmcmd + cmd[1:]
          if isremote(loc.hostname):
-            if quote:
-               # The remote sshd will use sh, so quote all the individual args
+            if quote and not os.environ["SLURM_JOB_ID"]:
+               # The remote sshd/shell will expand globs (unless it's SLURM's srun), so quote all the individual args
                s = ["'" + i + "'" for i in s]
                d = ["'" + i + "'" for i in d]
 
-            cmd = loc.sshcmd + [loc.hostname] + cmd + s + d
+            filestr = ' '.join(s+d)
+            if os.environ["SLURM_JOB_ID"] and not quote and ('*' in filestr or '?' in filestr):
+               # Assume srun.  Srun doesn't expand globs or run a shell automatically, so we have to explicitly run /bin/sh
+               cmd = loc.sshcmd + [loc.hostname, "sh", "-c", subprocess.list2cmdline(cmd + s + d)]
+            else:
+               cmd = loc.sshcmd + [loc.hostname] + cmd + s + d
 
          else:
             if s and glob:
