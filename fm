@@ -790,12 +790,7 @@ class FmLocations:
             r = self._expandList(s)
             for (i,name) in r:
                self.parseLocation(s, name=name, num=i)
-               if nl:
-                  # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
-                  if not self.config.locs[name].inactive and self.config.locs[name].hostname not in nl:
-                     self.config.locs[name].inactive = True
-                     #print "Marking", name, "inactive per SLURM"
-               
+
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
 
@@ -803,6 +798,12 @@ class FmLocations:
       for l in self.config.locs.values():
          self.prepLocation(l)
 
+         if nl:
+            # Check SLURM_JOB_NODELIST to make sure we've been allocated this node
+            if l.hostname not in nl:
+               l.inactive = True
+               #print "Marking", l.name, "inactive per SLURM", l.hostname, nl
+ 
       # Also prep the global section
       self.prepLocation(self.this)
 
@@ -898,13 +899,13 @@ class FmLocations:
          l[opt] = val
 
    def prepLocation(self, l):
-      # Inherit all hard-coded defaults if not over-ridden
-      for k,v in ConfigDefaults.items():
+      # Inherit all global defaults if not over-ridden
+      for k,v in self.configparser.items("global", raw=True):
          if not l.has_key(k):
             l[k] = v
 
-      # Inherit all global defaults if not over-ridden
-      for k,v in self.configparser.items("global", raw=True):
+      # Inherit all hard-coded defaults if not over-ridden
+      for k,v in ConfigDefaults.items():
          if not l.has_key(k):
             l[k] = v
 
@@ -918,7 +919,6 @@ class FmLocations:
       l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
 
       if l.name != "global": 
-         if not l.inactive:
             if l.num: 
                if '%' not in l.hostname:
                   print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, l.num)
