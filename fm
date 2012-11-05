@@ -2732,6 +2732,7 @@ and the program re-run.
       p.add_option("-s", "--statusonly", action="store_true", help="Don't wait for completion; fetch any available results now")
       p.add_option("-e", "--checkexit", action="store_false", default=True, help="Do NOT stop on error or remove output from any previous run that had a non-zero exit status")
       p.add_option("-m", "--mail", action="store_true", help="E-mail results")
+      p.add_option("--mx", action="store", help="SMTP server")
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
@@ -2810,7 +2811,6 @@ and the program re-run.
       #print >>sys.stderr, "Pipeline2:", pipeline
 
       if options.mail:
-         import dns.resolver
          import smtplib
          import socket
          import email.mime.multipart
@@ -2825,8 +2825,17 @@ and the program re-run.
          domain = '.'.join(host.split('.')[1:])
          toaddr = '@'.join([user,domain])
 
-         mx = dns.resolver.query(domain, 'MX')[0]
-         print "Results will be in mail from %s to %s via %s" % (fromaddr, toaddr, mx.exchange)
+         if options.mx:
+            mx = options.mx
+         else:
+            try:
+               import dns.resolver
+               mx = dns.resolver.query(domain, 'MX')[0]
+               mx = str(mx.exchange)
+            except:
+               mx = "mail"
+
+         print "Results will be in mail from %s to %s via %s" % (fromaddr, toaddr, mx)
 
          msg = email.mime.multipart.MIMEMultipart()
          msg['Subject'] = 'Filemap results for %s' % (cmd)
@@ -2853,25 +2862,26 @@ and the program re-run.
             sys.stdout = realstderr
    
             if finished:
-               #try:
-                  imgfile = cStringIO.StringIO()
-                  self.plot([".fm.stats.gz", imgfile])
+               imgfile = cStringIO.StringIO()
 
+               obj = email.mime.base.MIMEBase('application','octet-stream')
+               obj.set_payload(file(".fm.stats.gz").read())
+               email.encoders.encode_base64(obj)
+               obj.add_header('Content-Disposition', 'attachment', filename="fm.stats.gz")
+               msg.attach(obj)
+
+               try:
+                  self.plot([".fm.stats.gz", imgfile])
                   img = email.mime.image.MIMEImage(imgfile.getvalue())
                   img.add_header('Content-Disposition', 'inline', filename="fmstats.png")
                   msg.attach(img)
 
-                  obj = email.mime.base.MIMEBase('application','octet-stream')
-                  obj.set_payload(file(".fm.stats.gz").read())
-                  email.encoders.encode_base64(obj)
-                  obj.add_header('Content-Disposition', 'attachment', filename="fm.stats.gz")
-                  msg.attach(obj)
-
-               #except:
-                #  traceback.print_exc()
+               except:
+                  print >>sys.stderr, "Unable to generate plot:"
+                  traceback.print_exc(limit=0)
       
             # Send the email via our own SMTP server.
-            s = smtplib.SMTP(str(mx.exchange))
+            s = smtplib.SMTP(mx)
             s.sendmail(fromaddr, toaddr, msg.as_string())
             s.quit()
 
