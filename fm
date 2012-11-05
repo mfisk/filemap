@@ -433,7 +433,7 @@ def makeVnodes(nodes):
       del nodes[nodename]
       #print "Replacing", nodename, "with", len(vnodes)
       for i in range(0, len(vnodes)):
-         nodes[nodename + "." + str(i)] = vnodes[i]
+         nodes[nodename + ";" + str(i)] = vnodes[i]
          #print nodes.keys()
 
    return nodes
@@ -493,6 +493,7 @@ def plot(inputfile, pngfile):
    if Verbose > 1:
       print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
       print >>sys.stderr, "Packed into", len(nodes), "timelines"
+   nodes = makeVnodes(nodes)
 
    jobs = list(jobs)
    if Verbose > 2:
@@ -564,9 +565,6 @@ def plot(inputfile, pngfile):
 
    ax.autoscale_view()
   
-   #ax.set_yticks(range(0, i))
-   #ax.set_yticklabels(nodenames)
-
    xticks = [0]
    xlabels = [0]
    delta = 0
@@ -583,13 +581,13 @@ def plot(inputfile, pngfile):
    majorlabels = []
    majorlocs = []
    for n in nodenames:
-      if n.endswith(".0"):
-         majorlabels.append(n.replace(".0",""))
+      if n.endswith(";0"):
+         majorlabels.append(n.replace(";0",""))
          majorlocs.append(nodes2y[n])
    #print >>sys.stderr, "Yticks", majorlocs, majorlabels
    ax.set_yticks(majorlocs)
    ax.set_yticklabels(majorlabels)
-   ax.set_ylim(ymin=-2)
+   ax.set_ylim(ymin=-2, ymax=len(nodenames)+2)
    ax.set_title("%s processed" % (bytecount2str(totalsize)))
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
