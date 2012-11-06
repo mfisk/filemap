@@ -1019,8 +1019,7 @@ class FmLocations:
           node = self.config.chord[point]
           if node not in used_candidates:
               used_candidates.add(node)
-              if not self.config.locs[node].inactive:
-                  yield node
+              yield node
 
    def pickn(self, seed=None, n=None):
       """Pick some pseudo-random locations.  The number of locations
