@@ -493,6 +493,7 @@ def plot(inputfile, pngfile):
    if Verbose > 1:
       print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
       print >>sys.stderr, "Packed into", len(nodes), "timelines"
+   nodes = makeVnodes(nodes)
 
    jobs = list(jobs)
    if Verbose > 2:
@@ -564,9 +565,6 @@ def plot(inputfile, pngfile):
 
    ax.autoscale_view()
   
-   #ax.set_yticks(range(0, i))
-   #ax.set_yticklabels(nodenames)
-
    xticks = [0]
    xlabels = [0]
    delta = 0
