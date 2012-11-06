@@ -410,6 +410,7 @@ def makeVnodes(nodes):
    # We may have multiple jobs at a time per node (e.g. SMP nodes), so 
    # treat those as multiple nodes.  Since we don't have an explicit thread id, 
    # just assign them arbitrarily in a non-overlapping way
+   newnodes = {}
    for nodename in nodes.keys():
       vnodes = []
       nodes[nodename].sort(lambda a,b: cmp(a['start'], b['start']))
@@ -430,13 +431,12 @@ def makeVnodes(nodes):
          # It was serial, so no virtual nodes required
          continue
 
-      del nodes[nodename]
       #print "Replacing", nodename, "with", len(vnodes)
       for i in range(0, len(vnodes)):
-         nodes[nodename + "." + str(i)] = vnodes[i]
+         newnodes[nodename + ";" + str(i)] = vnodes[i]
          #print nodes.keys()
 
-   return nodes
+   return newnodes
    
 def plot(inputfile, pngfile):
    import matplotlib.figure
@@ -583,13 +583,13 @@ def plot(inputfile, pngfile):
    majorlabels = []
    majorlocs = []
    for n in nodenames:
-      if n.endswith(".0"):
-         majorlabels.append(n.replace(".0",""))
+      if n.endswith(";0"):
+         majorlabels.append(n[:-2])
          majorlocs.append(nodes2y[n])
    #print >>sys.stderr, "Yticks", majorlocs, majorlabels
    ax.set_yticks(majorlocs)
    ax.set_yticklabels(majorlabels)
-   ax.set_ylim(ymin=-2)
+   ax.set_ylim(ymin=-2, ymax=len(nodenames)+2)
    ax.set_title("%s processed" % (bytecount2str(totalsize)))
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
