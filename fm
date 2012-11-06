@@ -3462,7 +3462,7 @@ class FmLocalCommands(CommandSetBase):
 
    def redistribute(self, args):
       procs = Procs(retries=self.Locations.config.all2all_retries) 
-      errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, serialize=True, hashbasename=True).collect()
+      errors,ignore = self.Locations.put(args, "/", procs=procs, pickn=1, relativeroot=True, serialize=True, hashbasename=True).collect()
       return errors
 
    def _lscharmod(self, perms, offset, chr):
