@@ -1105,7 +1105,7 @@ locations of this instance."""
          if cmd[0] == "fm":
             cmd = loc.fmcmd + cmd[1:]
          if isremote(loc.hostname):
-            if quote and not os.environ["SLURM_JOB_ID"]:
+            if quote and "SLURM_JOB_ID" not in os.environ:
                # The remote sshd/shell will expand globs (unless it's SLURM's srun), so quote all the individual args
                s = ["'" + i + "'" for i in s]
                d = ["'" + i + "'" for i in d]
