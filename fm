@@ -1111,7 +1111,7 @@ locations of this instance."""
                d = ["'" + i + "'" for i in d]
 
             filestr = ' '.join(s+d)
-            if os.environ["SLURM_JOB_ID"] and not quote and ('*' in filestr or '?' in filestr):
+            if "SLURM_JOB_ID" in os.environ and not quote and ('*' in filestr or '?' in filestr):
                # Assume srun.  Srun doesn't expand globs or run a shell automatically, so we have to explicitly run /bin/sh
                cmd = loc.sshcmd + [loc.hostname, "sh", "-c", subprocess.list2cmdline(cmd + s + d)]
             else:
