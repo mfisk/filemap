@@ -21,6 +21,7 @@
 import ConfigParser
 import copy
 import base64
+import bisect
 import cPickle
 import cStringIO
 import errno
@@ -28,6 +29,7 @@ import fcntl
 import glob
 import grp
 import gzip
+import itertools
 import math
 import optparse
 import os
@@ -694,6 +696,7 @@ class FmLocations:
       self.procs = None
       self.locker = None
       self.cleanup = None
+      self.cached_dstnodes = {}
 
       if copyFrom and not slave:
          assert(locs)
@@ -984,17 +987,23 @@ class FmLocations:
 
       # Build the node points for the Chord algorithm used by nodes()
       if 'chord' not in self.config:
+          #print >>sys.stderr, "Generating chord assignments"
           candidates = self.config.locs.keys()
           mapping = {}
           for node in candidates:
               point = sha(node)
               # For small numbers of nodes, we need multiple points per node in order to have any stability
-              for _ in range(int(100 * self.config.locs[node].share)):
+              for _ in range(int(10 * self.config.locs[node].share)):
                   mapping[point.hexdigest()] = node
                   # Use a hash feedback loop to generate pseudo-random list of additional points
                   point = sha(point.digest() + node)
-    
+   
+          points = mapping.keys()
+          points.sort()
           self.config.chord = mapping
+          self.config.chord_points = points
+
+      #print >>sys.stderr, "Getting chord for this"
 
       if not seed:
           seed = str(random.random())
@@ -1002,15 +1011,19 @@ class FmLocations:
       #print >>sys.stderr, self.config
       # Add point to set
       seed_point = sha(seed).hexdigest()
-      candidate_points = self.config.chord.keys()
 
-      # Get ordered list of points after seed_point 
-      candidate_points.append(seed_point)
-      candidate_points.sort()
-      s_idx = candidate_points.index(seed_point)
-      candidate_points = candidate_points[s_idx:] + candidate_points[:s_idx]
-      candidate_points.pop(0) # Remove seed itself
+      # Construct generator of points after seed_point 
 
+      # Bisect the sequence
+      point = bisect.bisect_left(self.config.chord_points, seed_point)
+     
+      # Build a generator of indices 
+      indexes = itertools.chain(xrange(point, len(self.config.chord_points)), xrange(0, point))
+
+      # Turn into a generator of points
+      candidate_points = (self.config.chord_points[i] for i in indexes)
+
+      #print >>sys.stderr, "generating chord"
       # Generate nodes without duplicates 
       used_candidates = set()
       for point in candidate_points:
@@ -1248,11 +1261,22 @@ locations of this instance."""
             # Pick which nodes get this file
             if hashbasename:
                seed = os.path.basename(dst)
+
+               # If we're just using basename, we're probably in a redistribute and there will be a lot of reoccurrences of the same basename, so cache the pickn() results.
+               if pickn not in self.cached_dstnodes:
+                  self.cached_dstnodes[pickn] = {}
+             
+               if seed in self.cached_dstnodes[pickn]:
+                  return self.cached_dstnodes[pickn][seed]
             else:
                seed = dst
 
             if pickn != True: 
                choices = self.pickn(seed=seed, n=pickn)
+
+               if hashbasename:
+                  # Add to cache
+                  self.cached_dstnodes[n][seed] = choices 
             else:
                # use default n
                choices = self.pickn(seed=seed)
