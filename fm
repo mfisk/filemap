@@ -3597,14 +3597,7 @@ class FmLocalCommands(CommandSetBase):
    def localload(self, args):
       load = {}
       load['loadavg'] = file("/proc/loadavg").readline().strip().split()
-
-      cpus = 0
-      cpuinfo = file("/proc/cpuinfo")
-      for line in cpuinfo:
-         if line.startswith("processor\t"):
-            cpus += 1
-      cpuinfo.close()
-      load['cpus'] = cpus
+      load['cpus'] = os.sysconf('SC_NPROCESSORS_ONLN')
       
       #diskstats = file("/proc/diskstats")
       #for disk in diskstats:
