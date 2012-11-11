@@ -495,7 +495,6 @@ def plot(inputfile, pngfile):
    if Verbose > 1:
       print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
       print >>sys.stderr, "Packed into", len(nodes), "timelines"
-   nodes = makeVnodes(nodes)
 
    jobs = list(jobs)
    if Verbose > 2:
