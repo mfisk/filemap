@@ -530,7 +530,7 @@ def plot(inputfile, pngfile):
    else:
       minsize = math.log(minsize)
 
-   for node in nodes:
+   for node in nodenames:
       y = nodes2y[node]
 
       if Verbose > 2:
@@ -578,16 +578,40 @@ def plot(inputfile, pngfile):
    ax.set_xlim(xmin=0, xmax=maxtime-mintime-delta)
    ax.set_xticks(xticks)
    ax.set_xticklabels(xlabels, rotation=30, ha='right')
+   #matplotlib.rc('xtick', labelsize=
 
    majorlabels = []
    majorlocs = []
+   minorlabels = []
+   minorlocs = []
+   majors = []
    for n in nodenames:
       if n.endswith(";0"):
-         majorlabels.append(n[:-2])
-         majorlocs.append(nodes2y[n])
+         name = n[:-2]
+         if "." in n:
+            major,minor = name.split(".", 1)
+         else:
+            major = name
+            minor = None
+
+         if major in majors:
+            if minor:
+               minorlabels.append("." + minor)
+               minorlocs.append(nodes2y[n])
+            else:
+               minorlabels.append(name)
+               minorlocs.append(nodes2y[n])
+
+         else:
+            majors.append(major)
+            majorlabels.append(name)
+            majorlocs.append(nodes2y[n])
+
    #print >>sys.stderr, "Yticks", majorlocs, majorlabels
    ax.set_yticks(majorlocs)
-   ax.set_yticklabels(majorlabels)
+   ax.set_yticklabels(majorlabels, size=6)
+   ax.set_yticks(minorlocs, minor=True)
+   ax.set_yticklabels(minorlabels, size=4, minor=True)
    ax.set_ylim(ymin=-2, ymax=len(nodenames)+2)
    ax.set_title("%s processed" % (bytecount2str(totalsize)))
 
