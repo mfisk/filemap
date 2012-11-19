@@ -3508,6 +3508,19 @@ class SchedLock:
    def unlock(self):
       #XXX: doesn't check that we still hold the lock
       os.unlink(self.lockname)
+
+def setProcessName(name):
+   try:
+      import ctypes
+      libc = ctypes.cdll.LoadLibrary('libc.so.6')
+      buf = ctypes.create_string_buffer(len(name)+1)
+      buf.value = name
+      libc.prctl(15, ctypes.byref(buf), 0,0,0)
+
+   except:
+      print >>sys.stderr, "Unable to set process name:"
+      traceback.print_exc()
+      pass
       
 class FmLocalCommands(CommandSetBase):
    def __init__(self, args):
@@ -3526,6 +3539,8 @@ class FmLocalCommands(CommandSetBase):
          # should get our config on stdin
          os.environ['FMNODE'] = options.node
          self.Locations = FmLocations(copyFrom=inputs, slave=options.node)
+
+      setProcessName("fm _local -n %s %s" % (options.node, ' '.join(inputs.cmd)))
 
       CommandSetBase.__init__(self, self.Locations.this.subst(inputs.cmd), p)
 
