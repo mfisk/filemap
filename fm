@@ -1839,7 +1839,7 @@ class JobScheduler:
 
       if self.options.dynamicload:
          global cpu
-         cpu = CpuProfile(self.options.dynamicload)
+         cpu = CpuProfile(locs, self.options.dynamicload)
 
    def ReadJobDir(self):
       """Check for new/removed jobs"""
@@ -2023,12 +2023,25 @@ class JobScheduler:
 
      
 class CpuProfile:
-   def __init__(self, interval):
+   def __init__(self, locations, interval):
       self.interval = interval
       self.idle = 0
       self.total = 0
       self.HZ = os.sysconf('SC_CLK_TCK')
       self.ncpus = os.sysconf('SC_NPROCESSORS_ONLN')
+
+      self.divisor = 0
+      hostname = locations.this.get('hostname')
+      for l in locations.config.locs.values():
+         if (hostname == l.get('hostname')):
+            self.divisor += 1
+           
+      if Verbose > 2:
+         print >>sys.stderr, "Host", hostname, "shared with", self.divisor
+
+      if not self.divisor:
+         print >>sys.stderr, "Warning: could not determine number of nodes on this host"
+         self.divisor = 1 
 
    def update(self, force=False):
       """Try to update CPU idle figures.  Return True iff we updated the idle figures."""
@@ -2061,7 +2074,19 @@ class CpuProfile:
  
       return True
 
- 
+   def memory_usage(self):
+      return os.sysconf('SC_AVPHYS_PAGES') / float(os.sysconf('SC_PHYS_PAGES'))
+      #f = file("/proc/meminfo") 
+      #for line in f:
+         #if line.startswith("MemTotal"):
+            #total = float(line.split()[1])
+         #if line.startswith("MemFree"):
+            #free = float(line.split()[1])
+            #f.close()
+            #return free/total
+#
+      #assert(not "Unable to parse /proc/meminfo")
+
    def available(self):
       """Return True iff the system is neither CPU nor I/O bound."""
       if not self.update(): 
@@ -2073,6 +2098,13 @@ class CpuProfile:
 
          if Verbose > 2:
             print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for CPU to be more idle"
+         return False
+
+      mem_usage = self.memory_usage()
+      fair_share = 1.0/self.divisor
+      if mem_usage > (1 - fair_share):
+         if Verbose > 1:
+            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage drop below %d%%% from %d%%" % (int(100*(1-fair_share)), int(100*mem_usage))
          return False
 
       # Account for D state:
