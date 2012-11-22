@@ -812,8 +812,8 @@ class FmLocations:
             if s == "global": 
                continue
             r = self._expandList(s)
-            for (i,name) in r:
-               self.parseLocation(s, name=name, num=i)
+            for (vals,name) in r:
+               self.parseLocation(s, name=name, listvalues=vals)
 
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
@@ -874,15 +874,19 @@ class FmLocations:
       if self.cleanup:
          os.unlink(self.cleanup)
 
-   def _expandList(self, liststr):
-      range_re = re.compile("(.*)[\(\[](.*)[\)\]](.*)$")
+   def _expandList(self, liststr, values=[]):
+      """Returns a list of tuples where each tuple contains a list of 0 or more interval values and the resulting string from those values."""
+
+      #Support () or [] syntax for SLURM or ConfigParser cases
+      range_re = re.compile("([^\(\[]*)[\(\[]([^\)\]]*)[\)\]](.*)$")
+
       r = range_re.match(liststr)
       if not r:
-         return [(None, liststr)]
+         return [(values, liststr)]
       prefix = r.group(1)
       lst = r.group(2)
-      suffix = r.group(3)
       expanded = []
+      suffix = r.group(3)
       first = None
       for interval in lst.split(","):
          if "-" in interval:
@@ -896,10 +900,14 @@ class FmLocations:
 
       # First is the first example node number string.
       # It may be padded with leading zeros, the following will preserve that formatting:
-      expanded = [(i, prefix + first[:-len(str(i))] + str(i) + suffix) for i in expanded]
-      return expanded
 
-   def parseLocation(self, stanza, name=None, num=None):
+      # Recrusively try expanding each result (which may have a second list in it) and flatten the resulting lists
+      ret = []
+      for i in expanded:
+         ret += self._expandList(prefix + first[:-len(str(i))] + str(i) + suffix, values+[i])
+      return ret
+
+   def parseLocation(self, stanza, name=None, listvalues=[]):
       if name: 
          nodename = str(name)
       else:
@@ -916,7 +924,7 @@ class FmLocations:
 
          l.name = nodename
          l.config = {}
-         l.num = num
+         l.listvalues = listvalues
 
       # Import all configparser settings into a dictionary
       for opt,val in self.configparser.items(stanza, raw=True):
@@ -943,10 +951,11 @@ class FmLocations:
       l.rsynccmd[0] = os.path.expanduser(l.rsynccmd[0])
 
       if l.name != "global": 
-            if l.num: 
-               if '%' not in l.hostname:
-                  print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, l.num)
-               l.hostname = l.hostname % (l.num)
+            if l.values: 
+               #if '%' not in l.hostname:
+                  #print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, str(l.values))
+               l.hostname = l.hostname.format(*l.listvalues)
+               l.rootdir = l.rootdir.format(*l.listvalues)
             
             l.jobdir = l.rootdir + "/jobs"
             if l.queuebyhost:
