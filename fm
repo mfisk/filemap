@@ -2113,7 +2113,7 @@ class CpuProfile:
       fair_share = 1.0/self.divisor
       if mem_usage > (1 - fair_share):
          if Verbose > 1:
-            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage drop below %d%%% from %d%%" % (int(100*(1-fair_share)), int(100*mem_usage))
+            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage drop below %d%% from %d%%" % (int(100*(1-fair_share)), int(100*mem_usage))
          return False
 
       # Account for D state:
