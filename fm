@@ -1637,7 +1637,7 @@ class Procs:
                if deviations > 2:
                   print >>sys.stderr, "Node %s slow by %g standard deviations" % (p.node, deviations)
 
-            print >>sys.stderr, "Average time %gs, stddev %gs %s" % (mean, stddev, tag)
+            print >>sys.stderr, "Average time %gs, max %gs, stddev %gs %s" % (mean, max([p.time for p in results]), stddev, tag)
 
       if not stopping:
          for k,v in self.queues.items():
