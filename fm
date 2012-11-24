@@ -3033,7 +3033,7 @@ and the program re-run.
                   #Kill job since we returned early with an error
                   self.kill(joblist)
                   return False
-               continue
+            continue
       
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
          joblist.append(jobname)
