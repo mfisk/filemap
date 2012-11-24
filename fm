@@ -2996,6 +2996,7 @@ and the program re-run.
       assert (type(inglobs) == type([]))
       starttime = None
       jobname = None
+      joblist = []
 
       if options.optimistic:
          maxErrors = None
@@ -3029,10 +3030,13 @@ and the program re-run.
                   print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
                r = self._Locations().forAllLocal(["wait", jobname, "redistribute"] + inglobs).collect(maxErrors=maxErrors, stopOnError=True)
                if not r:
+                  #Kill job since we returned early with an error
+                  self.kill(joblist)
                   return False
                continue
       
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
+         joblist.append(jobname)
 
       if not options.statusonly:
          # Install the jobs on each node
@@ -3046,6 +3050,8 @@ and the program re-run.
             print >>sys.stderr, "Waiting for completion.  Job", jobname
          r = self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors, stopOnError=True)
          if not r:
+            #Kill job since we returned early with an error
+            self.kill(joblist)
             return False
          wallclock = time.time() - starttime
       else:
