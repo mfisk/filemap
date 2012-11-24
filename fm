@@ -1549,6 +1549,7 @@ class Procs:
       if queue and not node:
          node = queue
       r.node = node
+      r.cmd = cmdv
 
       self.pids[r.pid] = r
       if Verbose > 2:
@@ -1998,6 +1999,7 @@ class JobScheduler:
       stats['hostname'] = socket.gethostname()
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
+      stats['cmd'] = p.cmd
  
       dir = p.outdirname + "/." + p.outbasename 
       try:
