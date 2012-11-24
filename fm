@@ -499,11 +499,13 @@ def plot(inputfile, pngfile):
    jobs = list(jobs)
    if Verbose > 2:
       print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
-   colormap = ['r','g','b','cyan','magenta','black','yellow','purple']
+   colormap = ['red','green','blue','cyan','magenta','black','yellow','purple']
    color = {}
    for j in jobs:
       color[j] = jobs.index(j)
       color[j] = colormap[color[j] % len(colormap)]
+      if Verbose > 1:
+         print >>sys.stderr, "Job %s %s" % (color[j],j)
          
    nodenames = nodes.keys()
    nodenames.sort(cmp=numcmp)
