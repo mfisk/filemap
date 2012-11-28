@@ -440,7 +440,7 @@ def makeVnodes(nodes):
 
    return newnodes
    
-def plot(inputfile, pngfile):
+def plot(inputfile, pngfile, options):
    import matplotlib.figure
    import matplotlib.collections
    import matplotlib.backends.backend_agg
@@ -451,17 +451,22 @@ def plot(inputfile, pngfile):
    # Load all stats and keep track of min and max inputsizes along the way
    nodes = {}
    jobs = set()
+   filenames = {}
    minsize = 2**31
    mintime = 2**31
    maxsize = 0
    maxtime = 0
    totalsize = 0
+   nodename = 'nodename'
+   if options.group_host:
+      nodename = 'hostname'
+      
    for s in stats:
       s['start'] = s['timestamp'] - s['time']
       s['finish'] = s['timestamp']
-      if not nodes.get(s['nodename']):
-         nodes[s['nodename']] = []
-      nodes[s['nodename']].append(s)
+      if not nodes.get(s[nodename]):
+         nodes[s[nodename]] = []
+      nodes[s[nodename]].append(s)
 
       minsize = min(minsize, s['inputsize'])
       maxsize = max(maxsize, s['inputsize'])
@@ -562,8 +567,12 @@ def plot(inputfile, pngfile):
          for g in gaps:
             if g[1] < start:
                delta += g[1] - g[0]   
-
-         ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
+         if options.redundant:
+            filenames.setdefault(s['statusfile'],-1)
+            filenames[s['statusfile']] += 1
+            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=(1.0*filenames[s['statusfile']])/len(colormap), lw=0, color=colormap[min(len(colormap), filenames[s['statusfile']])])
+         else:
+            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
          #ax.errorbar(finish, y, yerr=1, fmt=None, elinewidth=(1 + 2*size), color=color[s['jobname']])
 
    ax.autoscale_view()
@@ -3118,7 +3127,10 @@ Unlike 'get -c', duplicate instances of files will be included."""
 
    def plot(self, args):
       """Plot run-time of a previous map."""
-      (options, args) = MethodOptionParser(fixed=["[infile [outfile]]"]).parse_args(args)
+      p = MethodOptionParser(fixed=["[infile [outfile]]"])
+      p.add_option("-r", "--redundant", action="store_true", default=False, help="generate a plot highlighting redundant work")
+      p.add_option("-g", "--group-host", action="store_true", default=False, help="group nodes by host")
+      (options, args) = p.parse_args(args)
       infile = ".fm.stats.gz"
       pngfile = "fmstats.png"
 
@@ -3139,7 +3151,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       if type(infile) == type(''):
          infile = gzip.GzipFile(infile)
    
-      plot(infile, pngfile)
+      plot(infile, pngfile, options)
 
    def _local(self, args):
       """This is for slave (remote) instantiations."""
