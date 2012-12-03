@@ -775,6 +775,11 @@ class FmLocations:
       if self.config.pathextras:
          os.environ['PATH'] += ":" + self.config.pathextras
 
+      if self.config.environ:
+         for pair in self.config.environ.split():
+            k,v = pair.split('=')
+            os.environ[k] = v
+
       if self.config.umask:
          os.umask(self.config.umask)
 
@@ -804,6 +809,7 @@ class FmLocations:
 
       self.config.umask = int(self.config_get("global", "umask", "0002"))
       self.config.pathextras = self.config_get("global", "pathextras")
+      self.config.environ = self.config_get("global", "environ")
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
