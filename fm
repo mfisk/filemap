@@ -477,7 +477,7 @@ def plot(inputfile, pngfile, options):
       if 'cmd' not in s:
          s['cmd'] = s['jobname']
 
-      jobs.add(s['cmd'])
+      jobs.add(s['cmd'][0])
 
    # Reduce to overlapping windows
    stats.sort(lambda a,b: cmp(a['start'], b['start']))
@@ -572,7 +572,7 @@ def plot(inputfile, pngfile, options):
             filenames[s['statusfile']] += 1
             ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=(1.0*filenames[s['statusfile']])/len(colormap), lw=0, color=colormap[min(len(colormap), filenames[s['statusfile']])])
          else:
-            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
+            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd'][0]])
          #ax.errorbar(finish, y, yerr=1, fmt=None, elinewidth=(1 + 2*size), color=color[s['jobname']])
 
    ax.autoscale_view()
