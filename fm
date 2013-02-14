@@ -474,10 +474,12 @@ def plot(inputfile, pngfile, options):
       maxtime = max(maxtime, s['finish'])
       totalsize += s['inputsize']
 
-      if 'cmd' not in s:
+      if 'cmd'  in s:
+         s['cmd'] = ' '.join(s['cmd'])
+      else:
          s['cmd'] = s['jobname']
 
-      jobs.add(s['cmd'])
+      jobs.add(str(s['cmd']))
 
    # Reduce to overlapping windows
    stats.sort(lambda a,b: cmp(a['start'], b['start']))
@@ -2393,7 +2395,7 @@ class FmJob:
       p.outdirname = odirname
       p.outbasename = obasename
       p.outrelpath = outfilename
-      p.cmd = cmd
+      p.cmd = self.cmd
       p.jobname = self.jobname
       p.job = self
       self.running.append(p)
