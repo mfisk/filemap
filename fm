@@ -1256,7 +1256,7 @@ locations of this instance."""
          else:
             srcfiles.append(a)
 
-      tag = "put %s %s" % (srclist, dst) 
+      tag = "put %s %s" % (srclist, dst)
       redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove)
 
       if remove and redundants:
@@ -1280,7 +1280,9 @@ locations of this instance."""
             seed = os.path.basename(s)
          elif "/./" in s:
             # Relative path
-            seed = "/".join([dst, s.split("/./")[1], os.path.basename(s)])
+            seed = "/".join([dst, s.split("/./")[1]])
+            while '//' in seed:
+               seed = seed.replace('//','/')
             assert(relative != False)
             relative = True
          else:
