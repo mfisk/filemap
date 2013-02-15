@@ -2478,7 +2478,8 @@ class FileSynchronizer:
         # isdone() is called iff we have newer inputs than outputs.
         # We don't compare syncfile's lasttime, but presumably it is stale like the local output
         try:
-           if file(syncfilename).read() == self.locs.thisname:
+           node = file(syncfilename).read()
+           if node == self.locs.thisname:
               # We did it last time, remove our syncfile now
               os.unlink(syncfilename)
               return False
@@ -2497,6 +2498,16 @@ class FileSynchronizer:
            return False
 
         # Somebody else did it and recently enough that we'll trust their result
+
+        # Unless that node is no longer active
+        if node not in self.locs.config.locs:
+           # Node no longer exists in config
+           return False
+
+        if self.locs.config.locs[node].inactive:
+           # Node that owns the lock is no longer active, so steal it
+           return False
+
 	return True
 
     def done(self, filename):
