@@ -1256,7 +1256,7 @@ locations of this instance."""
          else:
             srcfiles.append(a)
 
-      tag = "put %s %s" % (srclist, dst) 
+      tag = "put %s %s" % (srclist, dst)
       redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove)
 
       if remove and redundants:
@@ -1280,7 +1280,9 @@ locations of this instance."""
             seed = os.path.basename(s)
          elif "/./" in s:
             # Relative path
-            seed = "/".join([dst, s.split("/./")[1], os.path.basename(s)])
+            seed = "/".join([dst, s.split("/./")[1]])
+            while '//' in seed:
+               seed = seed.replace('//','/')
             assert(relative != False)
             relative = True
          else:
@@ -2476,7 +2478,8 @@ class FileSynchronizer:
         # isdone() is called iff we have newer inputs than outputs.
         # We don't compare syncfile's lasttime, but presumably it is stale like the local output
         try:
-           if file(syncfilename).read() == self.locs.thisname:
+           node = file(syncfilename).read()
+           if node == self.locs.thisname:
               # We did it last time, remove our syncfile now
               os.unlink(syncfilename)
               return False
@@ -2495,6 +2498,16 @@ class FileSynchronizer:
            return False
 
         # Somebody else did it and recently enough that we'll trust their result
+
+        # Unless that node is no longer active
+        if node not in self.locs.config.locs:
+           # Node no longer exists in config
+           return False
+
+        if self.locs.config.locs[node].inactive:
+           # Node that owns the lock is no longer active, so steal it
+           return False
+
 	return True
 
     def done(self, filename):
