@@ -3272,10 +3272,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       fnames = ls.keys()
       fnames.sort()
 
-      if not sys.stdout.isatty():
-         for i in fnames:
-            print i
-      elif not options.long:
+      if not options.long:
          tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
 
       else:
