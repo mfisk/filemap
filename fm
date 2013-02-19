@@ -696,7 +696,16 @@ class MethodOptionParser(optparse.OptionParser):
             elif o.action == 'help':
                pass
             else:
-               options += "[%s %s]" % (o._short_opts[0], o._long_opts[0].lstrip('-').upper())
+               opts_tmp_fmts = []
+               opts_tmp_vals = []
+               if o._short_opts:
+                  opts_tmp_fmts.append("%s")
+                  opts_tmp_vals.append(o._short_opts[0])
+               if o._long_opts:
+                  opts_tmp_fmts.append("%s")
+                  opts_tmp_vals.append(o._long_opts[0].lstrip('-').upper())
+                  
+               options += ("[" + " ".join(opts_tmp_fmts) + "]") % tuple(opts_tmp_vals)
                if o.action == 'append':
                   options += '...'
                
