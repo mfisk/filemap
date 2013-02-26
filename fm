@@ -2374,10 +2374,14 @@ class FmJob:
       cmd = copy.copy(self.cmd)
 
       if putargs == "argv":
-          if '%(input)' in cmd:
-             idx = cmd.index('%(input)')
-             cmd[idx:idx+1] = inputs
-          else:
+          subed = False
+          for i, c in enumerate(cmd):
+             if '%(input)' in c:
+                cmd[i] = c.replace('%(input)', " ".join(inputs))
+                subed = True
+#                idx = c.index('%(input)')
+#                c[idx:idx+1] = inputs
+          if not subed:
              cmd += inputs
       else:
           inputlist = "\n".join(inputs)
