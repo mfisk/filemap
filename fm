@@ -1401,7 +1401,7 @@ locations of this instance."""
 
             # we have to explicitly include every parent directory as well
             while name and name != "/":
-               il.append(name) + "/"
+               il.append(name + "/")
                name = os.path.dirname(name)
 
          inputlist = il
