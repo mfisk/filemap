@@ -1536,8 +1536,9 @@ class Procs:
          stdin = file('/dev/null')
 
       r = subprocess.Popen(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd)
+      r.stdinstr = None # Default to nothing to finalize
 
-      if r.stderr or r.stdout:
+      if r.stderr or r.stdout or stdinstr:
          self.numprocspolling += 1
          if r.stdout:
             fd = r.stdout.fileno()
@@ -1561,6 +1562,18 @@ class Procs:
 
             r.stderrbuf = cStringIO.StringIO()
 
+         if stdinstr:
+            fd = r.stdin.fileno()
+            self.poll.register(r.stdin, select.POLLOUT|select.POLLHUP|select.POLLERR) 
+            self.fd2proc[fd] = r
+
+            # make non-blocking file
+            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+            r.stdinstr = stdinstr
+            self.processStdin(r) 
+
       r.tag = tag
       r.start = time.time()
       r.queue = queue
@@ -1573,16 +1586,6 @@ class Procs:
       self.pids[r.pid] = r
       if Verbose > 2:
          print >>sys.stderr, r.pid, cmdv, r.node
-
-      if stdinstr:
-         try:
-            # Child could quit before we get it all out
-            r.stdin.write(stdinstr)
-         except:
-            # assume that child exit status will tell the story
-            # if it ignored some input and exited with 0, we'll be oblivious
-            pass
-         r.stdin.close()
 
       return r
 
@@ -1722,6 +1725,10 @@ class Procs:
          p.stderr = p.stderrbuf
          p.stderr.seek(0)
 
+      if p.stdinstr != None:
+         self.poll.unregister(p.stdin)
+         del self.fd2proc[p.stdin.fileno()]
+
       if p.stderr or p.stdout:
          self.numprocspolling -= 1
 
@@ -1843,8 +1850,35 @@ class Procs:
                   assert(fd == p.stderr.fileno())
                   s = p.stderr.read()
                   p.stderrbuf.write(s)
+            if event & select.POLLOUT:
+               assert(fd == p.stdin.fileno())
+               self.processStdin(p)
 
       return None
+
+   def processStdin(self, p):
+      assert(p.stdinstr != None)
+      try:
+         # Child could quit before we get it all out
+         bytes = os.write(p.stdin.fileno(), p.stdinstr)
+         #print >>sys.stderr, "%s: wrote %d of %d bytes" % (p, bytes, len(p.stdinstr))
+         p.stdinstr = p.stdinstr[bytes:]
+      except IOError:
+         raise
+         # assume that child exit status will tell the story
+         # if it ignored some input and exited with 0, we'll be oblivious
+         p.stdinstr = None
+
+      if not p.stdinstr:
+         #print >>sys.stderr, "%s: closing" % (p)
+         del self.fd2proc[p.stdin.fileno()]
+         try:
+             # May be closed
+             self.poll.unregister(p.stdin)
+         except ValueError:
+             pass
+         p.stdin.close()
+         p.stdinstr = None  #Tell finalize not to bother closing
 
 # The design is as follows:
 #   1. Jobs are submitted in an uncoordinated manner, so they have unique
@@ -2314,11 +2348,15 @@ class FmJob:
             if self.checkexit == None:
                return None
 
-            stats = cPickle.load(file(statfile))
-            if stats['status'] != self.checkexit:
-               print >>sys.stderr, "Invalidating previous output based on exit status", statfile, stats['status'], "instead of", self.checkexit
+            try:
+               stats = cPickle.load(file(statfile))
+            except:
+               print >>sys.stderr, "Invalidating previous output based on unreadable stats file", statfile
             else:
-               return None
+               if stats['status'] != self.checkexit:
+                  print >>sys.stderr, "Invalidating previous output based on exit status", statfile, stats['status'], "instead of", self.checkexit
+               else:
+                  return None
 
          #Remove it now before somebody uses it for something
          dir = os.path.dirname(statfile)
@@ -2850,7 +2888,7 @@ and the program re-run.
       p.add_option("-s", "--statusonly", action="store_true", help="Don't wait for completion; fetch any available results now")
       p.add_option("-e", "--checkexit", action="store_false", default=True, help="Do NOT stop on error or remove output from any previous run that had a non-zero exit status")
       p.add_option("-m", "--mail", action="store_true", help="E-mail results")
-      p.add_option("--mx", action="store", help="SMTP server")
+      p.add_option("-x", "--mx", action="store", help="SMTP server")
       (options, cmd) = p.parse_args(args)
 
       if not options.inputglob:
