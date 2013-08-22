@@ -696,7 +696,16 @@ class MethodOptionParser(optparse.OptionParser):
             elif o.action == 'help':
                pass
             else:
-               options += "[%s %s]" % (o._short_opts[0], o._long_opts[0].lstrip('-').upper())
+               opts_tmp_fmts = []
+               opts_tmp_vals = []
+               if o._short_opts:
+                  opts_tmp_fmts.append("%s")
+                  opts_tmp_vals.append(o._short_opts[0])
+               if o._long_opts:
+                  opts_tmp_fmts.append("%s")
+                  opts_tmp_vals.append(o._long_opts[0].lstrip('-').upper())
+                  
+               options += ("[" + " ".join(opts_tmp_fmts) + "]") % tuple(opts_tmp_vals)
                if o.action == 'append':
                   options += '...'
                
@@ -1390,8 +1399,9 @@ locations of this instance."""
             # Any name could be a directory, so add a recursive mask to get its children
             il.append(os.path.join(name, "***"))
 
+            # we have to explicitly include every parent directory as well
             while name and name != "/":
-               il.append(name)
+               il.append(name + "/")
                name = os.path.dirname(name)
 
          inputlist = il
@@ -2403,10 +2413,14 @@ class FmJob:
       cmd = copy.copy(self.cmd)
 
       if putargs == "argv":
-          if '%(input)' in cmd:
-             idx = cmd.index('%(input)')
-             cmd[idx:idx+1] = inputs
-          else:
+          subed = False
+          for i, c in enumerate(cmd):
+             if '%(input)' in c:
+                cmd[i] = c.replace('%(input)', " ".join(inputs))
+                subed = True
+#                idx = c.index('%(input)')
+#                c[idx:idx+1] = inputs
+          if not subed:
              cmd += inputs
       else:
           inputlist = "\n".join(inputs)
@@ -2843,7 +2857,7 @@ Has unix "mkdir -p" semantics."""
 Copy the specified file(s) into the virtual store.  
 """
       p = MethodOptionParser(fixed=["files...", "dst"])
-      p.add_option('-s', '--serialize', action='store', help="Number of nodes to store to concurrently", default=False)
+      p.add_option('-s', '--serialize', action='store', help="Number of nodes to store to concurrently", default=False, type=int)
       (options, args) = p.parse_args(args)
 
       dst = args[-1]
@@ -3323,10 +3337,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       fnames = ls.keys()
       fnames.sort()
 
-      if not sys.stdout.isatty():
-         for i in fnames:
-            print i
-      elif not options.long:
+      if not options.long:
          tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
 
       else:
