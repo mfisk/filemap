@@ -1399,7 +1399,11 @@ locations of this instance."""
             # Any name could be a directory, so add a recursive mask to get its children
             il.append(os.path.join(name, "***"))
 
+            # Any name could be a file, so add it without a /***
+            il.append(name)
+
             # we have to explicitly include every parent directory as well
+            name = os.path.dirname(name)
             while name and name != "/":
                il.append(name + "/")
                name = os.path.dirname(name)
