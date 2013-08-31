@@ -1,0 +1,28 @@
+#!/bin/bash
+
+PATH=..:$PATH
+export PATH
+
+doTest() {
+        echo "==== Running test $t ===="
+	sh -x $t.sh > $t.out 2>$t.err
+	diff -N $t.stdout $t.out || (echo ---- $t.err ----; cat $t.err)
+}
+
+# Run tests specified on command line
+if [ "$1" != "" ]; then
+	for t in "$@"; do 
+		doTest $t
+	done
+	exit
+fi
+
+# Find all numbered tests and run them
+for sh in [0-9]*.sh; do 
+	t=`echo $sh|sed 's/.sh$//'`
+
+	doTest $t
+done
+
+
+		 

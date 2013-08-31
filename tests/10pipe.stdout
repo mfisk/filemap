@@ -1,0 +1,6 @@
+ 3  9 18 
+ 5 15 30 
+/test/f1.d/wc/stdout
+/test/f1.d/wc/stdout.d/sed=20s=2C=2F.=2A=24=2C=2C
+/test/f2.d/wc/stdout
+/test/f2.d/wc/stdout.d/sed=20s=2C=2F.=2A=24=2C=2C
