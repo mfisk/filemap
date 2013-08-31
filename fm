@@ -3481,7 +3481,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       if args:
          self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
-      self._Locations().put([__file__], "/sys/").collect()
+      self._Locations().put([os.path.realpath(__file__)], "/sys/").collect()
 
    def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None, checkexit=False):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (repr(cmd), string.join(inglobs))
