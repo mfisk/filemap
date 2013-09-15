@@ -9,16 +9,17 @@ For more help, specify one of the following commands followed by -h option:
    init     - Create/correct directory structure
    jobs     - Show all of the jobs still active
    kill     - Kill a job
+   loadavg  - Show load average
    ls       - File & directory listing
    map      - Launch a computation on a set of input files in the cloud
    mkdir    - Make a directory (or directories) on all nodes
    mv       - Rename files in the cloud
+   partition - Partition an input file
    plot     - Plot run-time of a previous map
    replicate - Replicate the specified files (in the virtual file system) from each node
    rm       - Delete a file or directory tree in the cloud
    run      - Run a command on each node and print results
    runhost  - Run a command on each unique host and print results
-   split    - Partition an input file
    store    - Store one or more files into the cloud
 
 
