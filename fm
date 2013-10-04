@@ -3573,9 +3573,13 @@ class SchedLock:
              # process not running
              return None
 
-          else:
-             # Some other unexpected error
-             raise
+          if e.errno == 1:
+             # some linux systems now returning a permission error  if pid not exists!
+             if os.path.isdir("/proc/%d" % pid):
+                return None
+
+          # Some other unexpected error
+          raise
       
    def lock(self):
       try:
