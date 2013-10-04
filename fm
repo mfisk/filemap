@@ -429,15 +429,11 @@ def makeVnodes(nodes):
             vnodes.append([job])
          #print "now", vnodes
 
-      if len(vnodes) < 2:
-         # It was serial, so no virtual nodes required
-         continue
-
       #print "Replacing", nodename, "with", len(vnodes)
       for i in range(0, len(vnodes)):
          newnodes[nodename + ";" + str(i)] = vnodes[i]
          #print nodes.keys()
-
+   
    return newnodes
    
 def plot(inputfile, pngfile, options):
