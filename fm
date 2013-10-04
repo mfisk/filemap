@@ -2040,7 +2040,11 @@ class JobScheduler:
             self.freethreads += 1
             self.finalizeItem(p)
             if p.status and p.job.checkexit != None:
-               print >>sys.stderr, "Node terminating job %s due to exit status %d on input %s:" % (p.jobname, p.status, str(p.inputs))
+               if isinstance(p.inputs, list):
+                  inputstr = str("%s and %d others" % (str(p.inputs[0]), len(p.inputs)-1))
+               else:
+                  inputstr = str(p.inputs)
+               print >>sys.stderr, "Node terminating job %s due to exit status %d on input %s:" % (p.jobname, p.status, inputstr)
                try:
                   sys.stderr.write(file(p.outdirname+"/"+p.outbasename+"/.stderr").read())
                except IOError:
