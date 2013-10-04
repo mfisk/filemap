@@ -125,6 +125,15 @@ nonalphanumre = re.compile('[^\w\.\-]')
 
 def escape(s):
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), string.join(s))
+
+   base = os.path.basename(s)
+
+   # Make sure it's not too long to be a filename
+   if len(base) > 220: 
+      # Use a hash of the remainder 
+      base = base[:220] + printableHash(base[220:])
+      s = os.path.join(os.path.dirname(s), base)
+
    return s
 
 quoprire = re.compile('=([0-9a-fA-F]{2})')
