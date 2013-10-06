@@ -3688,22 +3688,22 @@ class FmLocalCommands(CommandSetBase):
       self._locs = None
       p = MethodOptionParser()
       p.set_usage("""fm _local command args...\n""" + self._usage())
-      p.add_option("-n", "--node", help="Node name for this node")
+      p.add_option("-n", "--node", action='append', help="Node name for this node")
       (options, args) = p.parse_args(args)
       assert(not args)
       assert(options.node)
 
       inputs = SmartDict(cPickle.loads(sys.stdin.read()))
 
-      if options.node:
+      for node in options.node:
          # If -n is given, then we are a direct slave and 
          # should get our config on stdin
-         os.environ['FMNODE'] = options.node
-         self.Locations = FmLocations(copyFrom=inputs, slave=options.node)
+         os.environ['FMNODE'] = node
+         self.Locations = FmLocations(copyFrom=inputs, slave=node)
 
-      setProcessName("fm _local -n %s %s" % (options.node, ' '.join(inputs.cmd)))
+         setProcessName("fm _local -n %s %s" % (node, ' '.join(inputs.cmd)))
 
-      CommandSetBase.__init__(self, self.Locations.this.subst(inputs.cmd), p)
+         CommandSetBase.__init__(self, self.Locations.this.subst(inputs.cmd), p)
 
    def replicate(self, args):
       procs = Procs(retries=self.Locations.config.all2all_retries) 
