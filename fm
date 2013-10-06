@@ -1334,21 +1334,27 @@ locations of this instance."""
                   self.cached_dstnodes[pickn] = {}
              
                if seed in self.cached_dstnodes[pickn]:
+                  #print >>sys.stderr, "PICK CACHE", hashbasename, pickn, seed, [c.hostname for c in self.cached_dstnodes[pickn][seed]]
                   return self.cached_dstnodes[pickn][seed]
             else:
                seed = dst
 
-            if pickn != True: 
+            if type(pickn) is int: 
                choices = self.pickn(seed=seed, n=pickn)
 
-               if hashbasename:
-                  # Add to cache
-                  self.cached_dstnodes[n][seed] = choices 
             else:
                # use default n
                choices = self.pickn(seed=seed)
 
-            return [self.config.locs[c] for c in choices]
+            choices = [self.config.locs[c] for c in choices]
+
+            if pickn and hashbasename:
+                # Add to cache
+                self.cached_dstnodes[pickn][seed] = choices
+
+            #print >>sys.stderr, "PICK", hashbasename, pickn, seed, choices, [c.hostname for c in choices]
+
+            return choices
          else:
             # Use all destinations that are active
             retlist = []
