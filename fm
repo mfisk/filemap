@@ -2199,10 +2199,36 @@ class CpuProfile:
          return False
 
       mem_usage = self.memory_usage()
-      fair_share = 1.0/self.divisor
-      if mem_usage > (1 - fair_share):
+
+      # Until we keep track of this, assume only 1 child running
+      # 	self.numChildrenRunning = 1
+
+      # Assume current memory usage is evenly distributed across our peer schedulers:  
+      #		our_usage = mem_usage / self.divisor
+
+      # Assume how much memory a new child would take:
+      #		needed = our_usage / self.numChildrenRunning
+
+      # Assume available memory is evenly distributed across schedulers
+      #		available_share = (1.0 - mem_usage) / self.divisor
+    
+      # We should wait if (needed > available_share)
+      #                 = mem_usage * (1.0 / self.numChildrenRunning) > (1.0 - mem_usage) 
+      #                 = mem_usage + mem_usage * (1.0 / self.numChildrenRunning) > 1.0 
+      #                 = mem_usage * (1 + (1.0 / self.numChildrenRunning)) > 1.0 
+      #                 = mem_usage > 1.0 / (1 + (1.0 / self.numChildrenRunning))
+      #                 = mem_usage > 1.0 / ((self.numChildrenRunning + 1) / self.numChildrenRunning)
+      #                 = mem_usage > self.numChildrenRunning / (self.numChildrenRunning + 1)
+      #                 = mem_usage > self.numChildrenRunning / (self.numChildrenRunning + 1)
+
+      # XXX. This class doesn't actually have a self.numChildrenRunning yet.
+      # If we conservatively assume it is 1, then the threshold is 1/2 (assuming 2 means 2/3; 3 means 3/4; ...)
+      threshold = 0.67
+
+      if mem_usage > threshold:
+         # Wait for more memory
          if Verbose > 1:
-            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage drop below %d%% from %d%%" % (int(100*(1-fair_share)), int(100*mem_usage))
+            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage drop to %d%% from %d%%" % (int(100*(threshold)), int(100*mem_usage))
          return False
 
       # Account for D state:
