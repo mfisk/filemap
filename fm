@@ -1436,7 +1436,7 @@ locations of this instance."""
 
       inputstr = '\n'.join(inputlist)
 
-      cmd = self.this.rsynccmd + ["-tLde", loc.ssh] + flags + [srcpath, dstpath]
+      cmd = self.this.rsynccmd + ["-utLde", loc.ssh] + flags + [srcpath, dstpath]
 
       #print >>sys.stderr, "inputlist:", inputlist
       procs.Popen(cmd, queue=queue, stdinstr=inputstr, node=node, tag=tag)
@@ -2543,14 +2543,15 @@ class FileSynchronizer:
     def isdone(self, filename, newestinput):
         # Locally we want to (re-)create output. 
         # Return True iff somebody already finished
+
         syncfilename = self._filename2lock(filename)
 
         # If we did it last time, then redo it now
-        # isdone() is called iff we have newer inputs than outputs.
         # We don't compare syncfile's lasttime, but presumably it is stale like the local output
         try:
            node = file(syncfilename).read()
            if node == self.locs.thisname:
+              # isdone() is called iff we have newer inputs than outputs.
               # We did it last time, remove our syncfile now
               os.unlink(syncfilename)
               return False
@@ -2563,9 +2564,9 @@ class FileSynchronizer:
 	if newestinput > lasttime: 
            # Somebody else did it, but we have newer inputs, so redo it
            # XXX. this doesn't remove the output elsewhere so if we shuffle both, we may get the old input
-           # Hopefully if our input changed, there's will too.   If a node is offline while the input updates
+           # Hopefully if our input changed, their's will too.   If a node is offline while the input updates
            # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
-           # things we have current locks for
+           # things we have current locks for.  Hopefully rsync -u will get the newer file in the end.
            return False
 
         # Somebody else did it and recently enough that we'll trust their result
