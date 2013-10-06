@@ -985,10 +985,12 @@ class FmLocations:
 
       if l.name != "global": 
             if l.values: 
-               #if '%' not in l.hostname:
-                  #print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, str(l.values))
                if l.hostname:
+                  #if '%' not in l.hostname:
+                     #print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, str(l.values))
                   l.hostname = l.hostname.format(*l.listvalues)
+
+               assert(l.rootdir)
                l.rootdir = l.rootdir.format(*l.listvalues)
             
             l.jobdir = l.rootdir + "/jobs"
@@ -3530,7 +3532,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       if args:
          self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
-      self._Locations().put([__file__], "/sys/").collect()
+      self._Locations().put([os.path.realpath(__file__)], "/sys/").collect()
 
    def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None, checkexit=False):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (repr(cmd), string.join(inglobs))

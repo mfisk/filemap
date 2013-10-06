@@ -1,0 +1,4 @@
+ 3  9 18 
+ 5 15 30 
+/test/f1.d/wc/.status  /test/f2.d/wc/.status
+/test/f1.d/wc/stdout   /test/f2.d/wc/stdout
