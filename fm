@@ -2170,17 +2170,20 @@ class CpuProfile:
       return True
 
    def memory_usage(self):
-      return os.sysconf('SC_AVPHYS_PAGES') / float(os.sysconf('SC_PHYS_PAGES'))
-      #f = file("/proc/meminfo") 
-      #for line in f:
-         #if line.startswith("MemTotal"):
-            #total = float(line.split()[1])
-         #if line.startswith("MemFree"):
-            #free = float(line.split()[1])
-            #f.close()
-            #return free/total
-#
-      #assert(not "Unable to parse /proc/meminfo")
+      #return 1 - (os.sysconf('SC_AVPHYS_PAGES') / float(os.sysconf('SC_PHYS_PAGES')))
+      f = file("/proc/meminfo") 
+      free = 0.0
+      for line in f:
+         if line.startswith("MemTotal"):
+            total = float(line.split()[1])
+         if line.startswith("MemFree"):
+            free += float(line.split()[1])
+         if line.startswith("Cached"):
+            free += float(line.split()[1])
+            f.close()
+            return 1 - (free/total)
+
+      assert(not "Unable to parse /proc/meminfo")
 
    def available(self):
       """Return True iff the system is neither CPU nor I/O bound."""
