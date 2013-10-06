@@ -2348,7 +2348,7 @@ class FmJob:
 
             # Apply all of the files with the same partition,
             # but only if that partition belongs on this node.
-            choices = list(Locations.pickn(part))
+            choices = list(Locations.pickn(part, n=1))
 
             if Locations.thisname not in choices:
                 #print >>sys.stderr, Locations.thisname, "only hashes", part, "to", list(choices)
