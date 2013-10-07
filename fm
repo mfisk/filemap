@@ -2008,7 +2008,7 @@ class JobScheduler:
    def RunOnce(self, invalidateOnly=False):
          """Try to launch a work item and return True on success (None->nothing to do)"""
 
-         if self.options.dynamicload and not self.procs.isempty() and not cpu.available():
+         if self.options.dynamicload and not self.procs.isempty() and not cpu.available(len(self.procs.pids)):
             # If using dynamic scheduling and something is running and system is not idle, 
             # then don't schedule more work.
 	    return None
@@ -2248,7 +2248,7 @@ class CpuProfile:
 
       assert(not "Unable to parse /proc/meminfo")
 
-   def available(self):
+   def available(self, nprocs):
       """Return True iff the system is neither CPU nor I/O bound."""
       if not self.update(): 
          return False
@@ -2263,30 +2263,26 @@ class CpuProfile:
 
       mem_usage = self.memory_usage()
 
-      # Until we keep track of this, assume only 1 child running
-      # 	self.numChildrenRunning = 1
-
       # Assume current memory usage is evenly distributed across our peer schedulers:  
       #		our_usage = mem_usage / self.divisor
 
       # Assume how much memory a new child would take:
-      #		needed = our_usage / self.numChildrenRunning
+      #		needed = our_usage / nprocs
 
       # Assume available memory is evenly distributed across schedulers
       #		available_share = (1.0 - mem_usage) / self.divisor
     
       # We should wait if (needed > available_share)
-      #                 = mem_usage * (1.0 / self.numChildrenRunning) > (1.0 - mem_usage) 
-      #                 = mem_usage + mem_usage * (1.0 / self.numChildrenRunning) > 1.0 
-      #                 = mem_usage * (1 + (1.0 / self.numChildrenRunning)) > 1.0 
-      #                 = mem_usage > 1.0 / (1 + (1.0 / self.numChildrenRunning))
-      #                 = mem_usage > 1.0 / ((self.numChildrenRunning + 1) / self.numChildrenRunning)
-      #                 = mem_usage > self.numChildrenRunning / (self.numChildrenRunning + 1)
-      #                 = mem_usage > self.numChildrenRunning / (self.numChildrenRunning + 1)
+      #                 = mem_usage * (1.0 / nprocs) > (1.0 - mem_usage) 
+      #                 = mem_usage + mem_usage * (1.0 / nprocs) > 1.0 
+      #                 = mem_usage * (1 + (1.0 / nprocs)) > 1.0 
+      #                 = mem_usage > 1.0 / (1 + (1.0 / nprocs))
+      #                 = mem_usage > 1.0 / ((nprocs + 1) / nprocs)
+      #                 = mem_usage > nprocs / (nprocs + 1)
+      #                 = mem_usage > nprocs / (nprocs + 1)
 
-      # XXX. This class doesn't actually have a self.numChildrenRunning yet.
       # If we conservatively assume it is 1, then the threshold is 1/2 (assuming 2 means 2/3; 3 means 3/4; ...)
-      threshold = 0.67
+      threshold = nprocs / (nprocs + 1)
 
       if mem_usage > threshold:
          # Wait for more memory
@@ -3042,7 +3038,7 @@ and the program re-run.
       # >- reduce (inputs on stdin)
       # Can be composed such as ">.<>." which reduces locally, redistributes, then reduces again
 
-      # The scheduler has looks for reduce operations with the substrings:
+      # The scheduler looks for reduce operations with the substrings:
       #   "stdin" which signifies to pass inputs on stdin rather than argv and 
       #   "part" which signifies to only reduce inputs who are in a partition owned by this node (which is what you do after a redistribute).
 
