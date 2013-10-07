@@ -1545,16 +1545,75 @@ class Procs:
       else:
          # No queue, means we can run now, but create an empty queue to block subsequent tasks         
          self.queues[queue] = []
-         return self.PopenSave(**kwargs)
+         return self._PopenSave(**kwargs)
 
-   def PopenSave(self, **kwargs):
-      # Call PopenNow, but save a copy of the kwargs for later retries
-      proc = self.PopenNow(**kwargs)
+   def _PopenSave(self, **kwargs):
+      # Call _PopenNow, but save a copy of the kwargs for later retries
+      proc = self._PopenNow(**kwargs)
       proc.kwargs = kwargs
       return proc
 
-   def PopenNow(self, cmdv=[], prefix=None, stderr=subprocess.PIPE, stdout=subprocess.PIPE, call=False, tag=None, queue=None, node=None, stdinstr=None, cwd=None, retries=0):
-      # This function should only be called by PopenSave
+   def PopenWithPipes(self, cmdv, stdin=None, stdout=None, stderr=None, **kwargs):
+      """This is a wrapper for subprocess.Popen that supports pipelines as in Popen(["ls", "|", "wc", "-l"])"""
+
+      results = []
+      thiscmd = []
+      for i in range(len(cmdv)):
+         if cmdv[i] == "|":
+            # There are more words, so make an intermediate pipe
+            r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, **kwargs)
+
+            # Next element of the pipe gets this output
+            stdin = r.stdout
+
+            results.append(r)
+            thiscmd = []
+         else:
+            thiscmd.append(cmdv[i])
+
+      # This is the last command in the pipeline
+      if thiscmd:
+         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, **kwargs)
+         results.append(r)
+
+      # Here's how we handle these pipelines outside of this function.  One (that last one)
+      # will be returned up the call stack and tracked as the unit of work.  All
+      # will be placed in the reaping and polling datastructures and handles accordingly.
+      # Only when all of the parts left will the tracked one be returned up and passed to FinalizeItem.
+
+      # Now close our reference to intermediate pipes so we don't poll on them
+      for i in range(1, len(results)):
+         if results[i].stdin:
+            #results[i].close()
+            results[i].stdin = None
+
+      if len(results) > 1:
+         for i in range(len(results)):
+            results[i].partof = results[-1]
+
+         # We will count this down (including self) to known when this pipeline/Item is done computing
+         results[-1].parts_left = len(results)
+      else:
+         results[-1].partof = None
+   
+      for i in range(0, len(results) - 1):
+         results[i].stdout = None
+
+      results[-1].parts = results[:-1]
+
+      return results
+
+   def add_poll(self, fh, r, mask):
+      fd = fh.fileno()
+      self.poll.register(fh, mask|select.POLLHUP|select.POLLERR) 
+      self.fd2proc[fd] = r
+  
+      # make non-blocking file
+      fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+      fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+ 
+   def _PopenNow(self, cmdv=[], prefix=None, stderr=subprocess.PIPE, stdout=subprocess.PIPE, call=False, tag=None, queue=None, node=None, stdinstr=None, cwd=None, retries=None):
+      # This function should only be called by _PopenSave
 
       # Note, we prefer to have a stdout so that poll() can tell when it closes and then reap the child
 
@@ -1563,60 +1622,39 @@ class Procs:
       else:
          stdin = file('/dev/null')
 
-      r = subprocess.Popen(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd)
-      r.stdinstr = None # Default to nothing to finalize
+      for r in self.PopenWithPipes(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd):
+         r.stdinstr = None # Default to nothing to finalize
 
-      if r.stderr or r.stdout or stdinstr:
-         self.numprocspolling += 1
-         if r.stdout:
-            fd = r.stdout.fileno()
-            self.poll.register(r.stdout, select.POLLIN|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[fd] = r
-
-            # make non-blocking file
-            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
-            r.stdoutbuf = cStringIO.StringIO()
+         if r.stderr or r.stdout or stdinstr:
+            self.numprocspolling += 1
+            if r.stdout:
+               self.add_poll(r.stdout, r, select.POLLIN)
+               r.stdoutbuf = cStringIO.StringIO()
    
-         if r.stderr:
-            fd = r.stderr.fileno()
-            self.poll.register(r.stderr, select.POLLIN|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[fd] = r
+            if r.stderr:
+               self.add_poll(r.stderr, r, select.POLLIN)
+               r.stderrbuf = cStringIO.StringIO()
+   
+            if stdinstr:
+               self.add_poll(r.stdin, r, select.POLLOUT)
+               r.stdinstr = stdinstr
+               self.processStdin(r) 
+   
+         r.tag = tag
+         r.start = time.time()
+         r.queue = queue
 
-            # make non-blocking file
-            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
-            r.stderrbuf = cStringIO.StringIO()
-
-         if stdinstr:
-            fd = r.stdin.fileno()
-            self.poll.register(r.stdin, select.POLLOUT|select.POLLHUP|select.POLLERR) 
-            self.fd2proc[fd] = r
-
-            # make non-blocking file
-            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
-            r.stdinstr = stdinstr
-            self.processStdin(r) 
-
-      r.tag = tag
-      r.start = time.time()
-      r.queue = queue
-
-      if queue and not node:
-         node = queue
-      r.node = node
-      r.cmd = cmdv
-
-      self.pids[r.pid] = r
-      if Verbose > 2:
-         print >>sys.stderr, r.pid, cmdv, r.node
-
-      return r
-
+         if queue and not node:
+            node = queue
+         r.node = node
+         r.cmd = cmdv
+      
+         self.pids[r.pid] = r
+         if Verbose > 2:
+            print >>sys.stderr, r.pid, cmdv, r.node
+   
+      return r  #Last one, and the one that others are "partof"
+   
    def wakeup(self, qname): 
          if not qname:
             return
@@ -1627,7 +1665,7 @@ class Procs:
             # Leave queue, even if empty, so things wait for us to finish
             if Verbose > 2:
                print >>sys.stderr, "Waking", kwargs
-            self.PopenSave(**kwargs)
+            self._PopenSave(**kwargs)
          else: 
             # Queues was already empty, so now delete it
             del self.queues[qname]
@@ -1718,6 +1756,17 @@ class Procs:
 
       return errors, results
 
+
+   def poll_remove(self, fh):
+      # Make blocking again
+      fd = fh.fileno()
+      fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+      fcntl.fcntl(fd, fcntl.F_SETFL, fl & (~os.O_NONBLOCK))
+
+      self.poll.unregister(fh)
+
+      del self.fd2proc[fd]
+
    def finalizeProc(self, p):
       # Record compute time
       after = os.times()
@@ -1729,38 +1778,38 @@ class Procs:
 
       # Finish building the output buffers
       if p.stdout != None:
-         # Make blocking again
-         fd = p.stdout.fileno()
-         fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-         fcntl.fcntl(fd, fcntl.F_SETFL, fl & (~os.O_NONBLOCK))
+         self.poll_remove(p.stdout)
 
-         self.poll.unregister(p.stdout)
          #print >>sys.stderr, "finalized", p.pid, p.stdout.fileno()
-         del self.fd2proc[p.stdout.fileno()]
          p.stdoutbuf.write(p.stdout.read())
          p.stdout = p.stdoutbuf
          p.stdout.seek(0)
 
       if p.stderr != None:
-         # Make blocking again
-         fd = p.stderr.fileno()
-         fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-         fcntl.fcntl(fd, fcntl.F_SETFL, fl & (~os.O_NONBLOCK))
+         self.poll_remove(p.stderr)
 
-         self.poll.unregister(p.stderr)
-         del self.fd2proc[p.stderr.fileno()]
          p.stderrbuf.write(p.stderr.read())
          p.stderr = p.stderrbuf
          p.stderr.seek(0)
 
       if p.stdinstr != None:
-         self.poll.unregister(p.stdin)
-         del self.fd2proc[p.stdin.fileno()]
+         self.poll_remove(p.stdin)
 
       if p.stderr or p.stdout:
          self.numprocspolling -= 1
 
       del self.pids[p.pid]
+
+      if p.partof:
+         p.partof.parts_left += -1
+         #p.partof.part_status.append(p.status)
+         #print >>sys.stderr, "PARTOF STATUS", p, p.status, p.time
+         # only the acountable child should impact queueing, and doesn't really count to caller
+         if p.partof.parts_left:
+            return None
+         else:
+            # Now that p has finished, p.partof is complete, so process the overall (which may or may not be p)
+            p = p.partof
 
       # XXX: ssh returns 255 if it can't connect and rsync returns 12
       if p.status and p.kwargs['retries'] and (os.WEXITSTATUS(p.status) == 255 or os.WEXITSTATUS(p.status) == 12):
@@ -2049,7 +2098,7 @@ class JobScheduler:
             self.freethreads += 1
             self.finalizeItem(p)
             if p.status and p.job.checkexit != None:
-               if isinstance(p.inputs, list):
+               if isinstance(p.inputs, list) and len(p.inputs) > 1:
                   inputstr = str("%s and %d others" % (str(p.inputs[0]), len(p.inputs)-1))
                else:
                   inputstr = str(p.inputs)
@@ -2085,6 +2134,17 @@ class JobScheduler:
       #stats['schedpid'] = os.getpid()
       stats['timestamp'] = time.time()
       stats['cmd'] = p.cmd
+
+      if p.parts:
+         assert(not p.parts_left)
+
+         for r in p.parts:
+            if stats['status'] == 0:
+               # Promote from non-error to error (like pipefail)
+               stats['status'] = r.status
+            stats['time'] += r.time
+            stats['utime'] += r.utime
+            stats['stime'] += r.stime
  
       dir = p.outdirname + "/." + p.outbasename 
       try:
@@ -2469,8 +2529,10 @@ class FmJob:
              if '%(input)' in c:
                 cmd[i] = c.replace('%(input)', " ".join(inputs))
                 subed = True
-#                idx = c.index('%(input)')
-#                c[idx:idx+1] = inputs
+             if c == "|" and not subed:
+                cmd.insert(i, " ".join(inputs))
+                subed = True
+
           if not subed:
              cmd += inputs
       else:
@@ -3003,9 +3065,10 @@ and the program re-run.
       pipeline = [[]]
       while cmdwords:
          w = cmdwords.pop(0)
-         if w[0] in ["|", ">", "<"]:
+         if w in ["||", ">", "<"]:
+            # Make a new pipeline element
             pipeline.append([])
-         if w[0] != "|":
+         if w != "||":
             pipeline[len(pipeline)-1].append(w)
       if pipeline[0] == []:
          pipeline.pop(0)
