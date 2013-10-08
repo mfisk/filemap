@@ -1622,6 +1622,7 @@ class Procs:
       else:
          stdin = file('/dev/null')
 
+      first = True
       for r in self.PopenWithPipes(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd):
          r.stdinstr = None # Default to nothing to finalize
 
@@ -1635,11 +1636,13 @@ class Procs:
                self.add_poll(r.stderr, r, select.POLLIN)
                r.stderrbuf = cStringIO.StringIO()
    
-            if stdinstr:
+            if first and stdinstr:
                self.add_poll(r.stdin, r, select.POLLOUT)
                r.stdinstr = stdinstr
                self.processStdin(r) 
-   
+  
+         first = False
+ 
          r.tag = tag
          r.start = time.time()
          r.queue = queue
