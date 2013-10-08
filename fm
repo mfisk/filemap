@@ -3064,7 +3064,7 @@ and the program re-run.
       pipeline = [[]]
       while cmdwords:
          w = cmdwords.pop(0)
-         if w in ["||", ">", "<"]:
+         if w in ["||", ">", "<", ">-"]:
             # Make a new pipeline element
             pipeline.append([])
          if w != "||":
@@ -3077,7 +3077,7 @@ and the program re-run.
       # Duplicate cmd when there are multiple reduces
       i = 0
       while i < len(pipeline):
-            if pipeline[i][0] == ">" and (len(pipeline[i]) == 1):
+            if pipeline[i][0].startswith(">") and (len(pipeline[i]) == 1):
                # Copy reduce command and modifier from next pipeline element
                if i+2 >= len(pipeline) or pipeline[i+1][0] != "<":
                   print >>sys.stderr, "Cannot parse command ending in >"
