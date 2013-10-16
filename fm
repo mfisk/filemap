@@ -2817,21 +2817,24 @@ http://mfisk.github.com/filemap
       key.  If the regex contains a group, then what matches the group is
       the key; otherwise, the whole match is the key.
 
-      Output files are numbered 1 to n and created in the current directory.
+      If nways is greater than 0, output files are numbered 1 to n.
+      If nways is 0, then files will be named for the values of the keys.
+      All output files are gzip compressed and created in the current directory.
+      Input files ending in .gz will automatically be decompressed.
       """
-      p = MethodOptionParser(fixed=["infile"])
-      p.add_option("-n", "--nways", help="Number of output files to use")
+      p = MethodOptionParser()
+      p.add_option("-n", "--nways", help="Number of output files to use (0 means each value will get its own file)")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
       p.add_option("-f", "--field", default="1", help="Use field # or range (numbered starting with 1).")
+      p.add_option("-Z", "--no-compress", action="store_true", help="Do NOT compress output files")
       (options, args) = p.parse_args(args)
-      options.nways = int(options.nways)
 
-      infile = args[0]
+      infiles = args
 
-      #print >>sys.stderr, "Writing to", ofile
-
-      if not options.nways:
+      if options.nways == None:
          p.error("-n option required")
+
+      options.nways = int(options.nways)
      
       if options.regex:
          options.regex = re.compile(options.regex)
@@ -2844,36 +2847,54 @@ http://mfisk.github.com/filemap
          else:
             options.field = [int(options.field) - 1, int(options.field)]
 
-      files = []
-      for i in range(0, options.nways):
-         fname = str(i+1) + ".gz"
-         files.append(gzip.GzipFile(fname, "w"))
+      files = {}
 
-      if infile.endswith("gz"):
-         f = gzip.GzipFile(infile)
-      else:
-         f = file(infile) 
+      if not infiles:
+         infiles = ["-"]
 
-      for line in f:
-         if options.regex:
-            key = options.regex.search(line)
-            if key:
-               g = key.groups()
-               if len(g):
-                  key = g[0]
-               else:
-                  key = key.group(0)
-            else:
-               print >>sys.stderr, "Key not found in line:", line.rstrip()
+      for infile in infiles:
+         if infile == "-":
+            f = sys.stdin
+         elif infile.endswith("gz"):
+            f = gzip.GzipFile(infile)
          else:
-            words= line.split()
-            #print words[options.field[0]:options.field[1]]
-            key = words[options.field[0]:options.field[1]]
+            f = file(infile) 
 
-         i = int(sha(str(key)).hexdigest(), 16) % options.nways
-         files[i].write(line)
+         for line in f:
+            if options.regex:
+               key = options.regex.search(line)
+               if key:
+                  g = key.groups()
+                  if len(g):
+                     key = g[0]
+                  else:
+                     key = key.group(0)
+               else:
+                  print >>sys.stderr, "Key not found in line:", line.rstrip()
+            else:
+               words= line.split()
+               #print words[options.field[0]:options.field[1]]
+               key = words[options.field[0]:options.field[1]]
+  
+            fname = None 
+            if options.nways:
+               i = int(sha(str(key)).hexdigest(), 16) % options.nways
+               if not files.has_key(i):
+                  fname = str(i+1)
+            else:
+               i = ','.join(key)
+               if not files.has_key(i):
+                  fname = escape([i])
 
-      for f in files: f.close()
+            if fname:
+               if options.no_compress:
+                  files[i] = gzip.GzipFile(fname + ".gz", "w")
+               else:
+                  files[i] = file(fname, "w")
+               
+            files[i].write(line)
+   
+      for f in files.values(): f.close()
 
    def kill(self, args):
       """Kill a job."""
