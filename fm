@@ -3915,9 +3915,10 @@ class FmLocalCommands(CommandSetBase):
       jobs = {}
       jobdir = self.Locations.this.jobdir
       for j in os.listdir(self.Locations.this.jobdir):
-         jobs[j] = FmJob(jobdir + "/" + j)
-         jobuid = os.stat(jobdir + "/" + j).st_uid
-         jobs[j].uid = jobuid
+         if not j.startswith("."):
+            jobs[j] = FmJob(jobdir + "/" + j)
+            jobuid = os.stat(jobdir + "/" + j).st_uid
+            jobs[j].uid = jobuid
 
       sys.stdout.write(cPickle.dumps(jobs))
       return
