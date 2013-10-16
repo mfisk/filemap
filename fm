@@ -2260,6 +2260,13 @@ class CpuProfile:
       if not self.update(): 
          return False
 
+      percent_per_proc = (1.0 - self.idle_fraction) / self.divisor / nprocs 
+      percent_per_cpu = 1.0 / self.ncpus
+
+      # Use a threshold that assumes that a job will use at least 1 CPU (percent_per_cpu) and perhaps much more (percent_per_proc).
+      # If the actual requirement is less than 1 CPU's worth, we'll add more in the futures.
+      threshold = max(percent_per_cpu, percent_per_proc)
+
       # Check for idle CPU time
       if self.idle_fraction < (1.0 / self.ncpus): 
          # Less than 1 CPU's worth of resources is available, so don't add more
@@ -2288,15 +2295,15 @@ class CpuProfile:
       #                 = mem_usage > nprocs / (nprocs + 1)
       #                 = mem_usage > nprocs / (nprocs + 1)
 
-      # If we conservatively assume it is 1, then the threshold is 1/2 (assuming 2 means 2/3; 3 means 3/4; ...)
-      threshold = nprocs / (nprocs + 1)
+      if nprocs:
+         threshold = nprocs / (nprocs + 1.0)
 
-      if mem_usage > threshold:
-         # Wait for more memory
-         if Verbose > 1:
-            print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage drop to %d%% from %d%%" % (int(100*(threshold)), int(100*mem_usage))
-         return False
-
+         if mem_usage > threshold:
+            # Wait for more memory
+            if Verbose > 1:
+               print >>sys.stderr, time.asctime(), "DynamicLoad: Waiting for memory usage to drop to %d%% from %d%%" % (int(100*(threshold)), int(100*mem_usage))
+            return False
+   
       # Account for D state:
       # If we're in I/O wait (e.g. for a write), then we're not idle,
       # so that's already accounted for.  But if we're in D, then we are
