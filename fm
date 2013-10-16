@@ -3208,8 +3208,7 @@ and the program re-run.
 
          raise
 
-      return True
-               
+      return None
    
 
    def _domap(self, options, pipeline):
