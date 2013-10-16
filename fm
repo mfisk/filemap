@@ -124,6 +124,8 @@ def isremote(hname):
 nonalphanumre = re.compile('[^\w\.\-]')
 
 def escape(s):
+   """Take a list of strings and return a name usable as a filename."""
+
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), string.join(s))
 
    base = os.path.basename(s)
