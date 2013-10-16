@@ -1187,8 +1187,12 @@ locations of this instance."""
             s = [loc.rootdir + "/" + f for f in src]
             d = [loc.rootdir + "/" + f for f in dst]
 
-         if cmd[0] == "fm":
-            cmd = loc.fmcmd + cmd[1:]
+         i = 0
+         while i < len(cmd):
+            if cmd[i] == "fm" and (i == 0 or cmd[i-1] == "|"):
+               cmd[i:i+1] = loc.fmcmd
+            i += 1
+
          if isremote(loc.hostname):
             if quote and "SLURM_JOB_ID" not in os.environ:
                # The remote sshd/shell will expand globs (unless it's SLURM's srun), so quote all the individual args
