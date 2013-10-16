@@ -638,6 +638,8 @@ def plot(inputfile, pngfile, options):
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
    canvas.print_figure(pngfile, antialias=False, dpi=600)
 
+   return None
+
 def bytecount2str(n):
    unit = 'B'
    units = ['kB', 'MB', 'GB', 'TB', 'PB']
