@@ -316,7 +316,7 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
             print >>sys.stderr, "New: %s/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
          
          # Find intervals we were computing over 
-         intervals = [(s['timestamp'] - s['time'], s['timestamp']) for s in statlist]
+         intervals = [(s['start'], s['timestamp']) for s in statlist]
          intervals = collapseIntervals(intervals)
 
          if bytes[1]:
@@ -468,7 +468,6 @@ def plot(inputfile, pngfile, options):
       nodename = 'hostname'
       
    for s in stats:
-      s['start'] = s['timestamp'] - s['time']
       s['finish'] = s['timestamp']
       if not nodes.get(s[nodename]):
          nodes[s[nodename]] = []
@@ -1801,7 +1800,6 @@ class Procs:
       p.utime = after[2] - p.starttimes[2]
       p.stime = after[3] - p.starttimes[3]
       del p.starttimes
-      del p.start
 
       # Finish building the output buffers
       if p.stdout != None:
@@ -2156,6 +2154,7 @@ class JobScheduler:
       stats['stime'] = p.stime
       stats['inputsize'] = p.inputsize
       stats['jobname'] = p.jobname
+      stats['start'] = p.start
       stats['nodename'] = self.options.name
       stats['hostname'] = socket.gethostname()
       #stats['schedpid'] = os.getpid()
