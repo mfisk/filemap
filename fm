@@ -523,11 +523,25 @@ def plot(inputfile, pngfile, options):
       print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
    colormap = ['red','green','blue','cyan','magenta','black','yellow','purple']
    color = {}
+   fakebars = []
    for j in jobs:
       color[j] = jobs.index(j)
       color[j] = colormap[color[j] % len(colormap)]
       if Verbose > 1:
          print >>sys.stderr, "Job %s %s" % (color[j],j)
+
+      # broken_bars don't generate a legend, so make bars for legend manually
+      fakebars.append(matplotlib.patches.Rectangle((0, 1), 1, 1, fc=color[j]))
+
+   fig = matplotlib.figure.Figure(figsize=(8,10.5))
+   ax = fig.add_subplot(111)
+   ax.set_autoscale_on(True)
+ 
+   # Add the legend 
+   fontsize = 800 / max([len(j) for j in jobs])
+   fontsize = min(10, fontsize) # No bigger than 10pt
+   fontsize = max(1, fontsize) # No smaller than 1pt
+   ax.legend(fakebars, jobs, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, frameon=False, title="%s processed" % (bytecount2str(totalsize)))
          
    nodenames = nodes.keys()
    nodenames.sort(cmp=numcmp)
@@ -539,10 +553,6 @@ def plot(inputfile, pngfile, options):
       nodes2y[n] = i
       i += 1
 
-   fig = matplotlib.figure.Figure(figsize=(8,10.5))
-   ax = fig.add_subplot(111)
-   ax.set_autoscale_on(True)
-  
    lines = []
    if not maxsize:
       maxsize = 0
@@ -590,7 +600,6 @@ def plot(inputfile, pngfile, options):
             ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=(1.0*filenames[s['statusfile']])/len(colormap), lw=0, color=colormap[min(len(colormap), filenames[s['statusfile']])])
          else:
             ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
-         #ax.errorbar(finish, y, yerr=1, fmt=None, elinewidth=(1 + 2*size), color=color[s['jobname']])
 
    ax.autoscale_view()
   
@@ -606,7 +615,6 @@ def plot(inputfile, pngfile, options):
    ax.set_xlim(xmin=0, xmax=maxtime-mintime-delta)
    ax.set_xticks(xticks)
    ax.set_xticklabels(xlabels, rotation=30, ha='right')
-   #matplotlib.rc('xtick', labelsize=
 
    majorlabels = []
    majorlocs = []
@@ -641,7 +649,7 @@ def plot(inputfile, pngfile, options):
    ax.set_yticks(minorlocs, minor=True)
    ax.set_yticklabels(minorlabels, size=4, minor=True)
    ax.set_ylim(ymin=-2, ymax=len(nodenames)+2)
-   ax.set_title("%s processed" % (bytecount2str(totalsize)))
+   #ax.set_title("%s processed" % (bytecount2str(totalsize)))
 
    canvas = matplotlib.backends.backend_agg.FigureCanvasAgg(fig)
    canvas.print_figure(pngfile, antialias=False, dpi=600)
