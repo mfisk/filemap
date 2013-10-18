@@ -574,7 +574,7 @@ def plot(inputfile, pngfile, options):
          # Adjust for time gaps
          delta = 0
          for g in gaps:
-            if g[1] < start:
+            if g[1] <= start:
                delta += g[1] - g[0]   
          if options.redundant:
             filenames.setdefault(s['statusfile'],-1)
