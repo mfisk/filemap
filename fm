@@ -318,7 +318,6 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          # Find intervals we were computing over 
          intervals = [(s['timestamp'] - s['time'], s['timestamp']) for s in statlist]
          intervals = collapseIntervals(intervals)
-         #print >>sys.stderr, intervals
 
          if bytes[1]:
             # Find intervals that were before starttime (cached)
@@ -459,8 +458,8 @@ def plot(inputfile, pngfile, options):
    nodes = {}
    jobs = set()
    filenames = {}
-   minsize = 2**31
-   mintime = 2**31
+   minsize = None
+   mintime = None
    maxsize = 0
    maxtime = 0
    totalsize = 0
@@ -475,9 +474,18 @@ def plot(inputfile, pngfile, options):
          nodes[s[nodename]] = []
       nodes[s[nodename]].append(s)
 
-      minsize = min(minsize, s['inputsize'])
+      if minsize == None:
+         minsize = s['inputsize']
+      else:
+         minsize = min(minsize, s['inputsize'])
+
       maxsize = max(maxsize, s['inputsize'])
-      mintime = min(mintime, s['start'])
+
+      if mintime == None:
+         mintime = s['start']
+      else:
+         mintime = min(mintime, s['start'])
+
       maxtime = max(maxtime, s['finish'])
       totalsize += s['inputsize']
 
