@@ -95,8 +95,6 @@ except:
    print >>sys.stderr, "select.poll() not implemented.  If MacOS, use DarwinPorts python."
    sys.exit(1)
 
-nonalphanumre = re.compile('\W')
-
 def dictListAppend(map, key, value):
    if not map.has_key(key):
       map[key] = [value]
@@ -121,12 +119,13 @@ def isremote(hname):
    else:
       return True
 
-nonalphanumre = re.compile('[^\w\.\-]')
+nonalphanumre = re.compile('[^a-zA-Z0-9\_\%\^\(\)\~\,\:\.\-]')
 
 def escape(s):
    """Take a list of strings and return a name usable as a filename."""
 
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), string.join(s))
+   s = s.replace('=20', '+')
 
    base = os.path.basename(s)
 
