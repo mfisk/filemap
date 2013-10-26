@@ -276,7 +276,7 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
             stime[cached] += stats['stime']
             bytes[cached] += stats['inputsize']
 
-            minstart = min(minstart, stats['timestamp'] - stats['time'])
+            minstart = min(minstart, stats['start'])
             maxend = max(maxend, stats['timestamp'])
 
             nodename = stats['nodename']
@@ -455,7 +455,8 @@ def plot(inputfile, pngfile, options):
 
    # Load all stats and keep track of min and max inputsizes along the way
    nodes = {}
-   jobs = set()
+   jobs = {}
+   cmds = {}
    filenames = {}
    minsize = None
    mintime = None
@@ -487,12 +488,15 @@ def plot(inputfile, pngfile, options):
       maxtime = max(maxtime, s['finish'])
       totalsize += s['inputsize']
 
-      if 'cmd'  in s:
-         s['cmd'] = ' '.join(s['cmd'])
-      else:
-         s['cmd'] = s['jobname']
+      jobname = s['jobname']
 
-      jobs.add(str(s['cmd']))
+      cmds[jobname] = jobname[:4] + ': ' + ' '.join(s['cmd'])
+
+      # Keep track of earliest start time
+      if jobname in jobs:
+         jobs[jobname] = min(jobs[jobname], s['start'])
+      else:
+         jobs[jobname] = s['start']
 
    # Reduce to overlapping windows
    stats.sort(lambda a,b: cmp(a['start'], b['start']))
@@ -516,30 +520,42 @@ def plot(inputfile, pngfile, options):
       print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
       print >>sys.stderr, "Packed into", len(nodes), "timelines"
 
-   jobs = list(jobs)
+   # invert the jobs->start map
+   start = {}
+   for j in jobs:
+      start[jobs[j]] = j  
+   starts = start.keys()
+   starts.sort()
+
+   # make jobs a list sorted in order of start time
+   jobs = [start[j] for j in starts]
+
    if Verbose > 2:
       print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
-   colormap = ['red','green','blue','cyan','magenta','black','yellow','purple']
+   colormap = ['blue','red','green','black', 'magenta', 'purple', 'cyan', 'yellow']
    color = {}
    fakebars = []
+   legends = []
    for j in jobs:
       color[j] = jobs.index(j)
       color[j] = colormap[color[j] % len(colormap)]
-      if Verbose > 1:
+      if Verbose > 2:
          print >>sys.stderr, "Job %s %s" % (color[j],j)
 
       # broken_bars don't generate a legend, so make bars for legend manually
       fakebars.append(matplotlib.patches.Rectangle((0, 1), 1, 1, fc=color[j]))
+      legends.append(cmds[j])
 
    fig = matplotlib.figure.Figure(figsize=(8,10.5))
    ax = fig.add_subplot(111)
    ax.set_autoscale_on(True)
  
    # Add the legend 
-   fontsize = 800 / max([len(j) for j in jobs])
+   fontsize = 800. / max([len(j) for j in jobs]) #Scale for line width
+   fontsize = min(fontsize, 30. / len(jobs)) # Scale for number of lines
    fontsize = min(10, fontsize) # No bigger than 10pt
    fontsize = max(1, fontsize) # No smaller than 1pt
-   ax.legend(fakebars, jobs, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, frameon=False, title="%s processed" % (bytecount2str(totalsize)))
+   ax.legend(fakebars, legends, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, frameon=False, title="%s processed" % (bytecount2str(totalsize)))
          
    nodenames = nodes.keys()
    nodenames.sort(cmp=numcmp)
@@ -597,22 +613,27 @@ def plot(inputfile, pngfile, options):
             filenames[s['statusfile']] += 1
             ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=(1.0*filenames[s['statusfile']])/len(colormap), lw=0, color=colormap[min(len(colormap), filenames[s['statusfile']])])
          else:
-            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
+            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['jobname']])
 
    ax.autoscale_view()
-  
-   xticks = [0]
-   xlabels = [0]
+
+   # Minor (gap) labels  
+   xlabels = []
+   xticks = []
    delta = 0
    for g in gaps:
       xticks.append(g[0] - delta - mintime)
       xlabels.append(seconds2human(g[1]-g[0]) + " idle")
       delta += g[1] - g[0]
-   xticks.append(maxtime-mintime-delta)
-   xlabels.append(seconds2human(maxtime-mintime-delta))
-   ax.set_xlim(xmin=0, xmax=maxtime-mintime-delta)
-   ax.set_xticks(xticks)
-   ax.set_xticklabels(xlabels, rotation=30, ha='right')
+   ax.set_xticks(xticks, minor=True)
+   ax.set_xticklabels(xlabels, minor=True, rotation=30, ha='right', size=8)
+   
+   # Major (min/max) labels
+   t = maxtime-mintime-delta
+   ax.set_xticks([0, t])
+   ax.set_xticklabels([0, seconds2human(t)])#, rotation=30, ha='right')
+
+   ax.set_xlim(xmin=0, xmax=t)
 
    majorlabels = []
    majorlocs = []
@@ -2170,6 +2191,7 @@ class JobScheduler:
             stats['time'] += r.time
             stats['utime'] += r.utime
             stats['stime'] += r.stime
+            stats['start'] = min(stats['start'], r.start)
  
       dir = p.outdirname + "/." + p.outbasename 
       try:
