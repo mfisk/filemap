@@ -1737,7 +1737,7 @@ class Procs:
                print >>sys.stderr, "Terminating early due to an error"
                stopping = True
 
-         if Verbose > 1:
+         if Verbose > 2:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %s status %d for %s" % (p.queue, seconds2human(p.time), ec, p.tag)
             waiting = [l.queue for l in self.pids.values()]
@@ -1750,7 +1750,7 @@ class Procs:
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
-      if stopping or (Verbose > 0):
+      if stopping or (Verbose > 1):
          print >>sys.stderr, "--- Report", tag
          tag = ""
          mean = 0.0
@@ -1789,7 +1789,7 @@ class Procs:
       if stopping or labelPrint or Verbose > 0:
          sys.stderr.write(coallesce([f.stderr for f in results], [f.node for f in results]))
 
-      if Verbose > 0:
+      if Verbose > 1:
          print >>sys.stderr, "---"
 
       if stopping:
@@ -3209,8 +3209,8 @@ and the program re-run.
          if options.mail:
             output = ""
             for line in stdout.getvalue().split("\n"):
-               if len(line) > 200:
-                   line = line[:200] + "..."
+               #if len(line) > 500:
+                   #line = line[:500] + "..."
                output += line + "\n"
             msg.attach(email.mime.text.MIMEText('<pre>' + output + '</pre>', 'html'))
 
@@ -3294,8 +3294,8 @@ and the program re-run.
 
             if not options.statusonly:
                # Barrier; Wait for that job (and its parents) to finish:
-               if Verbose > 0:
-                  print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
+               if Verbose > -1:
+                  print >>sys.stderr, "Waiting for map job %s and redistribute." % jobname
                if jobname:
                   args = ["wait", jobname, "redistribute"]
                else:
@@ -3319,7 +3319,7 @@ and the program re-run.
          starttime = time.time()
 
       if not options.statusonly: 
-         if Verbose > 0:
+         if Verbose > -1:
             print >>sys.stderr, "Waiting for completion.  Job", jobname
          r = self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors, stopOnError=True)
          if not r:
@@ -3333,6 +3333,8 @@ and the program re-run.
       # Get the output files
       errglobs = [f + "/.stderr" for f in outdirglobs]
       statglobs += [f + "/.status" for f in outdirglobs]
+      if Verbose > -1:
+         print >>sys.stderr, "Output in:\n\t", "\n\t".join(outdirglobs)
 
       statlists = self._local_pickles(["localstats"] + statglobs)
       allstats = []
