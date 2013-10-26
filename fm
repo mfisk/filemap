@@ -2927,7 +2927,7 @@ http://mfisk.github.com/filemap
                   fname = escape([i])
 
             if fname:
-               if options.no_compress:
+               if not options.no_compress:
                   files[i] = gzip.GzipFile(fname + ".gz", "w")
                else:
                   files[i] = file(fname, "w")
