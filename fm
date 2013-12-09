@@ -3352,8 +3352,8 @@ and the program re-run.
       statsfile.close()
 
       # Fetch stdout/stderr               
-      if (not options.statusonly) and (options.quiet < 2):
-         if options.quiet:
+      if options.quiet < 2:
+         if options.quiet or options.statusonly:
             outputglobs = []
          else:
             outputglobs = inglobs
