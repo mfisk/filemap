@@ -3515,6 +3515,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       p.add_option('-n', '--nodes', action='store_true', help="List names of nodes holding each file")
       p.add_option('-l', '--long', action='store_true', help="Show permissions, nodes, sizes, timestamps, etc.")
       p.add_option('-q', '--decode', action='store_true', help="Replace escaped characters")
+      p.add_option('-1', '--single', action='store_true', help="Single-column output")
       (options, args) = p.parse_args(args)
 
       ls = {}
@@ -3531,7 +3532,10 @@ Unlike 'get -c', duplicate instances of files will be included."""
       fnames.sort()
 
       if not options.long:
-         tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
+         if options.single:
+            for f in fnames: print f
+         else:
+            tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
 
       else:
          totalsize = 0
