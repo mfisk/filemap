@@ -2039,6 +2039,10 @@ class JobScheduler:
          del self.jobs[j]
 
       for j in recent:
+         if j.startswith("."):
+            # Ignore dot files (probably rsync droppping something in the directory)
+            continue
+
          #print "Job", j, "added"
          jobuid = os.stat(self.options.jobdir + "/" + j).st_uid
          if jobuid != os.getuid():
