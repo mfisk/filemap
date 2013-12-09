@@ -67,6 +67,7 @@ ConfigApply = {
    "ssh": os.path.expanduser,
    "syncdir": os.path.expanduser,
    "rootdir": os.path.expanduser,
+   "cowdir": os.path.expanduser,
    "python": os.path.expanduser,
    "fm": os.path.expanduser,
    "share": float,
@@ -2426,7 +2427,11 @@ class FmJob:
       # First time thru we expand the input globs to a file list
       # Unless this is a continuous job, this will be the only time we enumerate the files
       if not self.cachedinputs:
-         glob = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
+         glob = [options.rootdir + "/" + x for x in self.inputs.split()]
+         if options.cowdir:
+            glob += [options.cowdir + "/" + x for x in self.inputs.split()]
+
+         glob = multiglob(glob)
          if self.previousinputs: # Updating list 
             self.cachedinputs = list( set(glob) - self.previousinputs )
          else: # First pass
@@ -2488,7 +2493,13 @@ class FmJob:
             # Don't process .d directories as named inputs (feedback loop)
             continue
 
-         relativename = i[len(options.rootdir):]
+         if i.startswith(options.rootdir):
+            relativename = i[len(options.rootdir):]
+         elif options.cowdir and i.startswith(options.cowdir):
+            relativename = i[len(options.cowdir):]
+         else:
+            assert(not i)
+            
          outfilename = relativename + ".d/" + escape(self.cmd)
         
          p = self.computeItem(i, outfilename, options, procs, invalidateOnly)
