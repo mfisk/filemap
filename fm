@@ -2424,6 +2424,7 @@ class FmJob:
          self.cmd = self.cmd.split()
       self.inputs = config_get("inputs")
       self.cachedinputs = None
+      self.cachedinputs_deferred = []
       self.previousinputs = None
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config_get("reduce")
@@ -2494,14 +2495,19 @@ class FmJob:
             #print >>sys.stderr, part, "processes on this node", list(choices)
             outfilename = "/reduce/" + self.jobname + "/" + part + ".d"
 
-            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, putargs=putargs)
+            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, canDefer=False, putargs=putargs)
             if p: 
                #print >>sys.stderr, "Reduce part", part, "on node", Locations.thisname, files, "of", self.inputs
                return p
 
          return None # Nothing to do
 
-      while self.cachedinputs:
+      while self.cachedinputs or self.cachedinputs_deferred:
+         # If we exhaust cachedinputs, fall-over to the deferred inputs
+         if not self.cachedinputs:
+            self.cachedinputs = self.cachedinputs_deferred
+            self.cachedinputs = None # Keep track that we can't defer anymore
+
          i = self.cachedinputs.pop()
 
          if i[-2:] == ".d": 
@@ -2517,13 +2523,16 @@ class FmJob:
             
          outfilename = relativename + ".d/" + escape(self.cmd)
         
-         p = self.computeItem(i, outfilename, options, procs, invalidateOnly)
-         if p:
+         p = self.computeItem(i, outfilename, options, procs, invalidateOnly, self.cachedinputs_deferred != None)
+
+         if p == 'defer':
+            self.cachedinputs_deferred.append(i)
+         elif p:
             return p
 
       return None # Nothing to do
 
-   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, putargs="argv"):
+   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, canDefer, putargs="argv"):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
       if type(inputs) != type([]):
          inputs = [inputs]
@@ -2575,15 +2584,26 @@ class FmJob:
 
       # If we get here, then we're locally prepared to rerun
       # Check global synchronization to see if another node already ran it
-      if self.locker.isdone(outfilename, newestinput):
+      l = self.locker.start(outfilename, newestinput, exclusive=canDefer)
+
+      if l == 'done':
+          # Somebody already completed
           return None
+
+      elif l == False:
+          # Did not get (exclusive was requested and not available)
+          assert(canDefer)
+          return 'defer'
+
+      assert(l == True)
+
+      # We are ready to start processing
 
       if invalidateOnly:
          # Don't actually do anything right now
          return None
 
       # Now we proceed to execute.
-      # Lock will only be taken upon completion (in case we're a slow node).
       # XXX. our scheduler should check and kill us off if somebody finishes first
 
       # Now insert a "." at the beginning of the basename for partial output
@@ -2714,26 +2734,57 @@ class FileSynchronizer:
 	syncfiles = [self._filename2lock(i) for i in lst]
         return self.locs.pick().forAllLocal(["localrm", "-R", "--absolute"]  + syncfiles)
 
-    def isdone(self, filename, newestinput):
+    # We _desire_ near-atomicity on first to claim a job (since others will prefer to avoid duplication)
+    #    race conditions should result in multiple holders rather than no holders
+    # We don't worry so much about races between multiple finishers (any can win; they've already done the work),
+    #    race conditions should result in multiple holders rather than no holders
+    # but we want others testing for done-ness to promptly know if anybody has finished.
+    # We also want to keep track of how many are in process so that we don't over-duplicate
+
+
+    def start(self, filename, newestinput, exclusive):
         # Locally we want to (re-)create output. 
-        # Return True iff somebody already finished
+        # exclusive is True iff we want the first lock (not if anybody else has started)
+
+        # Return 'done' if the status is complete
+        # Return False if somebody else has started and exclusivity was requested
+        # Return True if we should start (given the status and requested exclusivity)
 
         syncfilename = self._filename2lock(filename)
 
-        # If we did it last time, then redo it now
-        # We don't compare syncfile's lasttime, but presumably it is stale like the local output
+        if self._atomicCreate(syncfilename, False):
+           # We were the first
+           return True
+
+        # File should exist.  Let's see what it says
+
         try:
            node = file(syncfilename).read()
-           if node == self.locs.thisname:
-              # isdone() is called iff we have newer inputs than outputs.
-              # We did it last time, remove our syncfile now
-              os.unlink(syncfilename)
-              return False
         except:
            # Assume that the status did not exist
            # XXX. it could have bad permissions or something so that we can't read or unlink
+     
+           # If we get here, then somebody must have just deleted it.  Let them do what they're doing...
            return False
 
+        if node == '':
+           # Empty file means somebody started, but nobody finished
+           return (not exclusive)
+
+        # Somebody finished.  Make sure no other reason to invalidate it.
+
+        # If we did it last time, then redo it now
+        # We don't compare syncfile's lasttime, but presumably it is stale like the local output
+        if node == self.locs.thisname:
+           # start() is called iff we have newer inputs than outputs.
+           # We did it last time, and previously finished, so remove our syncfile now and create an empty one
+           os.unlink(syncfilename)
+           if self._atomicCreate(syncfilename, False):
+              return True
+           else:
+              # This is highly unlikely, but somebody else must have just started
+              return (not exclusive)
+               
 	lasttime = os.path.getmtime(syncfilename)
 	if newestinput > lasttime: 
            # Somebody else did it, but we have newer inputs, so redo it
@@ -2741,41 +2792,40 @@ class FileSynchronizer:
            # Hopefully if our input changed, their's will too.   If a node is offline while the input updates
            # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
            # things we have current locks for.  Hopefully rsync -u will get the newer file in the end.
-           return False
-
+           if self._atomicCreate(syncfilename, False):
+              return True
+           else:
+              return (not exclusive)
+  
         # Somebody else did it and recently enough that we'll trust their result
-
+ 
         # Unless that node is no longer active
         if node not in self.locs.config.locs:
            # Node no longer exists in config
-           return False
+           return True
 
         if self.locs.config.locs[node].inactive:
            # Node that owns the lock is no longer active, so steal it
-           return False
+           return True
 
-	return True
+        return 'done'
+
 
     def done(self, filename):
         syncfilename = self._filename2lock(filename)
-        return self._atomicCreate(syncfilename)
+        return self._atomicCreate(syncfilename, self.locs.thisname)
 
-    def _atomicCreate(self, lockfilename):
+    def _atomicCreate(self, lockfilename, contents):
         myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
         mkdirexist(os.path.dirname(lockfilename))
 
         syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
-        syncfile.write(self.locs.thisname)
+        if contents:
+           syncfile.write(contents)
         syncfile.close()
   
         success = False
  
-        try: 
-            os.unlink(lockfilename)
-	except:
-            # may not have existed anyway
-            pass
-
         try:
             os.link(myname, lockfilename)
             success = True
@@ -2783,7 +2833,7 @@ class FileSynchronizer:
             if e.errno != errno.EEXIST:
                 os.unlink(myname)
                 raise
-            # Otherwise, somebody just beat us to it -- let hem have it
+            # Otherwise, somebody just beat us to it -- let them have it
 
         # Get rid of private name for it, successful or not
         os.unlink(myname)
