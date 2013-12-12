@@ -19,7 +19,6 @@
 #
 
 import ConfigParser
-import atexit
 import base64
 import bisect
 import copy
@@ -3792,53 +3791,42 @@ class SchedLock:
           raise
       
    def lock(self):
-      try:
-         fd = os.open(self.lockname, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY)
-
-      except OSError, e:
-         if e.errno == errno.EEXIST:
-            # Check for running
-            if self.checkpid():
+      # Check for running
+      if self.checkpid():
+         return False
+      else:
+         # Stale or empty, so steal.  
+         # XXX race here if 2 procs competing to steal and 1 unlinks and recreates before 2nd unlinks
+         tmp = self.lockname + "-" + str(os.getpid())
+         try:
+            os.unlink(self.lockname)
+         except:
+            pass
+         
+         f = file(tmp, "w")
+         f.write(str(os.getpid()))
+         f.close()
+         try:
+            os.rename(tmp, self.lockname)
+         except OSError, e:
+            if e.errno == errno.EEXIST:
+               # Somebody beat us
                return False
             else:
-               # Stale, so Steal
-               tmp = self.lockname + "-" + str(os.getpid())
-               try:
-                  os.unlink(self.lockname)
-               except:
-                  # Somebody beat us
-                  return False
-               
-               # XXX race here if 2 procs competing to steal and 1 unlinks and recreates before 2nd unlinks
-               time.sleep(1)
-
-               f = file(tmp, "w")
-               f.write(str(os.getpid()))
-               f.close()
-               try:
-                  os.rename(tmp, self.lockname)
-                  return True
-               except OSError, e:
-                  if e.errno == errno.EEXIST:
-                     # Somebody beat us
-                     return False
-                  else:
-                     raise
-         else:
-            raise
-
-      lockfile = os.fdopen(fd, "w")
-      lockfile.write(str(os.getpid()))
-      lockfile.close()
+               raise
 
       os.setpgrp()  # create new process group, become its leader
-      atexit.register(lambda: os.kill(0, signal.SIGTERM))
+      signal.signal(signal.SIGTERM, killProcessGroup)
 
       return True
 
    def unlock(self):
       #XXX: doesn't check that we still hold the lock
       os.unlink(self.lockname)
+
+def killProcessGroup(signum, frame):
+   os.kill(0, signal.SIGTERM)
+   sys.exit(1)
 
 def setProcessName(name):
    try:
