@@ -781,6 +781,16 @@ class SmartDict(dict):
 	def __setattr__(self, name, value):
 		self[name] = value
 
+def mkstemp(prefix, suffix):
+   dir = "/%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.getpid())
+   mkdirexist(dir)
+   return tempfile.mkstemp(prefix=prefix, dir=dir, suffix=suffix)
+
+def mkdtemp(prefix):
+   dir = "/%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.getpid())
+   mkdirexist(dir)
+   return tempfile.mkdtemp(prefix=prefix, dir=dir)
+
 class FmLocations:
    def __init__(self, copyFrom=None, locs={}, slave=False):
       self.procs = None
@@ -802,7 +812,7 @@ class FmLocations:
          self.thisis(slave)
 
          # Keep a copy of the config around so our children (like redistribute) can reference it
-         fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-", suffix=".pickle")
+         fd, name = mkstemp(prefix="locations", suffix=".pickle")
          #print >>sys.stderr, "locations is", name
          self.cleanup = name
          os.environ['FMCONFIG'] = name
@@ -1512,7 +1522,7 @@ will be the directory name preceding the first wildcard."""
       #   args = [os.path.dirname(a) + '/./' + os.path.basename(a) for a in args]
 
       if options.cat:
-         dst = tempfile.mkdtemp(prefix="tmp-fm-get-") + "/"
+         dst = mkdtemp(prefix="get") + "/"
          srcs = args
       else:
          dst = args[-1]
@@ -3276,7 +3286,7 @@ and the program re-run.
       if options.statusonly:
          tmpdir = None
       else:
-         tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
+         tmpdir = mkdtemp(prefix="map") + "/"
 
       inglobs = options.inputglob
       outdirglobs = []
@@ -3308,7 +3318,7 @@ and the program re-run.
                self._putJobs(tmpdir, None)
 
             if not options.statusonly:
-               tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
+               tmpdir = mkdtemp(prefix="map") + "/"
 
             if not starttime:
                starttime = time.time()
