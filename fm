@@ -458,7 +458,7 @@ def plot(inputfile, pngfile, options):
    nodes = {}
    jobs = {}
    cmds = {}
-   filenames = {}
+   copies = {}
    minsize = None
    mintime = None
    maxsize = 0
@@ -467,7 +467,9 @@ def plot(inputfile, pngfile, options):
    nodename = 'nodename'
    if options.group_host:
       nodename = 'hostname'
-      
+     
+   stats.sort(lambda a,b: cmp(a['start'], b['start']))
+
    for s in stats:
       s['finish'] = s['timestamp']
       if not nodes.get(s[nodename]):
@@ -499,8 +501,15 @@ def plot(inputfile, pngfile, options):
       else:
          jobs[jobname] = s['start']
 
+      # Count duplicate processing of a file and assign each element a serial number (in order of start, not completion)
+      copies.setdefault(s['statusfile'], 0)
+      copies[s['statusfile']] += 1
+      if options.redundant and copies[s['statusfile']] > 1:
+         print s['statusfile'], 'redundant', s['start'], s['finish'], s['nodename']
+         
+      s['copies'] = copies[s['statusfile']]
+
    # Reduce to overlapping windows
-   stats.sort(lambda a,b: cmp(a['start'], b['start']))
    intervals = [(i['start'], i['finish']) for i in stats]
    intervals = collapseIntervals(intervals)
    active = sum([i[1] - i[0] for i in intervals])
@@ -609,12 +618,8 @@ def plot(inputfile, pngfile, options):
          for g in gaps:
             if g[1] <= start:
                delta += g[1] - g[0]   
-         if options.redundant:
-            filenames.setdefault(s['statusfile'],-1)
-            filenames[s['statusfile']] += 1
-            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=(1.0*filenames[s['statusfile']])/len(colormap), lw=0, color=colormap[min(len(colormap), filenames[s['statusfile']])])
-         else:
-            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['jobname']])
+         lw = min(1, s['copies'] - 1)  # Outline duplicates more and more 
+         ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=lw, facecolor=color[s['jobname']])
 
    ax.autoscale_view()
 
@@ -3425,7 +3430,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
    def plot(self, args):
       """Plot run-time of a previous map."""
       p = MethodOptionParser(fixed=["[infile [outfile]]"])
-      p.add_option("-r", "--redundant", action="store_true", default=False, help="generate a plot highlighting redundant work")
+      p.add_option("-r", "--redundant", action="store_true", default=False, help="report redundant work")
       p.add_option("-g", "--group-host", action="store_true", default=False, help="group nodes by host")
       (options, args) = p.parse_args(args)
       infile = ".fm.stats.gz"
