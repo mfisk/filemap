@@ -19,9 +19,10 @@
 #
 
 import ConfigParser
-import copy
+import atexit
 import base64
 import bisect
+import copy
 import cPickle
 import cStringIO
 import errno
@@ -2953,9 +2954,15 @@ http://mfisk.github.com/filemap
 
    def kill(self, args):
       """Kill a job."""
-      (options, args) = MethodOptionParser(fixed=["jobid"]).parse_args(args)
+      p = MethodOptionParser()
+      p.add_option('-s', '--sched', action='store_true', help="Kill all remote schedulers", default=False)
+      (options, args) = p.parse_args(args)
+
       args = ["/jobs/" + a for a in args]
-      self._Locations().forAll(["rm", "-f"], args).collect()
+      if args:
+         self._Locations().forAll(["rm", "-f"], args).collect()
+      if options.sched:
+         self._Locations().forAllLocal(["kill"]).collect()
 
    def mv(self, args):
       """Rename files in the cloud"""
@@ -3748,6 +3755,10 @@ class SchedLock:
    def __init__(self, rootdir):
       self.lockname = rootdir + "/.fmschedlock-" + str(os.getuid())
 
+   def kill(self):
+      pid = file(self.lockname).read()
+      os.kill(int(pid), signal.SIGTERM)
+  
    def checkpid(self):
       # Check for running
       try:
@@ -3783,10 +3794,6 @@ class SchedLock:
    def lock(self):
       try:
          fd = os.open(self.lockname, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY)
-         lockfile = os.fdopen(fd, "w")
-         lockfile.write(str(os.getpid()))
-         lockfile.close()
-         return True
 
       except OSError, e:
          if e.errno == errno.EEXIST:
@@ -3820,7 +3827,14 @@ class SchedLock:
          else:
             raise
 
-      return False #shouldn't get here
+      lockfile = os.fdopen(fd, "w")
+      lockfile.write(str(os.getpid()))
+      lockfile.close()
+
+      os.setpgrp()  # create new process group, become its leader
+      atexit.register(lambda: os.kill(0, signal.SIGTERM))
+
+      return True
 
    def unlock(self):
       #XXX: doesn't check that we still hold the lock
@@ -4038,6 +4052,10 @@ class FmLocalCommands(CommandSetBase):
       sys.stdout.write(cPickle.dumps(output))
       return
 
+   def kill(self, args=[]):
+      """Kill an active scheduler for this node."""
+      SchedLock(self.Locations.this.rootdir).kill()
+     
    def sched(self, args=[]):
       """Start a scheduler for this node."""
 
