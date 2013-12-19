@@ -2513,7 +2513,7 @@ class FmJob:
          # If we exhaust cachedinputs, fall-over to the deferred inputs
          if not self.cachedinputs:
             self.cachedinputs = self.cachedinputs_deferred
-            self.cachedinputs = None # Keep track that we can't defer anymore
+            self.cachedinputs_deferred = None # Keep track that we can't defer anymore
 
          i = self.cachedinputs.pop()
 
@@ -2757,22 +2757,22 @@ class FileSynchronizer:
         # Return False if somebody else has started and exclusivity was requested
         # Return True if we should start (given the status and requested exclusivity)
 
+        # Doing an atomic operation is expensive and we're really only worried about simultaneous creation,
+        # so first just stat() to see if it file already exists.
         syncfilename = self._filename2lock(filename)
-
-        if self._atomicCreate(syncfilename, False):
-           # We were the first
-           return True
-
-        # File should exist.  Let's see what it says
 
         try:
            node = file(syncfilename).read()
         except:
            # Assume that the status did not exist
-           # XXX. it could have bad permissions or something so that we can't read or unlink
-     
-           # If we get here, then somebody must have just deleted it.  Let them do what they're doing...
-           return False
+
+           if self._atomicCreate(syncfilename, False):
+              # We were the first
+              return True
+           else:
+              # It could have bad permissions or something so that we can't read or unlink
+              # But assume that we just lose a race and let them have it
+              return (not exclusive)
 
         if node == '':
            # Empty file means somebody started, but nobody finished
@@ -2820,6 +2820,11 @@ class FileSynchronizer:
 
     def done(self, filename):
         syncfilename = self._filename2lock(filename)
+        try:
+           os.unlink(syncfilename)
+        except:
+           # This should only happen if somebody else just finished too
+           pass
         return self._atomicCreate(syncfilename, self.locs.thisname)
 
     def _atomicCreate(self, lockfilename, contents):
@@ -3026,7 +3031,7 @@ http://mfisk.github.com/filemap
    def kill(self, args):
       """Kill a job."""
       p = MethodOptionParser()
-      p.add_option('-s', '--sched', action='store_true', help="Kill all remote schedulers", default=False)
+      p.add_option('-s', '--sched', action='store_true', help="Kill all remote schedulers and their children", default=False)
       (options, args) = p.parse_args(args)
 
       args = ["/jobs/" + a for a in args]
@@ -3287,7 +3292,7 @@ and the program re-run.
          print "Results will be in mail from %s to %s via %s" % (fromaddr, toaddr, mx)
 
          msg = email.mime.multipart.MIMEMultipart()
-         msg['Subject'] = 'Filemap results for %s' % (cmd)
+         msg['Subject'] = "Filemap results for '%s'" % ("' '".join(args))
          msg['From'] = fromaddr
          msg['To'] = toaddr
 
