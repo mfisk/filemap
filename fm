@@ -2835,9 +2835,9 @@ class FileSynchronizer:
         if contents:
            syncfile.write(contents)
         syncfile.close()
-  
+
         success = False
- 
+
         try:
             os.link(myname, lockfilename)
             success = True
@@ -2849,7 +2849,7 @@ class FileSynchronizer:
 
         # Get rid of private name for it, successful or not
         os.unlink(myname)
-  
+ 
         return success
    
     def _filename2lock(self, filename):
