@@ -1620,7 +1620,12 @@ class Procs:
       for i in range(len(cmdv)):
          if cmdv[i] == "|":
             # There are more words, so make an intermediate pipe
-            r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, **kwargs)
+            try:
+               r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, **kwargs)
+            except:
+               print >>sys.stderr, "Error", sys.exc_value, "executing", thiscmd
+               raise
+  
 
             # Next element of the pipe gets this output
             stdin = r.stdout
