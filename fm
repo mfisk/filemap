@@ -2761,61 +2761,66 @@ class FileSynchronizer:
         # so first just stat() to see if it file already exists.
         syncfilename = self._filename2lock(filename)
 
+        take = False
+
         try:
-           node = file(syncfilename).read()
-        except:
-           # Assume that the status did not exist
-
-           if self._atomicCreate(syncfilename, False):
-              # We were the first
-              return True
+           contents = file(syncfilename).read()
+        except IOError, e:
+           if e.errno == errno.ENOENT:
+              # Nobody has claimed it yet, so we will
+              take = True
            else:
-              # It could have bad permissions or something so that we can't read or unlink
-              # But assume that we just lose a race and let them have it
-              return (not exclusive)
+              raise
 
-        if node == '':
-           # Empty file means somebody started, but nobody finished
+        if not take:
+           # Check to see if we think we need to invalidate it.
+           contents = contents.split()
+           node = contents[0]
+
+           try:
+              if ((node != self.locs.thisname) 
+                 # If we did it last time, then redo it now (start() is called iff we have newer inputs than outputs)
+                 and (node in self.locs.config.locs)
+                 # if the node that did it is no longer active 
+                 and (not self.locs.config.locs[node].inactive)
+                 # Somebody else did it, but we have newer inputs, so redo it
+                 # XXX. this doesn't remove the output elsewhere so if we shuffle both, we may get the old input
+                 # Hopefully if our input changed, their's will too.   If a node is offline while the input updates
+                 # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
+                 # things we have current locks for.  Hopefully rsync -u will get the newer file in the end.
+                 and (newestinput <= os.path.getmtime(syncfilename))):
+                    # If we get here, then we do NOT want to invalidate
+                    if len(contents) > 1:
+                       # This means the output is complete
+                       return 'done'
+                    else:
+                       return (not exclusive)
+      
+           except OSError, e:
+              if e.errno == errno.ENOENT:
+                 # Somebody else just removed it, so let them have it
+                 return (not exclusive)
+              else:
+                 raise
+   
+           # If we get here, then we are going to invalidate and take the lock.
+           try:
+              os.unlink(syncfilename)
+           except OSError, e:
+              if e.errno == errno.ENOENT:
+                 # We may be racing with another process that is just ahead of us.  
+                 # In that case, we may both unlink sucessfully and both restart the work.
+                 # Somebody else unlinked (but hasn't re-created yet).  Let them have it
+                 return (not exclusive)
+              else:
+                 raise
+
+        if self._atomicCreate(syncfilename):
+           # We were the first
+           return True
+        else:
+           # This is unlikely, but somebody else must have just started
            return (not exclusive)
-
-        # Somebody finished.  Make sure no other reason to invalidate it.
-
-        # If we did it last time, then redo it now
-        # We don't compare syncfile's lasttime, but presumably it is stale like the local output
-        if node == self.locs.thisname:
-           # start() is called iff we have newer inputs than outputs.
-           # We did it last time, and previously finished, so remove our syncfile now and create an empty one
-           os.unlink(syncfilename)
-           if self._atomicCreate(syncfilename, False):
-              return True
-           else:
-              # This is highly unlikely, but somebody else must have just started
-              return (not exclusive)
-               
-	lasttime = os.path.getmtime(syncfilename)
-	if newestinput > lasttime: 
-           # Somebody else did it, but we have newer inputs, so redo it
-           # XXX. this doesn't remove the output elsewhere so if we shuffle both, we may get the old input
-           # Hopefully if our input changed, their's will too.   If a node is offline while the input updates
-           # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
-           # things we have current locks for.  Hopefully rsync -u will get the newer file in the end.
-           if self._atomicCreate(syncfilename, False):
-              return True
-           else:
-              return (not exclusive)
-  
-        # Somebody else did it and recently enough that we'll trust their result
- 
-        # Unless that node is no longer active
-        if node not in self.locs.config.locs:
-           # Node no longer exists in config
-           return True
-
-        if self.locs.config.locs[node].inactive:
-           # Node that owns the lock is no longer active, so steal it
-           return True
-
-        return 'done'
 
 
     def done(self, filename):
@@ -2825,15 +2830,14 @@ class FileSynchronizer:
         except:
            # This should only happen if somebody else just finished too
            pass
-        return self._atomicCreate(syncfilename, self.locs.thisname)
+        return self._atomicCreate(syncfilename, ' .')
 
-    def _atomicCreate(self, lockfilename, contents):
+    def _atomicCreate(self, lockfilename, contents=''):
         myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
         mkdirexist(os.path.dirname(lockfilename))
 
         syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
-        if contents:
-           syncfile.write(contents)
+        syncfile.write(self.locs.thisname + contents)
         syncfile.close()
 
         success = False
