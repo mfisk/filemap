@@ -313,7 +313,7 @@ def tallyStats(statlist, starttime, wallclock, nodecount):
          if bytes[0] and wallclock:
             rate = bytecount2str(bytes[0]/wallclock)
             scaling = (stime[0]+utime[0])/wallclock
-            print >>sys.stderr, "New: %s/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
+            print >>sys.stderr, "New: %s/s, %.1f/%dx scaling." % (rate, scaling, nodecount)
          
          # Find intervals we were computing over 
          intervals = [(s['start'], s['timestamp']) for s in statlist]
@@ -906,7 +906,7 @@ class FmLocations:
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
 
-      # Once all config files settings are imported, pre the location for use (apply defaults, etc.)
+      # Once all config files settings are imported, prep the location for use (apply defaults, etc.)
       for l in self.config.locs.values():
          self.prepLocation(l)
 
