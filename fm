@@ -1013,6 +1013,10 @@ class FmLocations:
          l.name = nodename
          l.config = {}
          l.listvalues = listvalues
+      elif not l.listvalues:
+         l.listvalues = listvalues
+      #elif [str(i) for i in l.listvalues] != [str(i) for i in listvalues]:
+         #print >>sys.stderr, "Error: conflicting range information for node", nodename, l.listvalues, listvalues
 
       # Import all configparser settings into a dictionary
       for opt,val in self.configparser.items(stanza, raw=True):
