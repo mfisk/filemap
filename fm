@@ -19,6 +19,7 @@
 #
 
 import ConfigParser
+import atexit
 import base64
 import bisect
 import copy
@@ -704,11 +705,13 @@ class SmartDict(dict):
 def mkstemp(prefix, suffix):
    dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
    mkdirexist(dir)
+   atexit.atexit(shutil.rmtree, dir)
    return tempfile.mkstemp(prefix=prefix, dir=dir, suffix=suffix)
 
 def mkdtemp(prefix):
    dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
    mkdirexist(dir)
+   atexit.atexit(shutil.rmtree, dir)
    return tempfile.mkdtemp(prefix=prefix, dir=dir)
 
 class FmLocations:
