@@ -33,6 +33,7 @@ import itertools
 import math
 import optparse
 import os
+import pipes
 import pwd
 import pydoc
 import random
@@ -250,92 +251,6 @@ def collapseIntervals(lst):
 if RegressionTest:
    assert(collapseIntervals([(1,3), (2,4), (2,3), (1,4), (0,2), (5,6), (4,4.5)]) == [(0,4.5), (5,6)])
 
-def tallyStats(statlist, starttime, wallclock, nodecount):
-      # Tally the stats
-      errcodes = {}
-      wtime = [0.0, 0.0]
-      utime = [0.0, 0.0]
-      stime = [0.0, 0.0]
-      bytes = [0.0, 0.0]
-      nodewtime = [{}, {}]
-      nodebytes = [{}, {}] 
-      allstats = []
-      maxend = 0
-      minstart = starttime
-
-      for stats in statlist:
-            ec = os.WEXITSTATUS(stats['status'])
-            errcodes[ec] = errcodes.get(ec, 0) + 1
-
-            if stats['timestamp'] < starttime:
-               cached = 1
-            else:
-               cached = 0
-
-            wtime[cached] += stats['time']
-            utime[cached] += stats['utime']
-            stime[cached] += stats['stime']
-            bytes[cached] += stats['inputsize']
-
-            minstart = min(minstart, stats['start'])
-            maxend = max(maxend, stats['timestamp'])
-
-            nodename = stats['nodename']
-            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
-            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
-           
-      # Print out summary info
-      errstr = ''
-      for k in errcodes.keys():
-         if not errstr: 
-            errstr = "%d processes returned %d" % (errcodes[k], k)
-         else:
-            errstr += "; %d x %s" % (errcodes[k], k)
-      if not errstr:
-         errstr = 'No processes completed'
-
-      print >>sys.stderr, errstr
-
-      if Verbose > 0:
-         for n in nodebytes[0]:
-            if nodewtime[0][n]:
-               print >>sys.stderr, "Node %s %s/s new work" % (n, bytecount2str(nodebytes[0][n]/nodewtime[0][n]))
-
-      swtime = sum(wtime)
-
-      if swtime:
-         sbytes = sum(bytes)
-         sutime = sum(utime)
-         sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %s, %s/s, %s (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
-            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), seconds2human(swtime), 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
-
-         if bytes[0] and wallclock:
-            rate = bytecount2str(bytes[0]/wallclock)
-            scaling = (stime[0]+utime[0])/wallclock
-            print >>sys.stderr, "New: %s/s, %.1f/%dx scaling." % (rate, scaling, nodecount)
-         
-         # Find intervals we were computing over 
-         intervals = [(s['start'], s['timestamp']) for s in statlist]
-         intervals = collapseIntervals(intervals)
-
-         if bytes[1]:
-            # Find intervals that were before starttime (cached)
-            cacheduration = 0
-            for (start,end) in intervals:
-               if end < starttime:
-                  cacheduration += (end-start)
-
-            if cacheduration:
-               rate = bytecount2str(bytes[1]/cacheduration)
-               scaling = swtime/cacheduration
-               print >>sys.stderr, "Cached: %s/s, %s, %.1fx" % (rate, seconds2human(cacheduration), scaling)
-
-         if sbytes and wallclock:
-            rate = bytecount2str(sbytes/wallclock)
-            cached = 100*bytes[1]/sbytes
-            print >>sys.stderr, "Filemap: %s/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
-  
 def mkdirexist(path):
    try:
       os.makedirs(path)
@@ -3074,24 +2989,40 @@ Has unix "mkdir -p" semantics."""
       jobs = {}
       for mx in pkls:
          for jname,j in pkls[mx].iteritems():
-            if type(j.cmd) == type([]):
-               j.cmd = string.join(j.cmd)
             if not jobs.get(jname):
                jobs[jname] = j
                j.nodes = [mx]
             else:
                jobs[jname].nodes.append(mx)
 
-      fmt = "%-28s %-9s %-15s\n                             %s\n                             %s"
-      print fmt % ("Job ID", "User", "Nodes", "Command", "Inputs")
-       
+      # Second pass to get stats for all jobs (even on nodes that didn't have the job running)
+      for j in jobs.values():
+         statglobs = [i + ".d/" + escape(j.cmd) + "/.status" for i in j.inputs.split()]
+         j.stats = list(itertools.chain(*self._local_pickles(["localstats"] + statglobs).values()))
+
+      first = True
+
       for jname,j in jobs.iteritems():
+         inputlist = j.inputs.split()
+         flags = ""
+         if j.reduce:
+            flags = j.reduce + " "
+
+         if not first:
+            print
+         print jname + "\t" + j.uid + "\t" + pipes.quote(flags + ' '.join(j.cmd))
+         flags = ""
+         if j.continuous: 
+            flags += "-c "
+         if j.checkexit != 0:
+            flags += "-e "
+        
+         print "\t%s-i '%s'" % (flags, "' -i '".join(inputlist))
+
          j.nodes.sort(cmp=numcmp)
-         numinputs = len(j.inputs.split())
-         inputs = "%d: %s"  % (numinputs, j.inputs)
-         if len(inputs) > 100:
-            inputs = inputs[:100] + "..."
-         print fmt % (jname, j.uid, string.join(j.nodes, ','), j.cmd, inputs)
+         print "\tNodes:", ','.join(j.nodes)
+         self._tallyStats(j.stats, inputlist, indent='\t')
+         first = False
       
    def df(self, args):
       """Show free space on each node."""
@@ -3364,6 +3295,7 @@ and the program re-run.
          tmpdir = mkdtemp(prefix="map") + "/"
 
       inglobs = options.inputglob
+      allinglobs = set(inglobs)
       outdirglobs = []
       statglobs = []
       assert (type(inglobs) == type([]))
@@ -3414,6 +3346,7 @@ and the program re-run.
                   return False
             continue
       
+         allinglobs.update(inglobs)
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
          joblist.append(jobname)
 
@@ -3443,12 +3376,14 @@ and the program re-run.
          print >>sys.stderr, "Output in:\n\t", "\n\t".join(outdirglobs)
 
       statlists = self._local_pickles(["localstats"] + statglobs)
-      allstats = []
-      for lst in statlists.values():
-         allstats.extend(lst)
+      allstats = list(itertools.chain(*statlists.values()))
 
-      nodecount = self._Locations().processes()
-      tally = tallyStats(allstats, starttime, wallclock, nodecount)
+      if options.statusonly:
+         tally_start = None
+      else:
+         tally_start = starttime
+
+      tally = self._tallyStats(allstats, allinglobs, tally_start, wallclock)
       statsfile = gzip.GzipFile('.fm.stats.gz', 'w')
       cPickle.dump(allstats, statsfile)
       statsfile.close()
@@ -3463,6 +3398,112 @@ and the program re-run.
          self.get(["-ce"] + outputglobs + errglobs, relative=True)
 
       return True
+
+   def _tallyStats(self, statlist, inputglobs, starttime=None, wallclock=None, indent=''):
+      nodecount = self._Locations().processes()
+
+      # Tally the stats
+      errcodes = {}
+      wtime = [0.0, 0.0]
+      utime = [0.0, 0.0]
+      stime = [0.0, 0.0]
+      bytes = [0, 0]
+      nodewtime = [{}, {}]
+      nodebytes = [{}, {}] 
+      allstats = []
+      maxend = 0
+      if not starttime:
+         starttime = time.time()
+
+      minstart = starttime
+
+      for stats in statlist:
+            ec = os.WEXITSTATUS(stats['status'])
+            errcodes[ec] = errcodes.get(ec, 0) + 1
+
+            if stats['timestamp'] < starttime:
+               cached = 1
+            else:
+               cached = 0
+
+            wtime[cached] += stats['time']
+            utime[cached] += stats['utime']
+            stime[cached] += stats['stime']
+            bytes[cached] += stats['inputsize']
+
+            minstart = min(minstart, stats['start'])
+            maxend = max(maxend, stats['timestamp'])
+
+            nodename = stats['nodename']
+            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
+            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
+
+      # Print out summary info
+      errstr = ''
+      for k in errcodes.keys():
+         if not errstr: 
+            errstr = "%d processes returned %d" % (errcodes[k], k)
+         else:
+            errstr += "; %d x %s" % (errcodes[k], k)
+      if not errstr:
+         errstr = '0 processes completed'
+
+      print >>sys.stderr, indent+errstr
+
+      if Verbose > 0:
+         for n in nodebytes[0]:
+            if nodewtime[0][n]:
+               print >>sys.stderr, indent+"Node %s %s/s new work" % (n, bytecount2str(nodebytes[0][n]/nodewtime[0][n]))
+
+      swtime = sum(wtime)
+
+      if swtime:
+         sbytes = sum(bytes)
+         sutime = sum(utime)
+         sstime = sum(stime)
+         print >>sys.stderr, indent+"Serial performance: %s, %s/s, %s (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), seconds2human(swtime), 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
+
+         if bytes[0] and wallclock:
+            rate = bytecount2str(bytes[0]/wallclock)
+            scaling = (stime[0]+utime[0])/wallclock
+            print >>sys.stderr, indent+"New: %s/s, %.1f/%dx scaling." % (rate, scaling, nodecount)
+         
+         # Find intervals we were computing over 
+         intervals = [(s['start'], s['timestamp']) for s in statlist]
+         intervals = collapseIntervals(intervals)
+
+         if bytes[1]:
+            # Find intervals that were before starttime (cached)
+            cacheduration = 0
+            for (start,end) in intervals:
+               if end < starttime:
+                  cacheduration += (end-start)
+
+            if cacheduration:
+               rate = bytecount2str(bytes[1]/cacheduration)
+               scaling = swtime/cacheduration
+               print >>sys.stderr, indent+"Cached: %s/s, %s, %.1fx" % (rate, seconds2human(cacheduration), scaling)
+
+         if sbytes and wallclock:
+            rate = bytecount2str(sbytes/wallclock)
+            cached = 100*bytes[1]/sbytes
+            print >>sys.stderr, indent+"Overall: %s/s, %s, %.0f%% cached." % (rate, seconds2human(wallclock), cached)
+  
+      if not wallclock:
+         wallclock = maxend - minstart
+         #print >>sys.stderr, "Estimated wallclock time:", seconds2human(wallclock)
+
+      # Report percent complete
+      if wallclock and swtime:
+         ls = self._lsdict(list(inputglobs))
+         totalsize = 0
+         for f in ls.keys():
+            totalsize += min([i['size'] for i in ls[f]])
+     
+         if totalsize: 
+            #print sbytes, totalsize, totalsize-sbytes
+            print >>sys.stderr, indent+"%d%% complete, %s remaining" % (100.0*sbytes/totalsize, seconds2human(wallclock/(1.0*sbytes/totalsize) - wallclock))
 
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud to local storage."""
@@ -3614,7 +3655,20 @@ Unlike 'get -c', duplicate instances of files will be included."""
          # for i in too few, find differnece in replication and occurrences, select hosts to store
          # for i in too many, find differnece in replication and occurrences, select hosts to remove
 
+   def _lsdict(self, args, decode=False):
+      ls = {}
+      listing = self._ls(args)
 
+      for fkey in listing.keys():
+         if decode:
+            (fname, num) = quoprire.subn(lsUnescapeChr, fkey)
+         else:
+            fname = fkey
+
+         ls[fname] = listing[fkey]
+
+      return ls
+       
    def ls(self, args):
       """File & directory listing."""
       p = MethodOptionParser(fixed=["[files...]"])
@@ -3624,15 +3678,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       p.add_option('-1', '--single', action='store_true', help="Single-column output")
       (options, args) = p.parse_args(args)
 
-      ls = {}
-      listing = self._ls(args)
-
-      for fkey in listing.keys():
-         if options.decode:
-            (fname, num) = quoprire.subn(lsUnescapeChr, fkey)
-         else:
-            fname = fkey
-         ls[fname] = listing[fkey]
+      ls = self._lsdict(args, options.decode)
 
       fnames = ls.keys()
       fnames.sort()
@@ -3778,6 +3824,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
       self._Locations().put([os.path.realpath(__file__)], "/sys/").collect()
+
 
    def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None, checkexit=False):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (repr(cmd), string.join(inglobs))
@@ -4030,7 +4077,7 @@ class FmLocalCommands(CommandSetBase):
 
       return d
 
-   def localstats(self, args):
+   def localstats(self, args, raw=False):
       os.chdir(self.Locations.this.rootdir)  
       args = multiglob(["./" + a for a in args])
       statlist = []
@@ -4039,8 +4086,11 @@ class FmLocalCommands(CommandSetBase):
          stats['statusfile'] = apath
          statlist.append(stats)
 
-      sys.stdout.write(cPickle.dumps(statlist))
-      return 
+      if raw:
+         return statlist
+      else:
+         sys.stdout.write(cPickle.dumps(statlist))
+         return 
 
    def localload(self, args):
       load = {}
