@@ -702,12 +702,12 @@ class SmartDict(dict):
 		self[name] = value
 
 def mkstemp(prefix, suffix):
-   dir = "/%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.getpid())
+   dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
    mkdirexist(dir)
    return tempfile.mkstemp(prefix=prefix, dir=dir, suffix=suffix)
 
 def mkdtemp(prefix):
-   dir = "/%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.getpid())
+   dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
    mkdirexist(dir)
    return tempfile.mkdtemp(prefix=prefix, dir=dir)
 
