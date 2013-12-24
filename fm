@@ -3022,8 +3022,12 @@ Has unix "mkdir -p" semantics."""
         
          print "\t%s-i '%s'" % (flags, "' -i '".join(inputlist))
 
-         j.nodes.sort(cmp=numcmp)
-         print "\tNodes:", ','.join(j.nodes)
+         nodestr = ''
+         if len(j.nodes) < 10:
+            j.nodes.sort(cmp=numcmp)
+            nodestr = ': ' + (','.join(j.nodes))
+         print "\t%d nodes still processing%s" % (len(j.nodes), nodestr)
+
          self._tallyStats(j.stats, inputlist, indent='\t')
          first = False
       
