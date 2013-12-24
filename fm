@@ -4112,8 +4112,8 @@ class FmLocalCommands(CommandSetBase):
          if not j.startswith("."):
             jobs[j] = FmJob(jobdir + "/" + j)
             jobuid = os.stat(jobdir + "/" + j).st_uid
-            jobs[j].uid = jobuid
-
+            jobs[j].uid = pwd.getpwuid(jobuid).pw_name
+         
       sys.stdout.write(cPickle.dumps(jobs))
       return
 
