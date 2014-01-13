@@ -2867,23 +2867,26 @@ http://mfisk.github.com/filemap
       return self._locs
 
    def partition(self, args):
-      """Partition an input file.
-      Split an inputfile into n pieces.  By default, the first
-      whitespace-delimited field is used as the key.  All lines with the
-      same key will be placed in the same output file.  The -r option can be
-      used to specify a Perl-compatible regular expression that matches the
-      key.  If the regex contains a group, then what matches the group is
-      the key; otherwise, the whole match is the key.
+      """Partition an input file.  Split an inputfile into n pieces.
+      Specify a whitespace-delimited field with -f.  All lines with
+      the same key will be placed in the same output file.  The -r
+      option can be used to specify a Perl-compatible regular
+      expression that matches the key.  If the regex contains a group,
+      then what matches the group is the key; otherwise, the whole
+      match is the key.
 
       If nways is greater than 0, output files are numbered 1 to n.
       If nways is 0, then files will be named for the values of the keys.
-      All output files are gzip compressed and created in the current directory.
-      Input files ending in .gz will automatically be decompressed.
+
+      If nways is set and no field or regex is specified, then lines
+      are partitioned round-robin.  All output files are gzip
+      compressed and created in the current directory.  Input files
+      ending in .gz will automatically be decompressed.
       """
       p = MethodOptionParser()
       p.add_option("-n", "--nways", help="Number of output files to use (0 means each value will get its own file)")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
-      p.add_option("-f", "--field", default="1", help="Use field # or range (numbered starting with 1).")
+      p.add_option("-f", "--field", help="Use field # or range (numbered starting with 1).")
       p.add_option("-Z", "--no-compress", action="store_true", help="Do NOT compress output files")
       (options, args) = p.parse_args(args)
 
@@ -2907,6 +2910,8 @@ http://mfisk.github.com/filemap
 
       files = {}
 
+      i = 0
+
       if not infiles:
          infiles = ["-"]
 
@@ -2929,16 +2934,21 @@ http://mfisk.github.com/filemap
                      key = key.group(0)
                else:
                   print >>sys.stderr, "Key not found in line:", line.rstrip()
-            else:
+            elif options.field:
                words= line.split()
                #print words[options.field[0]:options.field[1]]
                key = words[options.field[0]:options.field[1]]
   
             fname = None 
             if options.nways:
-               i = int(sha(str(key)).hexdigest(), 16) % options.nways
+               if options.regex or options.field:
+                  i = int(sha(str(key)).hexdigest(), 16) % options.nways
+               else:
+                  i = (i + 1) % options.nways
+
                if not files.has_key(i):
                   fname = str(i+1)
+ 
             else:
                i = ','.join(key)
                if not files.has_key(i):
