@@ -3245,9 +3245,7 @@ and the program re-run.
 
          user = pwd.getpwuid(os.getuid()).pw_name
          host = socket.getfqdn()
-         fromaddr = '@'.join([user,host])
          domain = '.'.join(host.split('.')[1:])
-         toaddr = '@'.join([user,domain])
 
          if options.mx:
             mx = options.mx
@@ -3258,6 +3256,25 @@ and the program re-run.
                mx = str(mx.exchange)
             except:
                mx = "mail"
+
+         # If we couldn't get a good FQDN from the default interface,
+         # try again on the interface used to talk to the MX
+         if not domain or domain == "localdomain":
+            # Try on an actual socket to the mx
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+               s.connect((mx, 25))
+            except:
+               print >>sys.stderr, "Could not connect to mail exchanger '%s'" % mx
+               return 1
+
+            host = socket.gethostbyaddr(s.getsockname()[0])[0]
+            domain = '.'.join(host.split('.')[1:])
+
+            s.close() 
+
+         fromaddr = '@'.join([user,host])
+         toaddr = '@'.join([user,domain])
 
          print "Results will be in mail from %s to %s via %s" % (fromaddr, toaddr, mx)
 
