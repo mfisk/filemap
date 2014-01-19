@@ -482,7 +482,11 @@ def plot(inputfile, pngfile, options):
    fontsize = min(fontsize, 30. / len(jobs)) # Scale for number of lines
    fontsize = min(10, fontsize) # No bigger than 10pt
    fontsize = max(1, fontsize) # No smaller than 1pt
-   ax.legend(fakebars, legends, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, frameon=False, title="%s processed" % (bytecount2str(totalsize)))
+  
+   try: 
+      ax.legend(fakebars, legends, bbox_to_anchor=(0,1,1,1), frameon=False, loc=8, prop={'size': fontsize}, title="%s processed" % (bytecount2str(totalsize)))
+   except:
+      ax.legend(fakebars, legends, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, title="%s processed" % (bytecount2str(totalsize)))
          
    nodenames = nodes.keys()
    nodenames.sort(cmp=numcmp)
@@ -1550,7 +1554,7 @@ class Procs:
          if cmdv[i] == "|":
             # There are more words, so make an intermediate pipe
             try:
-               r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, **kwargs)
+               r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, close_fds=True, **kwargs)
             except:
                print >>sys.stderr, "Error", sys.exc_value, "executing", thiscmd
                raise
@@ -1566,7 +1570,7 @@ class Procs:
 
       # This is the last command in the pipeline
       if thiscmd:
-         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, **kwargs)
+         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True, **kwargs)
          results.append(r)
 
       # Here's how we handle these pipelines outside of this function.  One (that last one)
