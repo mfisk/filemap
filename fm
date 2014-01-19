@@ -702,16 +702,22 @@ class SmartDict(dict):
 	def __setattr__(self, name, value):
 		self[name] = value
 
+def tryrmtree(dir):
+   try:
+      shutil.rmtree(dir)
+   except:
+      pass
+
 def mkstemp(prefix, suffix):
    dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
    mkdirexist(dir)
-   atexit.register(shutil.rmtree, dir)
+   atexit.register(tryrmtree, dir)
    return tempfile.mkstemp(prefix=prefix, dir=dir, suffix=suffix)
 
 def mkdtemp(prefix):
    dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
    mkdirexist(dir)
-   atexit.register(shutil.rmtree, dir)
+   atexit.register(tryrmtree, dir)
    return tempfile.mkdtemp(prefix=prefix, dir=dir)
 
 class FmLocations:
