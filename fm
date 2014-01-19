@@ -1624,7 +1624,7 @@ class Procs:
       for r in self.PopenWithPipes(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd):
          r.stdinstr = None # Default to nothing to finalize
 
-         if r.stderr or r.stdout or stdinstr:
+         if r.stderr or r.stdout or (first and stdinstr):
             self.numprocspolling += 1
             if r.stdout:
                self.add_poll(r.stdout, r, select.POLLIN)
