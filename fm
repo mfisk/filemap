@@ -1671,7 +1671,7 @@ class Procs:
             # Queues was already empty, so now delete it
             del self.queues[qname]
 
-   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None, stopOnError=False):
+   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None, markInactive=False, stopOnError=False):
       """Execute any active or queued processes and return, a count of the number of errors and a list of the processes objects that ran."""
       results = []
       errors = 0
@@ -1754,6 +1754,13 @@ class Procs:
          if maxErrors != None and errors > maxErrors:
             print >>sys.stderr, "Terminating early due to %d errors" % errors
             sys.exit(errors)
+
+      if markInactive:
+         failed = [p.node for p in results if p.status]
+         if failed:
+            print >>sys.stderr, "Marking nodes inactive: %s" % ','.join(failed)
+            for f in failed:
+               markInactive.locs[f].inactive = True
 
       return errors, results
 
@@ -3123,13 +3130,7 @@ Copy the specified file(s) into the virtual store.
       self._Locations().put(args, dst, pickn=True, serialize=options.serialize).collect()
 
    def _putJobs(self, tmpdir, maxErrors):
-      errors,results = self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
-      failed = [p.node for p in results if p.status]
-      if failed:
-         print >>sys.stderr, "Marking nodes inactive: %s" % ','.join(failed)
-         for f in failed:
-            #print >>sys.stderr, "node %s was %s" % (f, self._Locations().config.locs[f].inactive)
-            self._Locations().config.locs[f].inactive = True
+      self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors, markInactive=self._Locations().config)
       shutil.rmtree(tmpdir)
 
    def map(self, args):
