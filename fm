@@ -52,6 +52,7 @@ import tempfile
 import time
 import traceback
 import urlparse
+import zlib
 
 try:
    import hashlib # New for python 2.5
@@ -1140,7 +1141,7 @@ locations of this instance."""
 
       inputs = {'cmd': cmd, 'config': self.config}
 
-      return self.forAll(lcmd, subst=True, stdinstr=cPickle.dumps(inputs), tag=string.join(cmd))
+      return self.forAll(lcmd, subst=True, stdinstr=zlib.compress(cPickle.dumps(inputs)), tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None, quote=True):
       if src and type(src) != type([]):
@@ -4031,7 +4032,7 @@ class FmLocalCommands(CommandSetBase):
       assert(not args)
       assert(options.node)
 
-      inputs = SmartDict(cPickle.loads(sys.stdin.read()))
+      inputs = SmartDict(cPickle.loads(zlib.decompress(sys.stdin.read())))
 
       for node in options.node:
          # If -n is given, then we are a direct slave and 
