@@ -2702,6 +2702,9 @@ class FileSynchronizer:
            if e.errno == errno.ENOENT:
               # Nobody has claimed it yet, so we will
               take = True
+           elif e.errno == errno.ESTALE:
+              # Looks like NFS file got deleted after opening
+              take = True
            else:
               raise
 
