@@ -90,6 +90,7 @@ ConfigDefaults = {
    "queuebyhost": False,
    "hostname": None,
    "cpusperjob": "1",
+   "cowdir": "",
 }
 
 try:
