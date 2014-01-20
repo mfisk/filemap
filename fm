@@ -3126,8 +3126,18 @@ Copy the specified file(s) into the virtual store.
       args = args[:-1]
       if len(args) > 1:
          dst += "/"
+         replargs = [dst + i for i in args] 
+      else:
+         replargs = args
 
-      self._Locations().put(args, dst, pickn=True, serialize=options.serialize).collect()
+      failover = 3
+      while failover:
+         errors, results = self._Locations().put(args, dst, pickn=1, serialize=options.serialize).collect(markInactive=self._Locations().config)
+         if not errors:
+            break
+         failover -= 1
+
+      self.replicate(replargs)
 
    def _putJobs(self, tmpdir, maxErrors):
       self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors, markInactive=self._Locations().config)
