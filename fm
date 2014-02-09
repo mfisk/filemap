@@ -86,7 +86,7 @@ ConfigDefaults = {
    "syncdir": "/tmp/fmsync",
    "python": "python",
    "processes": "1000",
-   "dynamicload": "2",
+   "dynamicload": ".1",
    "inactive": False,
    "queuebyhost": False,
    "hostname": None,
