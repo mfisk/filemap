@@ -1569,7 +1569,11 @@ class Procs:
 
       # This is the last command in the pipeline
       if thiscmd:
-         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True, **kwargs)
+         try:
+            r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True, **kwargs)
+         except:
+            print >>sys.stderr, "Error", sys.exc_value, "executing", thiscmd
+            raise
          results.append(r)
 
       # Here's how we handle these pipelines outside of this function.  One (that last one)
