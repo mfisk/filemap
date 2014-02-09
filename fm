@@ -19,9 +19,10 @@
 #
 
 import ConfigParser
-import copy
+import atexit
 import base64
 import bisect
+import copy
 import cPickle
 import cStringIO
 import errno
@@ -33,6 +34,7 @@ import itertools
 import math
 import optparse
 import os
+import pipes
 import pwd
 import pydoc
 import random
@@ -50,6 +52,7 @@ import tempfile
 import time
 import traceback
 import urlparse
+import zlib
 
 try:
    import hashlib # New for python 2.5
@@ -67,6 +70,7 @@ ConfigApply = {
    "ssh": os.path.expanduser,
    "syncdir": os.path.expanduser,
    "rootdir": os.path.expanduser,
+   "cowdir": os.path.expanduser,
    "python": os.path.expanduser,
    "fm": os.path.expanduser,
    "share": float,
@@ -87,6 +91,7 @@ ConfigDefaults = {
    "queuebyhost": False,
    "hostname": None,
    "cpusperjob": "1",
+   "cowdir": "",
 }
 
 try:
@@ -94,8 +99,6 @@ try:
 except:
    print >>sys.stderr, "select.poll() not implemented.  If MacOS, use DarwinPorts python."
    sys.exit(1)
-
-nonalphanumre = re.compile('\W')
 
 def dictListAppend(map, key, value):
    if not map.has_key(key):
@@ -121,12 +124,13 @@ def isremote(hname):
    else:
       return True
 
-nonalphanumre = re.compile('[^\w\.\-]')
+nonalphanumre = re.compile('[^a-zA-Z0-9\_\%\^\(\)\~\,\:\.\-]')
 
 def escape(s):
    """Take a list of strings and return a name usable as a filename."""
 
    (s, num) = nonalphanumre.subn(lambda m: "=%02X" % ord(m.group()), string.join(s))
+   s = s.replace('=20', '+')
 
    base = os.path.basename(s)
 
@@ -250,92 +254,6 @@ def collapseIntervals(lst):
 if RegressionTest:
    assert(collapseIntervals([(1,3), (2,4), (2,3), (1,4), (0,2), (5,6), (4,4.5)]) == [(0,4.5), (5,6)])
 
-def tallyStats(statlist, starttime, wallclock, nodecount):
-      # Tally the stats
-      errcodes = {}
-      wtime = [0.0, 0.0]
-      utime = [0.0, 0.0]
-      stime = [0.0, 0.0]
-      bytes = [0.0, 0.0]
-      nodewtime = [{}, {}]
-      nodebytes = [{}, {}] 
-      allstats = []
-      maxend = 0
-      minstart = starttime
-
-      for stats in statlist:
-            ec = os.WEXITSTATUS(stats['status'])
-            errcodes[ec] = errcodes.get(ec, 0) + 1
-
-            if stats['timestamp'] < starttime:
-               cached = 1
-            else:
-               cached = 0
-
-            wtime[cached] += stats['time']
-            utime[cached] += stats['utime']
-            stime[cached] += stats['stime']
-            bytes[cached] += stats['inputsize']
-
-            minstart = min(minstart, stats['timestamp'] - stats['time'])
-            maxend = max(maxend, stats['timestamp'])
-
-            nodename = stats['nodename']
-            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
-            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
-           
-      # Print out summary info
-      errstr = ''
-      for k in errcodes.keys():
-         if not errstr: 
-            errstr = "%d processes returned %d" % (errcodes[k], k)
-         else:
-            errstr += "; %d x %s" % (errcodes[k], k)
-      if not errstr:
-         errstr = 'No processes completed'
-
-      print >>sys.stderr, errstr
-
-      if Verbose > 0:
-         for n in nodebytes[0]:
-            if nodewtime[0][n]:
-               print >>sys.stderr, "Node %s %s/s new work" % (n, bytecount2str(nodebytes[0][n]/nodewtime[0][n]))
-
-      swtime = sum(wtime)
-
-      if swtime:
-         sbytes = sum(bytes)
-         sutime = sum(utime)
-         sstime = sum(stime)
-         print >>sys.stderr, "Serial performance: %s, %s/s, %s (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
-            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), seconds2human(swtime), 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
-
-         if bytes[0] and wallclock:
-            rate = bytecount2str(bytes[0]/wallclock)
-            scaling = (stime[0]+utime[0])/wallclock
-            print >>sys.stderr, "New: %s/s, %.1f/%dx CPU scaling." % (rate, scaling, nodecount)
-         
-         # Find intervals we were computing over 
-         intervals = [(s['start'], s['timestamp']) for s in statlist]
-         intervals = collapseIntervals(intervals)
-
-         if bytes[1]:
-            # Find intervals that were before starttime (cached)
-            cacheduration = 0
-            for (start,end) in intervals:
-               if end < starttime:
-                  cacheduration += (end-start)
-
-            if cacheduration:
-               rate = bytecount2str(bytes[1]/cacheduration)
-               scaling = swtime/cacheduration
-               print >>sys.stderr, "Cached: %s/s, %s, %.1fx" % (rate, seconds2human(cacheduration), scaling)
-
-         if sbytes and wallclock:
-            rate = bytecount2str(sbytes/wallclock)
-            cached = 100*bytes[1]/sbytes
-            print >>sys.stderr, "Filemap: %s/s, %.1fs, %.0f%% cached." % (rate, wallclock, cached)
-  
 def mkdirexist(path):
    try:
       os.makedirs(path)
@@ -456,8 +374,9 @@ def plot(inputfile, pngfile, options):
 
    # Load all stats and keep track of min and max inputsizes along the way
    nodes = {}
-   jobs = set()
-   filenames = {}
+   jobs = {}
+   cmds = {}
+   copies = {}
    minsize = None
    mintime = None
    maxsize = 0
@@ -466,7 +385,9 @@ def plot(inputfile, pngfile, options):
    nodename = 'nodename'
    if options.group_host:
       nodename = 'hostname'
-      
+     
+   stats.sort(lambda a,b: cmp(a['start'], b['start']))
+
    for s in stats:
       s['finish'] = s['timestamp']
       if not nodes.get(s[nodename]):
@@ -488,15 +409,25 @@ def plot(inputfile, pngfile, options):
       maxtime = max(maxtime, s['finish'])
       totalsize += s['inputsize']
 
-      if 'cmd'  in s:
-         s['cmd'] = ' '.join(s['cmd'])
-      else:
-         s['cmd'] = s['jobname']
+      jobname = s['jobname']
 
-      jobs.add(str(s['cmd']))
+      cmds[jobname] = jobname[:4] + ': ' + ' '.join(s['cmd'])
+
+      # Keep track of earliest start time
+      if jobname in jobs:
+         jobs[jobname] = min(jobs[jobname], s['start'])
+      else:
+         jobs[jobname] = s['start']
+
+      # Count duplicate processing of a file and assign each element a serial number (in order of start, not completion)
+      copies.setdefault(s['statusfile'], 0)
+      copies[s['statusfile']] += 1
+      if options.redundant and copies[s['statusfile']] > 1:
+         print s['statusfile'], 'redundant', s['start'], s['finish'], s['nodename']
+         
+      s['copies'] = copies[s['statusfile']]
 
    # Reduce to overlapping windows
-   stats.sort(lambda a,b: cmp(a['start'], b['start']))
    intervals = [(i['start'], i['finish']) for i in stats]
    intervals = collapseIntervals(intervals)
    active = sum([i[1] - i[0] for i in intervals])
@@ -517,30 +448,46 @@ def plot(inputfile, pngfile, options):
       print >>sys.stderr, "Data spans", seconds2human(maxtime-mintime), "with", seconds2human(active), "active"
       print >>sys.stderr, "Packed into", len(nodes), "timelines"
 
-   jobs = list(jobs)
+   # invert the jobs->start map
+   start = {}
+   for j in jobs:
+      start[jobs[j]] = j  
+   starts = start.keys()
+   starts.sort()
+
+   # make jobs a list sorted in order of start time
+   jobs = [start[j] for j in starts]
+
    if Verbose > 2:
       print >>sys.stderr, "Assigning colors to", len(jobs), "jobs"
-   colormap = ['red','green','blue','cyan','magenta','black','yellow','purple']
+   colormap = ['blue','red','green','black', 'magenta', 'purple', 'cyan', 'yellow']
    color = {}
    fakebars = []
+   legends = []
    for j in jobs:
       color[j] = jobs.index(j)
       color[j] = colormap[color[j] % len(colormap)]
-      if Verbose > 1:
+      if Verbose > 2:
          print >>sys.stderr, "Job %s %s" % (color[j],j)
 
       # broken_bars don't generate a legend, so make bars for legend manually
       fakebars.append(matplotlib.patches.Rectangle((0, 1), 1, 1, fc=color[j]))
+      legends.append(cmds[j])
 
    fig = matplotlib.figure.Figure(figsize=(8,10.5))
    ax = fig.add_subplot(111)
    ax.set_autoscale_on(True)
  
    # Add the legend 
-   fontsize = 800 / max([len(j) for j in jobs])
+   fontsize = 800. / max([len(j) for j in jobs]) #Scale for line width
+   fontsize = min(fontsize, 30. / len(jobs)) # Scale for number of lines
    fontsize = min(10, fontsize) # No bigger than 10pt
    fontsize = max(1, fontsize) # No smaller than 1pt
-   ax.legend(fakebars, jobs, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, frameon=False, title="%s processed" % (bytecount2str(totalsize)))
+  
+   try: 
+      ax.legend(fakebars, legends, bbox_to_anchor=(0,1,1,1), frameon=False, loc=8, prop={'size': fontsize}, title="%s processed" % (bytecount2str(totalsize)))
+   except:
+      ax.legend(fakebars, legends, bbox_to_anchor=(0,1,1,1), loc=8, prop={'size': fontsize}, title="%s processed" % (bytecount2str(totalsize)))
          
    nodenames = nodes.keys()
    nodenames.sort(cmp=numcmp)
@@ -593,27 +540,28 @@ def plot(inputfile, pngfile, options):
          for g in gaps:
             if g[1] <= start:
                delta += g[1] - g[0]   
-         if options.redundant:
-            filenames.setdefault(s['statusfile'],-1)
-            filenames[s['statusfile']] += 1
-            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=(1.0*filenames[s['statusfile']])/len(colormap), lw=0, color=colormap[min(len(colormap), filenames[s['statusfile']])])
-         else:
-            ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=0, color=color[s['cmd']])
+         lw = min(1, s['copies'] - 1)  # Outline duplicates more and more 
+         ax.broken_barh([(start-mintime-delta, finish-start)], [y-0.5*size,size], alpha=0.3+cpu, lw=lw, facecolor=color[s['jobname']])
 
    ax.autoscale_view()
-  
-   xticks = [0]
-   xlabels = [0]
+
+   # Minor (gap) labels  
+   xlabels = []
+   xticks = []
    delta = 0
    for g in gaps:
       xticks.append(g[0] - delta - mintime)
       xlabels.append(seconds2human(g[1]-g[0]) + " idle")
       delta += g[1] - g[0]
-   xticks.append(maxtime-mintime-delta)
-   xlabels.append(seconds2human(maxtime-mintime-delta))
-   ax.set_xlim(xmin=0, xmax=maxtime-mintime-delta)
-   ax.set_xticks(xticks)
-   ax.set_xticklabels(xlabels, rotation=30, ha='right')
+   ax.set_xticks(xticks, minor=True)
+   ax.set_xticklabels(xlabels, minor=True, rotation=30, ha='right', size=8)
+   
+   # Major (min/max) labels
+   t = maxtime-mintime-delta
+   ax.set_xticks([0, t])
+   ax.set_xticklabels([0, seconds2human(t)])#, rotation=30, ha='right')
+
+   ax.set_xlim(xmin=0, xmax=t)
 
    majorlabels = []
    majorlocs = []
@@ -760,6 +708,24 @@ class SmartDict(dict):
 	def __setattr__(self, name, value):
 		self[name] = value
 
+def tryrmtree(dir):
+   try:
+      shutil.rmtree(dir)
+   except:
+      pass
+
+def mkstemp(prefix, suffix):
+   dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
+   mkdirexist(dir)
+   atexit.register(tryrmtree, dir)
+   return tempfile.mkstemp(prefix=prefix, dir=dir, suffix=suffix)
+
+def mkdtemp(prefix):
+   dir = "/%s/fm-%s/%d" % (os.environ.get('TMPDIR', '/tmp'), os.environ.get('USER', 'none'), os.getpid())
+   mkdirexist(dir)
+   atexit.register(tryrmtree, dir)
+   return tempfile.mkdtemp(prefix=prefix, dir=dir)
+
 class FmLocations:
    def __init__(self, copyFrom=None, locs={}, slave=False):
       self.procs = None
@@ -781,7 +747,7 @@ class FmLocations:
          self.thisis(slave)
 
          # Keep a copy of the config around so our children (like redistribute) can reference it
-         fd, name = tempfile.mkstemp(prefix="tmp-fm-locations-", suffix=".pickle")
+         fd, name = mkstemp(prefix="locations", suffix=".pickle")
          #print >>sys.stderr, "locations is", name
          self.cleanup = name
          os.environ['FMCONFIG'] = name
@@ -870,7 +836,7 @@ class FmLocations:
       # Use global config values by default (thisis() can override later)
       self.parseLocation("global")
 
-      # Once all config files settings are imported, pre the location for use (apply defaults, etc.)
+      # Once all config files settings are imported, prep the location for use (apply defaults, etc.)
       for l in self.config.locs.values():
          self.prepLocation(l)
 
@@ -977,6 +943,10 @@ class FmLocations:
          l.name = nodename
          l.config = {}
          l.listvalues = listvalues
+      elif not l.listvalues:
+         l.listvalues = listvalues
+      #elif [str(i) for i in l.listvalues] != [str(i) for i in listvalues]:
+         #print >>sys.stderr, "Error: conflicting range information for node", nodename, l.listvalues, listvalues
 
       # Import all configparser settings into a dictionary
       for opt,val in self.configparser.items(stanza, raw=True):
@@ -1171,7 +1141,7 @@ locations of this instance."""
 
       inputs = {'cmd': cmd, 'config': self.config}
 
-      return self.forAll(lcmd, subst=True, stdinstr=cPickle.dumps(inputs), tag=string.join(cmd))
+      return self.forAll(lcmd, subst=True, stdinstr=zlib.compress(cPickle.dumps(inputs)), tag=string.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None, quote=True):
       if src and type(src) != type([]):
@@ -1491,7 +1461,7 @@ will be the directory name preceding the first wildcard."""
       #   args = [os.path.dirname(a) + '/./' + os.path.basename(a) for a in args]
 
       if options.cat:
-         dst = tempfile.mkdtemp(prefix="tmp-fm-get-") + "/"
+         dst = mkdtemp(prefix="get") + "/"
          srcs = args
       else:
          dst = args[-1]
@@ -1584,7 +1554,12 @@ class Procs:
       for i in range(len(cmdv)):
          if cmdv[i] == "|":
             # There are more words, so make an intermediate pipe
-            r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, **kwargs)
+            try:
+               r = subprocess.Popen(thiscmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr, close_fds=True, **kwargs)
+            except:
+               print >>sys.stderr, "Error", sys.exc_value, "executing", thiscmd
+               raise
+  
 
             # Next element of the pipe gets this output
             stdin = r.stdout
@@ -1596,7 +1571,7 @@ class Procs:
 
       # This is the last command in the pipeline
       if thiscmd:
-         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, **kwargs)
+         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True, **kwargs)
          results.append(r)
 
       # Here's how we handle these pipelines outside of this function.  One (that last one)
@@ -1649,7 +1624,7 @@ class Procs:
       for r in self.PopenWithPipes(cmdv, stdin=stdin, stdout=stdout, stderr=stderr, cwd=cwd):
          r.stdinstr = None # Default to nothing to finalize
 
-         if r.stderr or r.stdout or stdinstr:
+         if r.stderr or r.stdout or (first and stdinstr):
             self.numprocspolling += 1
             if r.stdout:
                self.add_poll(r.stdout, r, select.POLLIN)
@@ -1696,7 +1671,7 @@ class Procs:
             # Queues was already empty, so now delete it
             del self.queues[qname]
 
-   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None, stopOnError=False):
+   def collect(self, ignoreErrors=False, labelPrint=False, maxErrors=None, markInactive=False, stopOnError=False):
       """Execute any active or queued processes and return, a count of the number of errors and a list of the processes objects that ran."""
       results = []
       errors = 0
@@ -1717,7 +1692,7 @@ class Procs:
                print >>sys.stderr, "Terminating early due to an error"
                stopping = True
 
-         if Verbose > 1:
+         if Verbose > 2:
             ec = os.WEXITSTATUS(p.status)
             print >>sys.stderr, "%s: %s status %d for %s" % (p.queue, seconds2human(p.time), ec, p.tag)
             waiting = [l.queue for l in self.pids.values()]
@@ -1730,7 +1705,7 @@ class Procs:
 
       tag = "for " + results[0].tag #XXX not al tags identical
 
-      if stopping or (Verbose > 0):
+      if stopping or (Verbose > 1):
          print >>sys.stderr, "--- Report", tag
          tag = ""
          mean = 0.0
@@ -1769,7 +1744,7 @@ class Procs:
       if stopping or labelPrint or Verbose > 0:
          sys.stderr.write(coallesce([f.stderr for f in results], [f.node for f in results]))
 
-      if Verbose > 0:
+      if Verbose > 1:
          print >>sys.stderr, "---"
 
       if stopping:
@@ -1779,6 +1754,13 @@ class Procs:
          if maxErrors != None and errors > maxErrors:
             print >>sys.stderr, "Terminating early due to %d errors" % errors
             sys.exit(errors)
+
+      if markInactive:
+         failed = [p.node for p in results if p.status]
+         if failed:
+            print >>sys.stderr, "Marking nodes inactive: %s" % ','.join(failed)
+            for f in failed:
+               markInactive.locs[f].inactive = True
 
       return errors, results
 
@@ -2019,6 +2001,10 @@ class JobScheduler:
          del self.jobs[j]
 
       for j in recent:
+         if j.startswith("."):
+            # Ignore dot files (probably rsync droppping something in the directory)
+            continue
+
          #print "Job", j, "added"
          jobuid = os.stat(self.options.jobdir + "/" + j).st_uid
          if jobuid != os.getuid():
@@ -2171,6 +2157,7 @@ class JobScheduler:
             stats['time'] += r.time
             stats['utime'] += r.utime
             stats['stime'] += r.stime
+            stats['start'] = min(stats['start'], r.start)
  
       dir = p.outdirname + "/." + p.outbasename 
       try:
@@ -2383,6 +2370,7 @@ class FmJob:
          self.cmd = self.cmd.split()
       self.inputs = config_get("inputs")
       self.cachedinputs = None
+      self.cachedinputs_deferred = []
       self.previousinputs = None
       self.continuous = config.has_option("mrjob", "continuous")
       self.reduce = config_get("reduce")
@@ -2401,7 +2389,11 @@ class FmJob:
       # First time thru we expand the input globs to a file list
       # Unless this is a continuous job, this will be the only time we enumerate the files
       if not self.cachedinputs:
-         glob = multiglob([options.rootdir + "/" + x for x in self.inputs.split()])
+         glob = [options.rootdir + "/" + x for x in self.inputs.split()]
+         if options.cowdir:
+            glob += [options.cowdir + "/" + x for x in self.inputs.split()]
+
+         glob = multiglob(glob)
          if self.previousinputs: # Updating list 
             self.cachedinputs = list( set(glob) - self.previousinputs )
          else: # First pass
@@ -2410,7 +2402,9 @@ class FmJob:
          if not invalidateOnly:
             self.previousinputs = set(glob)
 
-         random.shuffle(self.cachedinputs)
+         # Randomize inputs.  Use nodename as lightweight seed guaranteed to be different on each node
+         random.Random(options.name).shuffle(self.cachedinputs)
+
 
       if self.reduce:
          parts = [os.path.basename(i) for i in self.cachedinputs]
@@ -2449,30 +2443,45 @@ class FmJob:
             #print >>sys.stderr, part, "processes on this node", list(choices)
             outfilename = "/reduce/" + self.jobname + "/" + part + ".d"
 
-            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, putargs=putargs)
+            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, canDefer=False, putargs=putargs)
             if p: 
                #print >>sys.stderr, "Reduce part", part, "on node", Locations.thisname, files, "of", self.inputs
                return p
 
          return None # Nothing to do
 
-      while self.cachedinputs:
+      while self.cachedinputs or self.cachedinputs_deferred:
+         # If we exhaust cachedinputs, fall-over to the deferred inputs
+         if not self.cachedinputs:
+            self.cachedinputs = self.cachedinputs_deferred
+            self.cachedinputs_deferred = None # Keep track that we can't defer anymore
+
          i = self.cachedinputs.pop()
 
          if i[-2:] == ".d": 
             # Don't process .d directories as named inputs (feedback loop)
             continue
 
-         relativename = i[len(options.rootdir):]
+         if i.startswith(options.rootdir):
+            relativename = i[len(options.rootdir):]
+         elif options.cowdir and i.startswith(options.cowdir):
+            relativename = i[len(options.cowdir):]
+         else:
+            assert(not i)
+            
          outfilename = relativename + ".d/" + escape(self.cmd)
         
-         p = self.computeItem(i, outfilename, options, procs, invalidateOnly)
-         if p:
+         p = self.computeItem(i, outfilename, options, procs, invalidateOnly, self.cachedinputs_deferred != None)
+
+         if p == 'defer' and False:
+            # XXX. Limit to things we would pick()
+            self.cachedinputs_deferred.append(i)
+         elif p:
             return p
 
       return None # Nothing to do
 
-   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, putargs="argv"):
+   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, canDefer, putargs="argv"):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
       if type(inputs) != type([]):
          inputs = [inputs]
@@ -2524,15 +2533,26 @@ class FmJob:
 
       # If we get here, then we're locally prepared to rerun
       # Check global synchronization to see if another node already ran it
-      if self.locker.isdone(outfilename, newestinput):
+      l = self.locker.start(outfilename, newestinput, exclusive=canDefer)
+
+      if l == 'done':
+          # Somebody already completed
           return None
+
+      elif l == False:
+          # Did not get (exclusive was requested and not available)
+          assert(canDefer)
+          return 'defer'
+
+      assert(l == True)
+
+      # We are ready to start processing
 
       if invalidateOnly:
          # Don't actually do anything right now
          return None
 
       # Now we proceed to execute.
-      # Lock will only be taken upon completion (in case we're a slow node).
       # XXX. our scheduler should check and kill us off if somebody finishes first
 
       # Now insert a "." at the beginning of the basename for partial output
@@ -2663,67 +2683,109 @@ class FileSynchronizer:
 	syncfiles = [self._filename2lock(i) for i in lst]
         return self.locs.pick().forAllLocal(["localrm", "-R", "--absolute"]  + syncfiles)
 
-    def isdone(self, filename, newestinput):
-        # Locally we want to (re-)create output. 
-        # Return True iff somebody already finished
+    # We _desire_ near-atomicity on first to claim a job (since others will prefer to avoid duplication)
+    #    race conditions should result in multiple holders rather than no holders
+    # We don't worry so much about races between multiple finishers (any can win; they've already done the work),
+    #    race conditions should result in multiple holders rather than no holders
+    # but we want others testing for done-ness to promptly know if anybody has finished.
+    # We also want to keep track of how many are in process so that we don't over-duplicate
 
+
+    def start(self, filename, newestinput, exclusive):
+        # Locally we want to (re-)create output. 
+        # exclusive is True iff we want the first lock (not if anybody else has started)
+
+        # Return 'done' if the status is complete
+        # Return False if somebody else has started and exclusivity was requested
+        # Return True if we should start (given the status and requested exclusivity)
+
+        # Doing an atomic operation is expensive and we're really only worried about simultaneous creation,
+        # so first just stat() to see if it file already exists.
         syncfilename = self._filename2lock(filename)
 
-        # If we did it last time, then redo it now
-        # We don't compare syncfile's lasttime, but presumably it is stale like the local output
+        take = False
+
         try:
-           node = file(syncfilename).read()
-           if node == self.locs.thisname:
-              # isdone() is called iff we have newer inputs than outputs.
-              # We did it last time, remove our syncfile now
+           contents = file(syncfilename).read()
+        except IOError, e:
+           if e.errno == errno.ENOENT:
+              # Nobody has claimed it yet, so we will
+              take = True
+           elif e.errno == errno.ESTALE:
+              # Looks like NFS file got deleted after opening
+              take = True
+           else:
+              raise
+
+        if not take:
+           # Check to see if we think we need to invalidate it.
+           contents = contents.split()
+           node = contents[0]
+
+           try:
+              if ((node != self.locs.thisname) 
+                 # If we did it last time, then redo it now (start() is called iff we have newer inputs than outputs)
+                 and (node in self.locs.config.locs)
+                 # if the node that did it is no longer active 
+                 and (not self.locs.config.locs[node].inactive)
+                 # Somebody else did it, but we have newer inputs, so redo it
+                 # XXX. this doesn't remove the output elsewhere so if we shuffle both, we may get the old input
+                 # Hopefully if our input changed, their's will too.   If a node is offline while the input updates
+                 # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
+                 # things we have current locks for.  Hopefully rsync -u will get the newer file in the end.
+                 and (newestinput <= os.path.getmtime(syncfilename))):
+                    # If we get here, then we do NOT want to invalidate
+                    if len(contents) > 1:
+                       # This means the output is complete
+                       return 'done'
+                    else:
+                       return (not exclusive)
+      
+           except OSError, e:
+              if e.errno == errno.ENOENT:
+                 # Somebody else just removed it, so let them have it
+                 return (not exclusive)
+              else:
+                 raise
+   
+           # If we get here, then we are going to invalidate and take the lock.
+           try:
               os.unlink(syncfilename)
-              return False
-        except:
-           # Assume that the status did not exist
-           # XXX. it could have bad permissions or something so that we can't read or unlink
-           return False
+           except OSError, e:
+              if e.errno == errno.ENOENT:
+                 # We may be racing with another process that is just ahead of us.  
+                 # In that case, we may both unlink sucessfully and both restart the work.
+                 # Somebody else unlinked (but hasn't re-created yet).  Let them have it
+                 return (not exclusive)
+              else:
+                 raise
 
-	lasttime = os.path.getmtime(syncfilename)
-	if newestinput > lasttime: 
-           # Somebody else did it, but we have newer inputs, so redo it
-           # XXX. this doesn't remove the output elsewhere so if we shuffle both, we may get the old input
-           # Hopefully if our input changed, their's will too.   If a node is offline while the input updates
-           # and comes back later, it eneds to invalidate its result.  Perhaps we should only redistribute
-           # things we have current locks for.  Hopefully rsync -u will get the newer file in the end.
-           return False
+        if self._atomicCreate(syncfilename):
+           # We were the first
+           return True
+        else:
+           # This is unlikely, but somebody else must have just started
+           return (not exclusive)
 
-        # Somebody else did it and recently enough that we'll trust their result
-
-        # Unless that node is no longer active
-        if node not in self.locs.config.locs:
-           # Node no longer exists in config
-           return False
-
-        if self.locs.config.locs[node].inactive:
-           # Node that owns the lock is no longer active, so steal it
-           return False
-
-	return True
 
     def done(self, filename):
         syncfilename = self._filename2lock(filename)
-        return self._atomicCreate(syncfilename)
+        try:
+           os.unlink(syncfilename)
+        except:
+           # This should only happen if somebody else just finished too
+           pass
+        return self._atomicCreate(syncfilename, ' .')
 
-    def _atomicCreate(self, lockfilename):
+    def _atomicCreate(self, lockfilename, contents=''):
         myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
         mkdirexist(os.path.dirname(lockfilename))
 
         syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
-        syncfile.write(self.locs.thisname)
+        syncfile.write(self.locs.thisname + contents)
         syncfile.close()
-  
+
         success = False
- 
-        try: 
-            os.unlink(lockfilename)
-	except:
-            # may not have existed anyway
-            pass
 
         try:
             os.link(myname, lockfilename)
@@ -2732,11 +2794,11 @@ class FileSynchronizer:
             if e.errno != errno.EEXIST:
                 os.unlink(myname)
                 raise
-            # Otherwise, somebody just beat us to it -- let hem have it
+            # Otherwise, somebody just beat us to it -- let them have it
 
         # Get rid of private name for it, successful or not
         os.unlink(myname)
-  
+ 
         return success
    
     def _filename2lock(self, filename):
@@ -2828,23 +2890,26 @@ http://mfisk.github.com/filemap
       return self._locs
 
    def partition(self, args):
-      """Partition an input file.
-      Split an inputfile into n pieces.  By default, the first
-      whitespace-delimited field is used as the key.  All lines with the
-      same key will be placed in the same output file.  The -r option can be
-      used to specify a Perl-compatible regular expression that matches the
-      key.  If the regex contains a group, then what matches the group is
-      the key; otherwise, the whole match is the key.
+      """Partition an input file.  Split an inputfile into n pieces.
+      Specify a whitespace-delimited field with -f.  All lines with
+      the same key will be placed in the same output file.  The -r
+      option can be used to specify a Perl-compatible regular
+      expression that matches the key.  If the regex contains a group,
+      then what matches the group is the key; otherwise, the whole
+      match is the key.
 
       If nways is greater than 0, output files are numbered 1 to n.
       If nways is 0, then files will be named for the values of the keys.
-      All output files are gzip compressed and created in the current directory.
-      Input files ending in .gz will automatically be decompressed.
+
+      If nways is set and no field or regex is specified, then lines
+      are partitioned round-robin.  All output files are gzip
+      compressed and created in the current directory.  Input files
+      ending in .gz will automatically be decompressed.
       """
       p = MethodOptionParser()
       p.add_option("-n", "--nways", help="Number of output files to use (0 means each value will get its own file)")
       p.add_option("-r", "--regex", help="Regex that matches the key portion of input lines")
-      p.add_option("-f", "--field", default="1", help="Use field # or range (numbered starting with 1).")
+      p.add_option("-f", "--field", help="Use field # or range (numbered starting with 1).")
       p.add_option("-Z", "--no-compress", action="store_true", help="Do NOT compress output files")
       (options, args) = p.parse_args(args)
 
@@ -2868,6 +2933,8 @@ http://mfisk.github.com/filemap
 
       files = {}
 
+      i = 0
+
       if not infiles:
          infiles = ["-"]
 
@@ -2890,23 +2957,28 @@ http://mfisk.github.com/filemap
                      key = key.group(0)
                else:
                   print >>sys.stderr, "Key not found in line:", line.rstrip()
-            else:
+            elif options.field:
                words= line.split()
                #print words[options.field[0]:options.field[1]]
                key = words[options.field[0]:options.field[1]]
   
             fname = None 
             if options.nways:
-               i = int(sha(str(key)).hexdigest(), 16) % options.nways
+               if options.regex or options.field:
+                  i = int(sha(str(key)).hexdigest(), 16) % options.nways
+               else:
+                  i = (i + 1) % options.nways
+
                if not files.has_key(i):
                   fname = str(i+1)
+ 
             else:
                i = ','.join(key)
                if not files.has_key(i):
                   fname = escape([i])
 
             if fname:
-               if options.no_compress:
+               if not options.no_compress:
                   files[i] = gzip.GzipFile(fname + ".gz", "w")
                else:
                   files[i] = file(fname, "w")
@@ -2917,9 +2989,15 @@ http://mfisk.github.com/filemap
 
    def kill(self, args):
       """Kill a job."""
-      (options, args) = MethodOptionParser(fixed=["jobid"]).parse_args(args)
+      p = MethodOptionParser()
+      p.add_option('-s', '--sched', action='store_true', help="Kill all remote schedulers and their children", default=False)
+      (options, args) = p.parse_args(args)
+
       args = ["/jobs/" + a for a in args]
-      self._Locations().forAll(["rm", "-f"], args).collect()
+      if args:
+         self._Locations().forAll(["rm", "-f"], args).collect()
+      if options.sched:
+         self._Locations().forAllLocal(["kill"]).collect()
 
    def mv(self, args):
       """Rename files in the cloud"""
@@ -2947,24 +3025,44 @@ Has unix "mkdir -p" semantics."""
       jobs = {}
       for mx in pkls:
          for jname,j in pkls[mx].iteritems():
-            if type(j.cmd) == type([]):
-               j.cmd = string.join(j.cmd)
             if not jobs.get(jname):
                jobs[jname] = j
                j.nodes = [mx]
             else:
                jobs[jname].nodes.append(mx)
 
-      fmt = "%-28s %-9s %-15s\n                             %s\n                             %s"
-      print fmt % ("Job ID", "User", "Nodes", "Command", "Inputs")
-       
+      # Second pass to get stats for all jobs (even on nodes that didn't have the job running)
+      for j in jobs.values():
+         statglobs = [i + ".d/" + escape(j.cmd) + "/.status" for i in j.inputs.split()]
+         j.stats = list(itertools.chain(*self._local_pickles(["localstats"] + statglobs).values()))
+
+      first = True
+
       for jname,j in jobs.iteritems():
-         j.nodes.sort(cmp=numcmp)
-         numinputs = len(j.inputs.split())
-         inputs = "%d: %s"  % (numinputs, j.inputs)
-         if len(inputs) > 100:
-            inputs = inputs[:100] + "..."
-         print fmt % (jname, j.uid, string.join(j.nodes, ','), j.cmd, inputs)
+         inputlist = j.inputs.split()
+         flags = ""
+         if j.reduce:
+            flags = j.reduce + " "
+
+         if not first:
+            print
+         print jname + "\t" + j.uid + "\t" + pipes.quote(flags + ' '.join(j.cmd))
+         flags = ""
+         if j.continuous: 
+            flags += "-c "
+         if j.checkexit != 0:
+            flags += "-e "
+        
+         print "\t%s-i '%s'" % (flags, "' -i '".join(inputlist))
+
+         nodestr = ''
+         if len(j.nodes) < 10:
+            j.nodes.sort(cmp=numcmp)
+            nodestr = ': ' + (','.join(j.nodes))
+         print "\t%d nodes still processing%s" % (len(j.nodes), nodestr)
+
+         self._tallyStats(j.stats, inputlist, indent='\t')
+         first = False
       
    def df(self, args):
       """Show free space on each node."""
@@ -3028,17 +3126,21 @@ Copy the specified file(s) into the virtual store.
       args = args[:-1]
       if len(args) > 1:
          dst += "/"
+         replargs = [dst + i for i in args] 
+      else:
+         replargs = args
 
-      self._Locations().put(args, dst, pickn=True, serialize=options.serialize).collect()
+      failover = 3
+      while failover:
+         errors, results = self._Locations().put(args, dst, pickn=1, serialize=options.serialize).collect(markInactive=self._Locations().config)
+         if not errors:
+            break
+         failover -= 1
+
+      self.replicate(replargs)
 
    def _putJobs(self, tmpdir, maxErrors):
-      errors,results = self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors)
-      failed = [p.node for p in results if p.status]
-      if failed:
-         print >>sys.stderr, "Marking nodes inactive: %s" % ','.join(failed)
-         for f in failed:
-            #print >>sys.stderr, "node %s was %s" % (f, self._Locations().config.locs[f].inactive)
-            self._Locations().config.locs[f].inactive = True
+      self._Locations().put([tmpdir + "*"], "/jobs/").collect(maxErrors=maxErrors, markInactive=self._Locations().config)
       shutil.rmtree(tmpdir)
 
    def map(self, args):
@@ -3156,9 +3258,7 @@ and the program re-run.
 
          user = pwd.getpwuid(os.getuid()).pw_name
          host = socket.getfqdn()
-         fromaddr = '@'.join([user,host])
          domain = '.'.join(host.split('.')[1:])
-         toaddr = '@'.join([user,domain])
 
          if options.mx:
             mx = options.mx
@@ -3170,10 +3270,29 @@ and the program re-run.
             except:
                mx = "mail"
 
+         # If we couldn't get a good FQDN from the default interface,
+         # try again on the interface used to talk to the MX
+         if not domain or domain == "localdomain":
+            # Try on an actual socket to the mx
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+               s.connect((mx, 25))
+            except:
+               print >>sys.stderr, "Could not connect to mail exchanger '%s'" % mx
+               return 1
+
+            host = socket.gethostbyaddr(s.getsockname()[0])[0]
+            domain = '.'.join(host.split('.')[1:])
+
+            s.close() 
+
+         fromaddr = '@'.join([user,host])
+         toaddr = '@'.join([user,domain])
+
          print "Results will be in mail from %s to %s via %s" % (fromaddr, toaddr, mx)
 
          msg = email.mime.multipart.MIMEMultipart()
-         msg['Subject'] = 'Filemap results for %s' % (cmd)
+         msg['Subject'] = "Filemap results for '%s'" % ("' '".join(args))
          msg['From'] = fromaddr
          msg['To'] = toaddr
 
@@ -3188,8 +3307,8 @@ and the program re-run.
          if options.mail:
             output = ""
             for line in stdout.getvalue().split("\n"):
-               if len(line) > 200:
-                   line = line[:200] + "..."
+               #if len(line) > 500:
+                   #line = line[:500] + "..."
                output += line + "\n"
             msg.attach(email.mime.text.MIMEText('<pre>' + output + '</pre>', 'html'))
 
@@ -3234,9 +3353,10 @@ and the program re-run.
       if options.statusonly:
          tmpdir = None
       else:
-         tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
+         tmpdir = mkdtemp(prefix="map") + "/"
 
       inglobs = options.inputglob
+      allinglobs = set(inglobs)
       outdirglobs = []
       statglobs = []
       assert (type(inglobs) == type([]))
@@ -3266,15 +3386,15 @@ and the program re-run.
                self._putJobs(tmpdir, None)
 
             if not options.statusonly:
-               tmpdir = tempfile.mkdtemp(prefix="tmp-fm-map-") + "/"
+               tmpdir = mkdtemp(prefix="map") + "/"
 
             if not starttime:
                starttime = time.time()
 
             if not options.statusonly:
                # Barrier; Wait for that job (and its parents) to finish:
-               if Verbose > 0:
-                  print >>sys.stderr, "Waiting for map and redistribute.  Job", jobname
+               if Verbose > -1:
+                  print >>sys.stderr, "Waiting for map job %s and redistribute." % jobname
                if jobname:
                   args = ["wait", jobname, "redistribute"]
                else:
@@ -3287,6 +3407,7 @@ and the program re-run.
                   return False
             continue
       
+         allinglobs.update(inglobs)
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
          joblist.append(jobname)
 
@@ -3298,7 +3419,7 @@ and the program re-run.
          starttime = time.time()
 
       if not options.statusonly: 
-         if Verbose > 0:
+         if Verbose > -1:
             print >>sys.stderr, "Waiting for completion.  Job", jobname
          r = self._Locations().forAllLocal(["wait", jobname]).collect(maxErrors=maxErrors, stopOnError=True)
          if not r:
@@ -3312,21 +3433,25 @@ and the program re-run.
       # Get the output files
       errglobs = [f + "/.stderr" for f in outdirglobs]
       statglobs += [f + "/.status" for f in outdirglobs]
+      if Verbose > -1:
+         print >>sys.stderr, "Output in:\n\t", "\n\t".join(outdirglobs)
 
       statlists = self._local_pickles(["localstats"] + statglobs)
-      allstats = []
-      for lst in statlists.values():
-         allstats.extend(lst)
+      allstats = list(itertools.chain(*statlists.values()))
 
-      nodecount = self._Locations().processes()
-      tally = tallyStats(allstats, starttime, wallclock, nodecount)
+      if options.statusonly:
+         tally_start = None
+      else:
+         tally_start = starttime
+
+      tally = self._tallyStats(allstats, allinglobs, tally_start, wallclock)
       statsfile = gzip.GzipFile('.fm.stats.gz', 'w')
       cPickle.dump(allstats, statsfile)
       statsfile.close()
 
       # Fetch stdout/stderr               
-      if (not options.statusonly) and (options.quiet < 2):
-         if options.quiet:
+      if options.quiet < 2:
+         if options.quiet or options.statusonly:
             outputglobs = []
          else:
             outputglobs = inglobs
@@ -3334,6 +3459,112 @@ and the program re-run.
          self.get(["-ce"] + outputglobs + errglobs, relative=True)
 
       return True
+
+   def _tallyStats(self, statlist, inputglobs, starttime=None, wallclock=None, indent=''):
+      nodecount = self._Locations().processes()
+
+      # Tally the stats
+      errcodes = {}
+      wtime = [0.0, 0.0]
+      utime = [0.0, 0.0]
+      stime = [0.0, 0.0]
+      bytes = [0, 0]
+      nodewtime = [{}, {}]
+      nodebytes = [{}, {}] 
+      allstats = []
+      maxend = 0
+      if not starttime:
+         starttime = time.time()
+
+      minstart = starttime
+
+      for stats in statlist:
+            ec = os.WEXITSTATUS(stats['status'])
+            errcodes[ec] = errcodes.get(ec, 0) + 1
+
+            if stats['timestamp'] < starttime:
+               cached = 1
+            else:
+               cached = 0
+
+            wtime[cached] += stats['time']
+            utime[cached] += stats['utime']
+            stime[cached] += stats['stime']
+            bytes[cached] += stats['inputsize']
+
+            minstart = min(minstart, stats['start'])
+            maxend = max(maxend, stats['timestamp'])
+
+            nodename = stats['nodename']
+            nodewtime[cached][nodename] = nodewtime[cached].get(nodename, 0) + stats['time']
+            nodebytes[cached][nodename] = nodebytes[cached].get(nodename, 0) + stats['inputsize']
+
+      # Print out summary info
+      errstr = ''
+      for k in errcodes.keys():
+         if not errstr: 
+            errstr = "%d processes returned %d" % (errcodes[k], k)
+         else:
+            errstr += "; %d x %s" % (errcodes[k], k)
+      if not errstr:
+         errstr = '0 processes completed'
+
+      print >>sys.stderr, indent+errstr
+
+      if Verbose > 0:
+         for n in nodebytes[0]:
+            if nodewtime[0][n]:
+               print >>sys.stderr, indent+"Node %s %s/s new work" % (n, bytecount2str(nodebytes[0][n]/nodewtime[0][n]))
+
+      swtime = sum(wtime)
+
+      if swtime:
+         sbytes = sum(bytes)
+         sutime = sum(utime)
+         sstime = sum(stime)
+         print >>sys.stderr, indent+"Serial performance: %s, %s/s, %s (%.0f%% User, %.0f%% System, %.0f%% Wait)" \
+            % (bytecount2str(sbytes), bytecount2str(sbytes/swtime), seconds2human(swtime), 100*sutime/swtime, 100*sstime/swtime, 100*(swtime-sstime-sutime)/swtime)
+
+         if bytes[0] and wallclock:
+            rate = bytecount2str(bytes[0]/wallclock)
+            scaling = (stime[0]+utime[0])/wallclock
+            print >>sys.stderr, indent+"New: %s/s, %.1f/%dx scaling." % (rate, scaling, nodecount)
+         
+         # Find intervals we were computing over 
+         intervals = [(s['start'], s['timestamp']) for s in statlist]
+         intervals = collapseIntervals(intervals)
+
+         if bytes[1]:
+            # Find intervals that were before starttime (cached)
+            cacheduration = 0
+            for (start,end) in intervals:
+               if end < starttime:
+                  cacheduration += (end-start)
+
+            if cacheduration:
+               rate = bytecount2str(bytes[1]/cacheduration)
+               scaling = swtime/cacheduration
+               print >>sys.stderr, indent+"Cached: %s/s, %s, %.1fx" % (rate, seconds2human(cacheduration), scaling)
+
+         if sbytes and wallclock:
+            rate = bytecount2str(sbytes/wallclock)
+            cached = 100*bytes[1]/sbytes
+            print >>sys.stderr, indent+"Overall: %s/s, %s, %.0f%% cached." % (rate, seconds2human(wallclock), cached)
+  
+      if not wallclock:
+         wallclock = maxend - minstart
+         #print >>sys.stderr, "Estimated wallclock time:", seconds2human(wallclock)
+
+      # Report percent complete
+      if wallclock and swtime:
+         ls = self._lsdict(list(inputglobs))
+         totalsize = 0
+         for f in ls.keys():
+            totalsize += min([i['size'] for i in ls[f]])
+     
+         if totalsize: 
+            #print sbytes, totalsize, totalsize-sbytes
+            print >>sys.stderr, indent+"%d%% complete, %s remaining" % (100.0*sbytes/totalsize, seconds2human(wallclock/(1.0*sbytes/totalsize) - wallclock))
 
    def get(self, *args, **kwargs):
       """Copy one or more files from the cloud to local storage."""
@@ -3371,7 +3602,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
    def plot(self, args):
       """Plot run-time of a previous map."""
       p = MethodOptionParser(fixed=["[infile [outfile]]"])
-      p.add_option("-r", "--redundant", action="store_true", default=False, help="generate a plot highlighting redundant work")
+      p.add_option("-r", "--redundant", action="store_true", default=False, help="report redundant work")
       p.add_option("-g", "--group-host", action="store_true", default=False, help="group nodes by host")
       (options, args) = p.parse_args(args)
       infile = ".fm.stats.gz"
@@ -3485,30 +3716,39 @@ Unlike 'get -c', duplicate instances of files will be included."""
          # for i in too few, find differnece in replication and occurrences, select hosts to store
          # for i in too many, find differnece in replication and occurrences, select hosts to remove
 
+   def _lsdict(self, args, decode=False):
+      ls = {}
+      listing = self._ls(args)
 
+      for fkey in listing.keys():
+         if decode:
+            (fname, num) = quoprire.subn(lsUnescapeChr, fkey)
+         else:
+            fname = fkey
+
+         ls[fname] = listing[fkey]
+
+      return ls
+       
    def ls(self, args):
       """File & directory listing."""
       p = MethodOptionParser(fixed=["[files...]"])
       p.add_option('-n', '--nodes', action='store_true', help="List names of nodes holding each file")
       p.add_option('-l', '--long', action='store_true', help="Show permissions, nodes, sizes, timestamps, etc.")
       p.add_option('-q', '--decode', action='store_true', help="Replace escaped characters")
+      p.add_option('-1', '--single', action='store_true', help="Single-column output")
       (options, args) = p.parse_args(args)
 
-      ls = {}
-      listing = self._ls(args)
-
-      for fkey in listing.keys():
-         if options.decode:
-            (fname, num) = quoprire.subn(lsUnescapeChr, fkey)
-         else:
-            fname = fkey
-         ls[fname] = listing[fkey]
+      ls = self._lsdict(args, options.decode)
 
       fnames = ls.keys()
       fnames.sort()
 
       if not options.long:
-         tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
+         if options.single:
+            for f in fnames: print f
+         else:
+            tabulate(fnames, int(os.environ.get("COLUMNS", 80)))
 
       else:
          totalsize = 0
@@ -3646,6 +3886,7 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
       self._Locations().put([os.path.realpath(__file__)], "/sys/").collect()
 
+
    def _MapComponent(self, cmd, inglobs, outglobs, options, reduce=False, parent=None, tmpdir="/tmp/", procsPerCpu=None, checkexit=False):
       jobdesc = "[mrjob]\ncmd = %s\ninputs = %s\n" % (repr(cmd), string.join(inglobs))
       if parent: 
@@ -3706,6 +3947,10 @@ class SchedLock:
    def __init__(self, rootdir):
       self.lockname = rootdir + "/.fmschedlock-" + str(os.getuid())
 
+   def kill(self):
+      pid = file(self.lockname).read()
+      os.kill(int(pid), signal.SIGTERM)
+  
    def checkpid(self):
       # Check for running
       try:
@@ -3739,50 +3984,42 @@ class SchedLock:
           raise
       
    def lock(self):
-      try:
-         fd = os.open(self.lockname, os.O_CREAT|os.O_SYNC|os.O_EXCL|os.O_WRONLY)
-         lockfile = os.fdopen(fd, "w")
-         lockfile.write(str(os.getpid()))
-         lockfile.close()
-         return True
-
-      except OSError, e:
-         if e.errno == errno.EEXIST:
-            # Check for running
-            if self.checkpid():
+      # Check for running
+      if self.checkpid():
+         return False
+      else:
+         # Stale or empty, so steal.  
+         # XXX race here if 2 procs competing to steal and 1 unlinks and recreates before 2nd unlinks
+         tmp = self.lockname + "-" + str(os.getpid())
+         try:
+            os.unlink(self.lockname)
+         except:
+            pass
+         
+         f = file(tmp, "w")
+         f.write(str(os.getpid()))
+         f.close()
+         try:
+            os.rename(tmp, self.lockname)
+         except OSError, e:
+            if e.errno == errno.EEXIST:
+               # Somebody beat us
                return False
             else:
-               # Stale, so Steal
-               tmp = self.lockname + "-" + str(os.getpid())
-               try:
-                  os.unlink(self.lockname)
-               except:
-                  # Somebody beat us
-                  return False
-               
-               # XXX race here if 2 procs competing to steal and 1 unlinks and recreates before 2nd unlinks
-               time.sleep(1)
+               raise
 
-               f = file(tmp, "w")
-               f.write(str(os.getpid()))
-               f.close()
-               try:
-                  os.rename(tmp, self.lockname)
-                  return True
-               except OSError, e:
-                  if e.errno == errno.EEXIST:
-                     # Somebody beat us
-                     return False
-                  else:
-                     raise
-         else:
-            raise
+      os.setpgrp()  # create new process group, become its leader
+      signal.signal(signal.SIGTERM, killProcessGroup)
 
-      return False #shouldn't get here
+      return True
 
    def unlock(self):
       #XXX: doesn't check that we still hold the lock
       os.unlink(self.lockname)
+
+def killProcessGroup(signum, frame):
+   os.kill(0, signal.SIGTERM)
+   sys.exit(1)
 
 def setProcessName(name):
    try:
@@ -3807,7 +4044,7 @@ class FmLocalCommands(CommandSetBase):
       assert(not args)
       assert(options.node)
 
-      inputs = SmartDict(cPickle.loads(sys.stdin.read()))
+      inputs = SmartDict(cPickle.loads(zlib.decompress(sys.stdin.read())))
 
       for node in options.node:
          # If -n is given, then we are a direct slave and 
@@ -3901,7 +4138,7 @@ class FmLocalCommands(CommandSetBase):
 
       return d
 
-   def localstats(self, args):
+   def localstats(self, args, raw=False):
       os.chdir(self.Locations.this.rootdir)  
       args = multiglob(["./" + a for a in args])
       statlist = []
@@ -3910,8 +4147,11 @@ class FmLocalCommands(CommandSetBase):
          stats['statusfile'] = apath
          statlist.append(stats)
 
-      sys.stdout.write(cPickle.dumps(statlist))
-      return 
+      if raw:
+         return statlist
+      else:
+         sys.stdout.write(cPickle.dumps(statlist))
+         return 
 
    def localload(self, args):
       load = {}
@@ -3933,8 +4173,8 @@ class FmLocalCommands(CommandSetBase):
          if not j.startswith("."):
             jobs[j] = FmJob(jobdir + "/" + j)
             jobuid = os.stat(jobdir + "/" + j).st_uid
-            jobs[j].uid = jobuid
-
+            jobs[j].uid = pwd.getpwuid(jobuid).pw_name
+         
       sys.stdout.write(cPickle.dumps(jobs))
       return
 
@@ -3996,6 +4236,10 @@ class FmLocalCommands(CommandSetBase):
       sys.stdout.write(cPickle.dumps(output))
       return
 
+   def kill(self, args=[]):
+      """Kill an active scheduler for this node."""
+      SchedLock(self.Locations.this.rootdir).kill()
+     
    def sched(self, args=[]):
       """Start a scheduler for this node."""
 
