@@ -1247,7 +1247,8 @@ locations of this instance."""
          srcs = []
          for s in srclist:
             s = s.rstrip('/') 
-            s = os.path.dirname(s) + '/./' + os.path.basename(s)
+            dirname = os.path.dirname(s) or '.'
+            s = dirname + '/./' + os.path.basename(s)
             srcs.append(s)
 
       srcs = multiglob(srcs)
