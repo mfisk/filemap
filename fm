@@ -4150,9 +4150,12 @@ class FmLocalCommands(CommandSetBase):
       args = multiglob(["./" + a for a in args])
       statlist = []
       for apath in args:
-         stats = cPickle.load(open(apath))
-         stats['statusfile'] = apath
-         statlist.append(stats)
+         try:
+            stats = cPickle.load(open(apath))
+            stats['statusfile'] = apath
+            statlist.append(stats)
+         except:
+            print >>sys.stderr, "Error parsing statusfile", apath
 
       if raw:
          return statlist
