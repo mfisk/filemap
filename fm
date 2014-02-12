@@ -914,6 +914,10 @@ class FmLocations:
             if not first: first = min
          else:
             #singleton
+            try:
+               interval = int(interval)
+            except:
+               pass
             expanded.append(interval)
             if not first: first = interval
 
@@ -923,7 +927,8 @@ class FmLocations:
       # Recrusively try expanding each result (which may have a second list in it) and flatten the resulting lists
       ret = []
       for i in expanded:
-         ret += self._expandList(prefix + first[:-len(str(i))] + str(i) + suffix, values+[i])
+         ret += self._expandList(prefix + str(first)[:-len(str(i))] + str(i) + suffix, values+[i])
+          
       return ret
 
    def parseLocation(self, stanza, name=None, listvalues=[]):
