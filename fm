@@ -896,9 +896,10 @@ class FmLocations:
       """Returns a list of tuples where each tuple contains a list of 0 or more interval values and the resulting string from those values."""
 
       #Support () or [] syntax for SLURM or ConfigParser cases
-      range_re = re.compile("([^\(\[]*)[\(\[]([^\)\]]*)[\)\]](.*)$")
+      if not hasattr(self, 'range_fe'):
+         self.range_re = re.compile("([^\(\[]*)[\(\[]([^\)\]]*)[\)\]](.*)$")
 
-      r = range_re.match(liststr)
+      r = self.range_re.match(liststr)
       if not r:
          return [(values, liststr)]
       prefix = r.group(1)
@@ -913,6 +914,10 @@ class FmLocations:
             if not first: first = min
          else:
             #singleton
+            try:
+               interval = int(interval)
+            except:
+               pass
             expanded.append(interval)
             if not first: first = interval
 
@@ -922,7 +927,8 @@ class FmLocations:
       # Recrusively try expanding each result (which may have a second list in it) and flatten the resulting lists
       ret = []
       for i in expanded:
-         ret += self._expandList(prefix + first[:-len(str(i))] + str(i) + suffix, values+[i])
+         ret += self._expandList(prefix + str(first)[:-len(str(i))] + str(i) + suffix, values+[i])
+          
       return ret
 
    def parseLocation(self, stanza, name=None, listvalues=[]):
@@ -977,7 +983,11 @@ class FmLocations:
                if l.hostname:
                   #if '%' not in l.hostname:
                      #print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, str(l.values))
-                  l.hostname = l.hostname.format(*l.listvalues)
+                  try:
+                     l.hostname = l.hostname.format(*l.listvalues)
+                  except:
+                     print >>sys.stderr, "Error formatting", l.hostname, "with", l.listvalues
+                     raise
 
                assert(l.rootdir)
                l.rootdir = l.rootdir.format(*l.listvalues)
@@ -3131,11 +3141,13 @@ Copy the specified file(s) into the virtual store.
 
       dst = args[-1]
       args = args[:-1]
+
+      args = multiglob(args)
+
       if len(args) > 1:
          dst += "/"
-         replargs = [dst + i for i in args] 
-      else:
-         replargs = args
+
+      replargs = [dst + os.path.basename(i) for i in args] 
 
       failover = 3
       while failover:
