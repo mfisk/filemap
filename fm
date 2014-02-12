@@ -983,7 +983,11 @@ class FmLocations:
                if l.hostname:
                   #if '%' not in l.hostname:
                      #print >>sys.stderr, "Warning %s does not reference given instance %s" % (l.hostname, str(l.values))
-                  l.hostname = l.hostname.format(*l.listvalues)
+                  try:
+                     l.hostname = l.hostname.format(*l.listvalues)
+                  except:
+                     print >>sys.stderr, "Error formatting", l.hostname, "with", l.listvalues
+                     raise
 
                assert(l.rootdir)
                l.rootdir = l.rootdir.format(*l.listvalues)
