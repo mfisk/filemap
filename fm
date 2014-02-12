@@ -590,11 +590,13 @@ def plot(inputfile, pngfile, options):
             majorlabels.append(name)
             majorlocs.append(nodes2y[n])
 
-   #print >>sys.stderr, "Yticks", majorlocs, majorlabels
    ax.set_yticks(majorlocs)
    ax.set_yticklabels(majorlabels, size=6)
-   ax.set_yticks(minorlocs, minor=True)
-   ax.set_yticklabels(minorlabels, size=4, minor=True)
+
+   if len(majorlocs) < 50:
+      ax.set_yticks(minorlocs, minor=True)
+      ax.set_yticklabels(minorlabels, size=4, minor=True)
+      
    ax.set_ylim(ymin=-2, ymax=len(nodenames)+2)
    #ax.set_title("%s processed" % (bytecount2str(totalsize)))
 
