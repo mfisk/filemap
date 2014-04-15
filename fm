@@ -86,7 +86,7 @@ ConfigDefaults = {
    "syncdir": "/tmp/fmsync",
    "python": "python",
    "processes": "1000",
-   "dynamicload": "2",
+   "dynamicload": ".1",
    "inactive": False,
    "queuebyhost": False,
    "hostname": None,
@@ -1184,11 +1184,8 @@ locations of this instance."""
             s = [loc.rootdir + "/" + f for f in src]
             d = [loc.rootdir + "/" + f for f in dst]
 
-         i = 0
-         while i < len(cmd):
-            if cmd[i] == "fm" and (i == 0 or cmd[i-1] == "|"):
-               cmd[i:i+1] = loc.fmcmd
-            i += 1
+         if cmd[0] == "fm":
+            cmd = loc.fmcmd + cmd[1:]
 
          if isremote(loc.hostname):
             if quote and "SLURM_JOBID" not in os.environ:
@@ -1262,7 +1259,8 @@ locations of this instance."""
          srcs = []
          for s in srclist:
             s = s.rstrip('/') 
-            s = os.path.dirname(s) + '/./' + os.path.basename(s)
+            dirname = os.path.dirname(s) or '.'
+            s = dirname + '/./' + os.path.basename(s)
             srcs.append(s)
 
       srcs = multiglob(srcs)
@@ -1585,7 +1583,11 @@ class Procs:
 
       # This is the last command in the pipeline
       if thiscmd:
-         r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True, **kwargs)
+         try:
+            r = subprocess.Popen(thiscmd, stdin=stdin, stdout=stdout, stderr=stderr, close_fds=True, **kwargs)
+         except:
+            print >>sys.stderr, "Error", sys.exc_value, "executing", thiscmd
+            raise
          results.append(r)
 
       # Here's how we handle these pipelines outside of this function.  One (that last one)
@@ -2602,8 +2604,13 @@ class FmJob:
       else:
           inputlist = "\n".join(inputs)
         
-      if cmd[0] == "fm":
-         cmd = options.fmcmd + cmd[1:]
+      i = 0
+      while i < len(cmd):
+         if cmd[i] == "fm" and (i == 0 or cmd[i-1] == "|"):
+            cmd[i:i+1] = options.fmcmd
+            i += len(options.fmcmd)
+         else:
+            i += 1
 
       cmd = [os.path.expanduser(c) for c in cmd]
  
@@ -4160,9 +4167,12 @@ class FmLocalCommands(CommandSetBase):
       args = multiglob(["./" + a for a in args])
       statlist = []
       for apath in args:
-         stats = cPickle.load(open(apath))
-         stats['statusfile'] = apath
-         statlist.append(stats)
+         try:
+            stats = cPickle.load(open(apath))
+            stats['statusfile'] = apath
+            statlist.append(stats)
+         except:
+            print >>sys.stderr, "Error parsing statusfile", apath
 
       if raw:
          return statlist
