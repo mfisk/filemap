@@ -2593,14 +2593,14 @@ class FmJob:
                 cmd[i] = c.replace('%(input)', " ".join(inputs))
                 subed = True
              if c == "|" and not subed:
-                cmd.insert(i, " ".join(inputs))
+                cmd[i:1] = inputs
                 subed = True
 
           if not subed:
              cmd += inputs
       else:
           inputlist = "\n".join(inputs)
-        
+
       i = 0
       while i < len(cmd):
          if cmd[i] == "fm" and (i == 0 or cmd[i-1] == "|"):
@@ -2610,7 +2610,7 @@ class FmJob:
             i += 1
 
       cmd = [os.path.expanduser(c) for c in cmd]
- 
+
       try:
          if putargs == "argv":
              p = procs.Popen(cmd, stdout=sout, stderr=serr, cwd=obase)
