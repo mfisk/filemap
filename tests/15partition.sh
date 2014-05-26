@@ -1,4 +1,4 @@
 #!/bin/sh
 
-fm -v map -qi '/test/*' "`pwd`/split.sh <"
-fm -v ls /test/*/*split.sh
+fm -vvv map -qi '/test/*' "split.sh <"
+fm -v ls -1 '/test/*/*split.sh'

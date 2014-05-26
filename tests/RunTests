@@ -6,8 +6,10 @@ export PATH
 doTest() {
         echo "==== Running test $t ===="
 	sh -x $t.sh > $t.out 2>$t.err
-	diff -N $t.stdout $t.out || (echo ---- $t.err ----; cat $t.err)
+	diff -wN $t.stdout $t.out || (echo ---- $t.err ----; cat $t.err)
 }
+
+m4 -D PWD=`pwd` filemap.conf.in > filemap.conf
 
 # Run tests specified on command line
 if [ "$1" != "" ]; then

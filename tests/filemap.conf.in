@@ -33,6 +33,7 @@
 # (: delimited like PATH)
 #
 # pathextras =
+pathextras = PWD
 
 ##
 ## Global defaults: (can be overridden per node)

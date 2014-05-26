@@ -2293,7 +2293,12 @@ class CpuProfile:
 
    def update(self, force=False):
       """Try to update CPU idle figures.  Return True iff we updated the idle figures."""
-      fields = open('/proc/stat').readline().split()
+      try:
+         fields = open('/proc/stat').readline().split()
+      except:
+         print >>sys.stderr, "Warning: scheduler cannot determine CPU idle % on this platform"
+         return False
+
       assert(fields[0] == "cpu")
       fields = [int(x) for x in fields[1:]]
       total = sum(fields)
@@ -4114,8 +4119,8 @@ def setProcessName(name):
       libc.prctl(15, ctypes.byref(buf), 0,0,0)
 
    except:
-      print >>sys.stderr, "Unable to set process name:"
-      traceback.print_exc()
+   #   print >>sys.stderr, "Unable to set process name:"
+   #   traceback.print_exc()
       pass
       
 class FmLocalCommands(CommandSetBase):
