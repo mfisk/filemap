@@ -36,7 +36,6 @@ import optparse
 import os
 import pipes
 import pwd
-import pydoc
 import random
 import re
 import select
@@ -2660,7 +2659,6 @@ their doc strings."""
          if cmd[0] == "_":
             continue
          method = self.__method(cmd)
-         #docstr = pydoc.text.indent(pydoc.text.document(method)).replace("(self, args)","")
          docstr = method.__doc__
          if docstr:
             docstr = docstr.split("\n")[0].strip().rstrip(".")
