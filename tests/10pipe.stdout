@@ -1,6 +1,0 @@
-       3       9      18 
-       5      15      30 
-/test/f1.d/wc+=7C+sed+s,=2F.=2A=24,,/stdout
-/test/f1.d/wc/stdout
-/test/f2.d/wc+=7C+sed+s,=2F.=2A=24,,/stdout
-/test/f2.d/wc/stdout
