@@ -57,7 +57,7 @@
 <p><i>Example:</i>
 Compute word frequencies in a text corpus.  FileMap stores the files across a set of machines and executes the pipeline in parallel.  Word list are divided up across the nodes and tallied in parallel:
 <div class="code" width="80%">$ fm store *.txt /etext/
-<p>$ fm map -i "/etext/*" "sed -f words.sed | fm split -n 9 |> sort | uniq -c"
+<p>$ fm map -i "/etext/*" "sed -f words.sed | fm partition -n 9 <> sort | uniq -c"
 </div>
 
 
