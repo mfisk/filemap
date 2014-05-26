@@ -94,12 +94,6 @@ ConfigDefaults = {
    "cowdir": "",
 }
 
-try:
-   select.poll
-except:
-   print >>sys.stderr, "select.poll() not implemented.  If MacOS, use DarwinPorts python."
-   sys.exit(1)
-
 def dictListAppend(map, key, value):
    if not map.has_key(key):
       map[key] = [value]
@@ -1516,13 +1510,90 @@ class FmLocation(SmartDict):
    def subst(self, args):
        return [n.replace("%(ROOTDIR)", self.rootdir).replace("%(SYNCDIR)", self.syncdir).replace("%(NODE)", self.name) for n in args]
 
+class Poll:
+   def __init__(self):
+      try:
+        self.pollobj = select.poll()
+        self.kqueue = None
+      except:
+        self.kqueue = select.kqueue()
+        self.pollobj = None
+        self.reads = set()
+        self.writes = set()
+
+   def add(self, fd, for_read=False, for_write=False):
+      if self.pollobj:
+         mask = 0
+         if for_read:
+            mask |= select.POLLIN
+         if for_write:
+            mask |= select.POLLOUT
+
+         self.pollobj.register(fd, mask|select.POLLHUP|select.POLLERR) 
+
+      else:
+         #print >>sys.stderr, "POLL add", fd, for_read, for_write
+         if for_read:
+            self.reads.add(fd) 
+            self.kqueue.control([select.kevent(fd, select.KQ_FILTER_READ, select.KQ_EV_ADD, fflags=select.KQ_NOTE_LOWAT)], 0)
+         if for_write:
+            self.writes.add(fd) 
+            self.kqueue.control([select.kevent(fd, select.KQ_FILTER_WRITE, select.KQ_EV_ADD)], 0)
+
+   def unregister(self, fd):
+      if self.pollobj:
+         self.pollobj.unregister(fd)
+      else:
+         #print >>sys.stderr, "POLL unregister", fd, fd in self.reads
+         if fd in self.reads:
+            self.kqueue.control([select.kevent(fd, select.KQ_FILTER_READ, select.KQ_EV_DELETE)], 0)
+            self.reads.remove(fd)
+
+         if fd in self.writes:
+            self.kqueue.control([select.kevent(fd, select.KQ_FILTER_WRITE, select.KQ_EV_DELETE)], 0)
+            self.writes.remove(fd)
+
+   def poll(self, timeout):
+      if self.pollobj:
+         try:
+            l = self.pollobj.poll(timeout)
+         except select.error, e:
+            if e[0] == errno.EINTR:
+               return
+            else:
+               raise
+
+         for fd,event in l:
+            if event & select.POLLIN:
+               yield (fd, 'r')
+            if event & select.POLLOUT:
+               yield (fd, 'w')
+
+      else:
+         #print >>sys.stderr, "POLL poll", timeout
+         if not self.reads and not self.writes:
+            #print >>sys.stderr, "Skipping poll with nothing registered"
+            return
+
+         if timeout == -1:
+            timeout = None
+      
+         events = self.kqueue.control(None, 1, timeout)
+         for e in events:
+            if e.filter == select.KQ_FILTER_READ:
+               yield (e.ident, 'r')
+            elif e.filter == select.KQ_FILTER_WRITE:
+               yield (e.ident, 'w')
+            else:
+               print >>sys.stderr, "unknown filter", e
+
 class Procs:
    """This class is used to launch some number of child processes and reap them.
    It provides methods to instantiate a process for each node."""
 
    def __init__(self, retries=0):
       self.queues = {}
-      self.poll = select.poll()
+      self.poll = Poll()
       self.fd2proc = {}
       self.pids = {}
       self.numprocspolling = 0
@@ -1615,9 +1686,9 @@ class Procs:
 
       return results
 
-   def add_poll(self, fh, r, mask):
+   def add_poll(self, fh, r, for_read=False, for_write=False):
       fd = fh.fileno()
-      self.poll.register(fh, mask|select.POLLHUP|select.POLLERR) 
+      self.poll.add(fd, for_read, for_write)
       self.fd2proc[fd] = r
   
       # make non-blocking file
@@ -1641,15 +1712,15 @@ class Procs:
          if r.stderr or r.stdout or (first and stdinstr):
             self.numprocspolling += 1
             if r.stdout:
-               self.add_poll(r.stdout, r, select.POLLIN)
+               self.add_poll(r.stdout, r, for_read=True)
                r.stdoutbuf = cStringIO.StringIO()
    
             if r.stderr:
-               self.add_poll(r.stderr, r, select.POLLIN)
+               self.add_poll(r.stderr, r, for_read=True)
                r.stderrbuf = cStringIO.StringIO()
    
             if first and stdinstr:
-               self.add_poll(r.stdin, r, select.POLLOUT)
+               self.add_poll(r.stdin, r, for_write=True)
                r.stdinstr = stdinstr
                self.processStdin(r) 
   
@@ -1748,7 +1819,7 @@ class Procs:
          assert(not self.pids)
          assert(self.numprocspolling == 0)
 
-         self.poll = select.poll() #Reinit, just in case not everything was unregister()'d
+         self.poll = Poll() #Reinit, just in case not everything was unregister()'d
 
       if not ignoreErrors and errors:
          print >>sys.stderr, "Error, %d/%d subprocess(es) returned error %s" % (errors, total, tag)
@@ -1785,7 +1856,7 @@ class Procs:
       fl = fcntl.fcntl(fd, fcntl.F_GETFL)
       fcntl.fcntl(fd, fcntl.F_SETFL, fl & (~os.O_NONBLOCK))
 
-      self.poll.unregister(fh)
+      self.poll.unregister(fd)
 
       del self.fd2proc[fd]
 
@@ -1882,10 +1953,10 @@ class Procs:
          else:
             # In this case poll() is superfluous and we should just do a blocking waitpid()
             waitopts = 0 #block
-            pollopts = 1 #do not block
+            pollopts = 0 #do not block
       else:
          # Simple case
-         pollopts = 0 #block
+         pollopts = 0 # poll only
          waitopts = os.WNOHANG
 
       #print >>sys.stderr, "block case", waitopts, pollopts
@@ -1927,30 +1998,22 @@ class Procs:
 
       # Look for children that may be blocking on writes to stdout, or that have finished
       # this won't catch children that we don't have share a fd with
-      try:
-         # Make sure we get interrupted if a child exits (in case we're not connected to any of its fds)
-         l = self.poll.poll(pollopts)
 
-      except select.error, e:
-         if e[0] == errno.EINTR:
-            return None
-         else:
-            raise
-      else:
-         for fd,event in l:
-            p = self.fd2proc[fd]
+      # Make sure we get interrupted if a child exits (in case we're not connected to any of its fds)
+      for fd, event in self.poll.poll(pollopts):
+         p = self.fd2proc[fd]
 
-            if event & select.POLLIN: 
-               if fd == p.stdout.fileno():
-                  s = p.stdout.read()
-                  p.stdoutbuf.write(s)
-               else:
-                  assert(fd == p.stderr.fileno())
-                  s = p.stderr.read()
-                  p.stderrbuf.write(s)
-            if event & select.POLLOUT:
-               assert(fd == p.stdin.fileno())
-               self.processStdin(p)
+         if event == 'r':
+            if fd == p.stdout.fileno():
+               s = p.stdout.read()
+               p.stdoutbuf.write(s)
+            else:
+               assert(fd == p.stderr.fileno())
+               s = p.stderr.read()
+               p.stderrbuf.write(s)
+         if event == 'w':
+            assert(fd == p.stdin.fileno())
+            self.processStdin(p)
 
       return None
 
@@ -1972,7 +2035,7 @@ class Procs:
          del self.fd2proc[p.stdin.fileno()]
          try:
              # May be closed
-             self.poll.unregister(p.stdin)
+             self.poll.unregister(p.stdin.fileno())
          except ValueError:
              pass
          p.stdin.close()
