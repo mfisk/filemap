@@ -3660,7 +3660,13 @@ and the program re-run.
       self._Locations().get(*args, **kwargs)
 
    def replicate(self, args):
-      """Replicate the specified files (in the virtual file system) from each node."""
+      """Replicate the specified files in the virtual filesystem to the correct set of 
+nodes.
+
+Use this command after adding or removing nodes in the cluster in order to make
+sure that each specified file is replicated on the correct set and number of 
+nodes.  Upon successful replication, any excess copies are also removed.
+      """
       (options, args) = MethodOptionParser(fixed=["files.."]).parse_args(args)
 
       self._Locations().forAllLocal(["replicate"] + args).collect(labelPrint=True)
