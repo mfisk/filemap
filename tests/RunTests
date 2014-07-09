@@ -3,28 +3,48 @@
 PATH=..:$PATH
 export PATH
 
-doTest() {
+doTest() { 
         echo "==== Running test $t ===="
-	sh -x $t.sh > $t.out 2>$t.err
-	diff -wN $t.stdout $t.out || (echo ---- $t.err ----; cat $t.err)
+	sh -x $t.sh > $dir/$t.out 2>$dir/$t.err
+	diff -wN $t.stdout $dir/$t.out || (echo ---- $dir/$t.err ----; cat $dir/$t.err)
 }
 
-m4 -D PWD=`pwd` filemap.conf.in > filemap.conf
+doSuite() {
+	export FMCONFIG=`pwd`/$dir/filemap.conf
 
-# Run tests specified on command line
-if [ "$1" != "" ]; then
-	for t in "$@"; do 
-		doTest $t
-	done
-	exit
-fi
+	# Run tests specified on command line
+	if [ "$1" != "" ]; then
+		for t in "$@"; do 
+			doTest 
+		done
+	else
+		# Find all numbered tests and run them
+		for sh in [0-9]*.sh; do 
+			t=`echo $sh|sed 's/.sh$//'`
+		
+			doTest 
+		done
+	fi
+}
 
-# Find all numbered tests and run them
-for sh in [0-9]*.sh; do 
-	t=`echo $sh|sed 's/.sh$//'`
-
-	doTest $t
-done
 
 
-		 
+echo "=== Running with local config ==="
+mkdir -p config-local
+dir=config-local
+m4 -D PWD=`pwd` -D SYNC=/tmp/fmtestsync filemap.conf.in > $dir/filemap.conf
+#doSuite "$@"
+
+echo "=== Running with redis config ==="
+mkdir -p config-redis
+dir=config-redis
+redisport=`openssl rand 1 | od -d | head -1 | awk '{print 1024 + $2}'`
+echo "REDISPORT is $redisport" 1>&2
+export redisport
+redis-server --port $redisport &
+sleep 1
+redis-cli -p $redisport monitor &
+m4 -D PWD=`pwd` -D SYNC=redis://localhost:$redisport filemap.conf.in > $dir/filemap.conf
+doSuite "$@"
+kill %1 %2
+

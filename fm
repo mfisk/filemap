@@ -790,7 +790,7 @@ class FmLocations:
          os.umask(self.config.umask)
 
       if not self.locker:
-         self.locker = FileSynchronizer(self)
+         self.locker = self.getSynchronizer()
 
       if not self.procs:
          self.procs = Procs()
@@ -1020,7 +1020,13 @@ class FmLocations:
    def thisis(self, nodename):
       self.thisname = nodename
       self.this = self.config.locs[nodename]
-      self.locker = FileSynchronizer(self)
+      self.locker = self.getSynchronizer()
+
+   def getSynchronizer(self):
+      if self.this.syncdir.startswith("redis:"):
+          return RedisSynchronizer(self)
+      else:
+          return FileSynchronizer(self)
 
    def pickHosts(self):
       """Return a subset of locations containing only one location per hostname"""
@@ -2061,7 +2067,7 @@ class JobScheduler:
       self.procs = Procs(retries=0)
       self.options = locs.this
       self.freethreads = self.options.processes
-      self.locker = FileSynchronizer(locs)
+      self.locker = locs.getSynchronizer()
 
       if self.options.dynamicload:
          global cpu
@@ -2253,7 +2259,7 @@ class JobScheduler:
          if os.path.getsize(outf) == 0:
             os.unlink(outf)
 
-      self.locker.done(p.outrelpath)
+      self.locker.done(p.outrelpath, p.start)
    
       dst = p.outdirname + "/" + p.outbasename 
       new = p.outdirname + "/." + p.outbasename
@@ -2759,15 +2765,79 @@ their doc strings."""
    def _optionHook(self, optParser):
       pass
 
+   
+class RedisSynchronizer:
+    def __init__(self, locs):
+        url = locs.this.syncdir
+        import redis
+        self.redis = redis.client.Redis.from_url(url)
+        self.hostname = socket.gethostname()
+        self.myname = self.hostname + " " + str(os.getpid()) + " "
+        self.procs = locs.procs
+
+    def _canonicalize(self, pth):
+        return pth.replace('//', '/').lstrip('/')
+
+    def invalidate(self, lst):
+        nonglobs = []
+        lst = [self._canonicalize(l) for l in lst]
+        
+        for i in lst:
+           if '*' in i:
+              # We could explicitly register this so we can call it multiple times a little more efficiently (maybe)
+              script = self.redis.register_script("local r = redis.call('keys', KEYS[1]); if table.getn(r) > 0 then redis.call('del', unpack(r)); end")
+              script(keys=[i])
+           else:
+              nonglobs.append(i)
+
+        if nonglobs:
+           self.redis.delete(nonglobs)
+
+    def start(self, filename, newestinput, exclusive):
+        """Semantics here are complicated.  Grab this (and return True) if any of the following are true:
+        0. Nobody has grabbed this yet
+        1. Our newestinput is newer than the timestamp
+        2. The node that claimed this before was us
+        3. The node that claimed this before is now inactive
+        4. Somebody else has started, is not us, is not inactive, is not finished, and exclusive==False
+
+        If #4 is true, except that exclusive==True, then return 'defer'.
+        In any other case, return False. 
+        """
+
+        filename = self._canonicalize(filename)
+        
+        #XXX Should this be nodename (for multiple nodes per host) insted of hostname?
+        #XXX Make this a Lua script so it's atomic
+                
+        r = self.redis.get(filename)
+        #print >>sys.stderr, "REDIS GET", filename, r
+        if r:
+           r = r.split()
+           if r[0] != self.hostname and not self.locs.config.locs[r[0]].inactive:
+              if r[2] >= newestinput:
+                 if len(r) == 4:
+                    return 'done'
+
+                 if len(r) < 4 and exclusive:
+                    return False
+
+        self.redis.set(filename, self.myname + str(newestinput))
+        return True
+    
+    def done(self, filename, timestamp):
+        filename = self._canonicalize(filename)
+        self.redis.set(filename, self.myname + str(timestamp) + " .")
+        
 class FileSynchronizer:
     def __init__(self, locs):
         self.locs = locs
         self.syncdir = locs.this.syncdir
 
-    def unlock(self, lst):
+    def invalidate(self, lst):
         # Delete sync files so that computation is forced to (re-)execute
         # These files are shared, so we pick a minimum number of nodes to do this on
-	syncfiles = [self._filename2lock(i) for i in lst]
+        syncfiles = [self._filename2lock(i) for i in lst]
         return self.locs.pick().forAllLocal(["localrm", "-R", "--absolute"]  + syncfiles)
 
     # We _desire_ near-atomicity on first to claim a job (since others will prefer to avoid duplication)
@@ -2776,7 +2846,6 @@ class FileSynchronizer:
     #    race conditions should result in multiple holders rather than no holders
     # but we want others testing for done-ness to promptly know if anybody has finished.
     # We also want to keep track of how many are in process so that we don't over-duplicate
-
 
     def start(self, filename, newestinput, exclusive):
         # Locally we want to (re-)create output. 
@@ -2855,7 +2924,8 @@ class FileSynchronizer:
            return (not exclusive)
 
 
-    def done(self, filename):
+    def done(self, filename, timestamp):
+        # XXX. Uses current time (as recorded by NFS server on file modification) instead of timestamp
         syncfilename = self._filename2lock(filename)
         try:
            os.unlink(syncfilename)
@@ -3962,23 +4032,32 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
       (options, args) = p.parse_args(args)
       if options.recurse:
          options = ["-R"]
+         children = [a + "/*" for a in args]
       else:
          options = []
+         children = []
 
       self._Locations().forAllLocal(["localrm"] + options + args).collect()
 
       # Now clean-up the syncdir 
-      self._Locations().locker.unlock(args).collect()
+      r = self._Locations().locker.invalidate(args + children)
+      if r: 
+         r.collect()
 
    def init(self, args):
       """Create/correct directory structure.
  If a groupname is specified, it will be applied to the directories."""
       (options, args) = MethodOptionParser(fixed=["[group]"]).parse_args(args)
 
-      self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"], async=True)
+      if self._Locations().this.syncdir.startswith("redis:"):
+         absolutes=[]
+      else:
+         absolutes=["%(SYNCDIR)"]
+         
+      self.mkdir(["/", "/jobs", "/reduce", "/sys"], absolutes=absolutes, async=True)
       if args:
-         self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=["%(SYNCDIR)"])
-      self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=["%(SYNCDIR)"], ignoreErrors=True)
+         self.chgrp([args[0], "/", "/jobs", "/reduce", "/sys"], absolutes=absolutes)
+      self.chmod(["g+rwxs", "/", "/jobs", "/reduce"], absolutes=absolutes, ignoreErrors=True)
       self._Locations().put([os.path.realpath(__file__)], "/sys/").collect()
 
 
@@ -4022,9 +4101,9 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          #XXX lower latency to accumulate these up to map() and let it do a bulk delete
 
          if reduce:
-            self._Locations().locker.unlock(['/reduce/' + h + '/*']).collect()
+            self._Locations().locker.invalidate(['/reduce/' + h + '/*']).collect()
          else:
-            self._Locations().locker.unlock([g + ".d/" + escape(cmd) for g in inglobs]).collect()
+            self._Locations().locker.invalidate([g + ".d/" + escape(cmd) for g in inglobs]).collect()
 
          # Also delete previous output so that it doesn't keep getting used
          # (In the case of replication, a node may not replace the old output with new output
