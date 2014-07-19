@@ -112,7 +112,8 @@ def printableHash(s):
    h = h.rstrip('\n\r =')
    return h
 
-me = socket.gethostname().split('.')[0]
+Hostname = socket.gethostname().split('.')[0]
+My_file_prefix = "_".join(Hostname, os.getpid())
 
 def isremote(hname):
    if not hname:
@@ -2150,6 +2151,7 @@ class JobScheduler:
             if not block:
                time.sleep(sleep)
 
+
    def finalizeItem(self, p):
       stats = {}
       stats['status'] = p.status
@@ -2160,8 +2162,7 @@ class JobScheduler:
       stats['jobname'] = p.jobname
       stats['start'] = p.start
       stats['nodename'] = self.options.name
-      stats['hostname'] = socket.gethostname()
-      #stats['schedpid'] = os.getpid()
+      stats['hostname'] = Hostname
       stats['timestamp'] = time.time()
       stats['cmd'] = p.cmd
 
@@ -2177,7 +2178,7 @@ class JobScheduler:
             stats['stime'] += r.stime
             stats['start'] = min(stats['start'], r.start)
  
-      dir = p.outdirname + "/." + p.outbasename 
+      dir = p.outdirname + "/." + My_file_prefix + "_" + p.outbasename
       try:
          f = file(dir + "/.status", "w")
       except IOError:
@@ -2197,16 +2198,19 @@ class JobScheduler:
       self.locker.done(p.outrelpath)
    
       dst = p.outdirname + "/" + p.outbasename 
-      new = p.outdirname + "/." + p.outbasename
       if os.path.exists(dst): 
-          tmp = p.outdirname + "/.del." + p.outbasename
-          os.rename(dst, tmp)
-          os.rename(new, dst)
-          shutil.rmtree(tmp)
           # By removing this dst, we're invalidating any previously derived data, but our redo-if-newer-than logic will handle the compute.
           # XXX. There is still a chance for a race if a child already was in process on the old dir and in between multiple files.
-      else:
-          os.rename(p.outdirname + "/." + p.outbasename, dst)
+
+          tmp = p.outdirname + "/.del." + My_file_prefix + "_" + p.outbasename
+          os.rename(dst, tmp)
+          shutil.rmtree(tmp)
+
+      try:
+          os.rename(dir, dst)
+      except OSError:
+          print >>sys.stderr, "Ignoring error (okay if this is a shared rootdir):"
+          traceback.print_exc()
 
       p.job.running.remove(p) 
 
@@ -2576,7 +2580,7 @@ class FmJob:
       # Now insert a "." at the beginning of the basename for partial output
       odirname = os.path.dirname(obase)
       obasename = os.path.basename(obase)
-      obase = odirname + "/." + obasename
+      obase = odirname + "/." + My_file_prefix + "_" + obasename
 
       oname = obase + "/stdout"
       ename = obase + "/.stderr"
@@ -2642,7 +2646,7 @@ class FmJob:
       sout.close()
       serr.close()
 
-      #print >>sys.stderr, "computeItem", cmd, socket.gethostname(), p.pid
+      #print >>sys.stderr, "computeItem", cmd, Hostname, p.pid
       return p
 
 class CommandSetBase(object):
@@ -2801,7 +2805,7 @@ class FileSynchronizer:
         return self._atomicCreate(syncfilename, ' .')
 
     def _atomicCreate(self, lockfilename, contents=''):
-        myname = lockfilename + "-" + socket.gethostname() + "-" + str(os.getpid())
+        myname = lockfilename + "_" + My_file_prefix
         mkdirexist(os.path.dirname(lockfilename))
 
         syncfile = os.fdopen(os.open(myname, os.O_CREAT|os.O_SYNC|os.O_WRONLY), "w")
@@ -4015,7 +4019,7 @@ class SchedLock:
       else:
          # Stale or empty, so steal.  
          # XXX race here if 2 procs competing to steal and 1 unlinks and recreates before 2nd unlinks
-         tmp = self.lockname + "-" + str(os.getpid())
+         tmp = self.lockname + "_" + My_file_prefix
          try:
             os.unlink(self.lockname)
          except:
@@ -4287,6 +4291,9 @@ class FmLocalCommands(CommandSetBase):
             f = file(self.Locations.this.rootdir + "/.schedlog-" + str(os.getuid()), 'w')
             os.dup2(f.fileno(), 1)
             os.dup2(f.fileno(), 2)
+
+            global My_file_prefix
+            My_file_prefix = "_".join(Hostname, os.getpid()) # New pid!
 
             # For now, the scheduler and FmJob still assume a global Locations var
             global Locations
