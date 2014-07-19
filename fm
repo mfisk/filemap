@@ -1116,13 +1116,14 @@ class FmLocations:
       nodes = self.nodes(seed=seed)
 
       i = 0
+      foundactive = 0
       for l in nodes:
          i += 1
-         if i > n and foundactive:
+         if foundactive > n:
             # Stop if we've examined $n$ and at least 1 was active
             break
          if not self.config.locs[l].inactive: 
-            foundactive = True
+            foundactive += 1
             yield l
 
       if i < n:
