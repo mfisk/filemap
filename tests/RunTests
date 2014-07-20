@@ -33,7 +33,7 @@ echo "=== Running with local config ==="
 mkdir -p config-local
 dir=config-local
 m4 -D PWD=`pwd` -D SYNC=/tmp/fmtestsync filemap.conf.in > $dir/filemap.conf
-#doSuite "$@"
+doSuite "$@"
 
 echo "=== Running with redis config ==="
 mkdir -p config-redis
