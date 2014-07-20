@@ -1,4 +1,3 @@
 #!/bin/sh
 
-fm -v map -i '/test/*' "`pwd`/split.sh < sort > sort -m | uniq -c"
-#fm ls /reduce/*/*
+fm -v map -i '/test/*' "split.sh < sort -n > sort -n -m | uniq -c"

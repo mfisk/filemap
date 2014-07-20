@@ -1,4 +1,4 @@
 #!/bin/sh
 
-fm -v map -i '/test/*' "`pwd`/split.sh <> sort | uniq -c"
-#fm ls /reduce/*/*
+fm -v map -i '/test/*' "split.sh <> sort -n | uniq -c"
+

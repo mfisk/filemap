@@ -33,6 +33,7 @@
 # (: delimited like PATH)
 #
 # pathextras =
+pathextras = PWD
 
 ##
 ## Global defaults: (can be overridden per node)
@@ -66,7 +67,7 @@
 # not necessarily this client machine. If the location is mounted in different 
 # locations on nodes, override the setting in node definitions.
 #
-syncdir = /tmp/locks 
+syncdir = SYNC
 
 #
 # FM command (specify alternate path)
