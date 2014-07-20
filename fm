@@ -116,7 +116,7 @@ def isremote(hname):
       return False
 
    hname = hname.split('.')[0]
-   if me == hname:
+   if Hostname == hname:
       return False
    else:
       return True
@@ -2802,8 +2802,8 @@ class RedisSynchronizer:
         import redis
         self.redis = redis.client.Redis.from_url(url)
         self.hostname = socket.gethostname()
-        self.myname = self.hostname + " " + str(os.getpid()) + " "
         self.procs = locs.procs
+        self.locs = locs
 
     def _canonicalize(self, pth):
         return pth.replace('//', '/').lstrip('/')
@@ -2844,20 +2844,20 @@ class RedisSynchronizer:
         #print >>sys.stderr, "REDIS GET", filename, r
         if r:
            r = r.split()
-           if r[0] != self.hostname and not self.locs.config.locs[r[0]].inactive:
-              if r[2] >= newestinput:
-                 if len(r) == 4:
+           if r[0] != self.hostname and r[0] in self.locs.config.locs and not self.locs.config.locs[r[0]].inactive:
+              if r[1] >= newestinput:
+                 if len(r) == 3 and r[2] == ".":
                     return 'done'
 
-                 if len(r) < 4 and exclusive:
+                 if len(r) < 3 and exclusive:
                     return False
 
-        self.redis.set(filename, self.myname + str(newestinput))
+        self.redis.set(filename, self.locs.thisname + " " + str(newestinput))
         return True
     
     def done(self, filename, timestamp):
         filename = self._canonicalize(filename)
-        self.redis.set(filename, self.myname + str(timestamp) + " .")
+        self.redis.set(filename, self.locs.thisname + " " + str(timestamp) + " .")
         
 class FileSynchronizer:
     def __init__(self, locs):
@@ -4131,9 +4131,12 @@ Remove empty file or directory.  Normal rm flags are passed through; -f is impli
          #XXX lower latency to accumulate these up to map() and let it do a bulk delete
 
          if reduce:
-            self._Locations().locker.invalidate(['/reduce/' + h + '/*']).collect()
+            p = self._Locations().locker.invalidate(['/reduce/' + h + '/*'])
          else:
-            self._Locations().locker.invalidate([g + ".d/" + escape(cmd) for g in inglobs]).collect()
+            p = self._Locations().locker.invalidate([g + ".d/" + escape(cmd) for g in inglobs])
+
+         if p:
+            p.collect()
 
          # Also delete previous output so that it doesn't keep getting used
          # (In the case of replication, a node may not replace the old output with new output
@@ -4467,13 +4470,13 @@ class FmLocalCommands(CommandSetBase):
             os.dup2(f.fileno(), 1)
             os.dup2(f.fileno(), 2)
 
-            global My_file_prefix
-            My_file_prefix = "_".join(Hostname, os.getpid()) # New pid!
-
             # For now, the scheduler and FmJob still assume a global Locations var
             global Locations
             Locations = self.Locations
       
+            global My_file_prefix
+            My_file_prefix = "_".join([self.Locations.thisname, str(os.getpid())]) # New pid and better name!
+
             if not sl.lock(): 
                # Somebody else running
                sys.exit(0) 
