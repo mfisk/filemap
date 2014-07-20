@@ -77,6 +77,7 @@ ConfigApply = {
    "cpusperjob": int,
    "processes": int,
    "dynamicload": float,
+   "demand": int,
 }
 
 ConfigDefaults = {
@@ -92,6 +93,7 @@ ConfigDefaults = {
    "hostname": None,
    "cpusperjob": "1",
    "cowdir": "",
+   "demand": "3",
 }
 
 try:
@@ -113,7 +115,7 @@ def printableHash(s):
    return h
 
 Hostname = socket.gethostname().split('.')[0]
-My_file_prefix = "_".join(Hostname, os.getpid())
+My_file_prefix = "_".join([Hostname, str(os.getpid())])
 
 def isremote(hname):
    if not hname:
@@ -2412,10 +2414,30 @@ class FmJob:
       # Unless this is a continuous job, this will be the only time we enumerate the files
       if not self.cachedinputs:
          glob = [options.rootdir + "/" + x for x in self.inputs.split()]
-         if options.cowdir:
-            glob += [options.cowdir + "/" + x for x in self.inputs.split()]
-
          glob = multiglob(glob)
+
+         if options.cowdir:
+            cows = multiglob([options.cowdir + "/" + x for x in self.inputs.split()])
+
+            if self.reduce:
+                glob += cows
+
+            else:
+                # Assume that COWdir is globally shared and manage competition/duplication of processing it.
+                # Use demand setting to limit contention (unlike files in the rootdir)
+                n = Locations.this.demand
+
+                if n == 0:
+                    # Process everything in sight
+                    glob += cows
+    
+                else:
+                   for i in cows:
+                      choices = list(Locations.pickn(i[len(options.cowdir):], n=n))
+                      if Locations.thisname in choices:
+                         #print >>sys.stderr, i[len(options.cowdir):], "hashes to", list(choices), i
+                         glob.append(i)
+    
          if self.previousinputs: # Updating list 
             self.cachedinputs = list( set(glob) - self.previousinputs )
          else: # First pass
@@ -2442,6 +2464,15 @@ class FmJob:
             if part[-2:] == ".d":
                continue
 
+            # Check to see if this node should proess this partition
+            choices = list(Locations.pickn(part, n=1))
+
+            if Locations.thisname not in choices:
+                #print >>sys.stderr, Locations.thisname, "only hashes", part, "to", list(choices)
+                continue
+
+            #print >>sys.stderr, part, "processes on this node", list(choices)
+
             #Get list of files with this partition
             files = []
             remaininginputs = []
@@ -2454,15 +2485,6 @@ class FmJob:
             # Remove these from the list of inputs to process later
             self.cachedinputs = remaininginputs
 
-            # Apply all of the files with the same partition,
-            # but only if that partition belongs on this node.
-            choices = list(Locations.pickn(part, n=1))
-
-            if Locations.thisname not in choices:
-                #print >>sys.stderr, Locations.thisname, "only hashes", part, "to", list(choices)
-                continue
-
-            #print >>sys.stderr, part, "processes on this node", list(choices)
             outfilename = "/reduce/" + self.jobname + "/" + part + ".d"
 
             p = self.computeItem(files, outfilename, options, procs, invalidateOnly, canDefer=False, putargs=putargs)
