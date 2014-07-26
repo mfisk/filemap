@@ -4371,7 +4371,9 @@ class FmLocalCommands(CommandSetBase):
          try:
             stats = cPickle.load(open(apath))
             stats['statusfile'] = apath
-            statlist.append(stats)
+            if stats['nodename'] == self.Locations.thisname:
+                # In case of shared directories, we may open status files for other nodes
+            	statlist.append(stats)
          except:
             print >>sys.stderr, "Error parsing statusfile", apath
 
