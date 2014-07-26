@@ -78,6 +78,9 @@ ConfigApply = {
    "processes": int,
    "dynamicload": float,
    "demand": int,
+   "replication": int,
+   "umask": int,
+   "all2all_retries": int,
 }
 
 ConfigDefaults = {
@@ -94,6 +97,11 @@ ConfigDefaults = {
    "cpusperjob": "1",
    "cowdir": "",
    "demand": "3",
+   "replication": "1",
+   "umask": "0002",
+   "pathextras": "",
+   "environ": None,
+   "all2all_retries": "7",
 }
 
 def dictListAppend(map, key, value):
@@ -738,7 +746,8 @@ class FmLocations:
          self.config.locs = locs
          self.procs = copyFrom.procs
          self.locker = copyFrom.locker
-         #self.thisis(copyFrom.thisname)
+
+         self.this = copyFrom.this
 
       elif slave:
          assert(copyFrom)
@@ -781,16 +790,16 @@ class FmLocations:
 
          #self.thisis('global')
 
-      if self.config.pathextras:
-         os.environ['PATH'] += ":" + self.config.pathextras
+      if self.this.pathextras:
+         os.environ['PATH'] += ":" + self.this.pathextras
 
-      if self.config.environ:
-         for pair in self.config.environ.split():
+      if self.this.environ:
+         for pair in self.this.environ.split():
             k,v = pair.split('=')
             os.environ[k] = v
 
-      if self.config.umask:
-         os.umask(self.config.umask)
+      if self.this.umask:
+         os.umask(self.this.umask)
 
       if not self.locker:
          self.locker = self.getSynchronizer()
@@ -807,18 +816,9 @@ class FmLocations:
       #print >>sys.stderr, "Reading config", filename, self.configparser.sections()
       self.configparser.readfp(fh)
   
-      self.config.replication = int(self.config_get("global", "replication", "1"))
-
-      #All-to-all can hit sshd's MaxStartups limit, so retry a lot
-      self.config.all2all_retries = int(self.config_get("global", "all2all_retries", "7"))
-
       self.config.slurmfe = self.config_get("global", "slurmfe", None)
       if self.config.slurmfe == "localhost":
          self.config.slurmfe = "sh -c"
-
-      self.config.umask = int(self.config_get("global", "umask", "0002"))
-      self.config.pathextras = self.config_get("global", "pathextras")
-      self.config.environ = self.config_get("global", "environ")
 
       # Unless we were passed an explicit list of locations, grab all
       # from the config file.
@@ -1022,7 +1022,11 @@ class FmLocations:
 
    def thisis(self, nodename):
       self.thisname = nodename
-      self.this = self.config.locs[nodename]
+      if nodename == "global":
+         self.this = self.config.locs['global']
+      else:
+         self.this = self.config.locs[nodename]
+
       self.locker = self.getSynchronizer()
 
    def getSynchronizer(self):
@@ -3874,7 +3878,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
 
    def fs(self, args):
       p = MethodOptionParser(fixed=["<dir>..."])
-      p.add_option('-r', '--replication', action='store', help="Replication level to check for", default=self._Locations().replication)
+      p.add_option('-r', '--replication', action='store', help="Replication level to check for", default=self._Locations().this.replication)
       p.add_option('-f', '--fix', action='store_true', help="Fix file system")
       p.add_option('-v', '--verbose', action="count", help="Up verbostiy, more occurrances means higher level")
       p.add_option('-d', '--dryrun', action='store_true', help="Display proposed fix, do not execute")
@@ -4264,12 +4268,12 @@ class FmLocalCommands(CommandSetBase):
          CommandSetBase.__init__(self, self.Locations.this.subst(inputs.cmd), p)
 
    def replicate(self, args):
-      procs = Procs(retries=self.Locations.config.all2all_retries) 
+      procs = Procs(retries=self.Locations.this.all2all_retries) 
       errors,ignore = self.Locations.put(args, "/", procs=procs, relativeroot=True, pickn=True, serialize=True, remove=True).collect()
       return errors
 
    def redistribute(self, args):
-      procs = Procs(retries=self.Locations.config.all2all_retries) 
+      procs = Procs(retries=self.Locations.this.all2all_retries) 
       errors,ignore = self.Locations.put(args, "/", procs=procs, pickn=1, relativeroot=True, serialize=True, hashbasename=True).collect()
       return errors
 
