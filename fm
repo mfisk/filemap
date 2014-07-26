@@ -3575,7 +3575,7 @@ and the program re-run.
          maxErrors = None
       else:
          maxErrors = 0
-         # If replicate uses pickn=True, then use self._Locations().config.replication-1 here
+         # If replicate uses pickn=True, then use self._Locations().this.replication-1 here
          # since pickn defaults to false, to default to no errors allowed
 
       for cmd in pipeline:
