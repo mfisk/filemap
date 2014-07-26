@@ -1118,7 +1118,7 @@ class FmLocations:
       foundactive = False
 
       if not n: 
-         n = self.config.replication
+         n = self.this.replication
 
       nodes = self.nodes(seed=seed)
 
