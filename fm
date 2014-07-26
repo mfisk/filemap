@@ -2273,19 +2273,28 @@ class JobScheduler:
       self.locker.done(p.outrelpath, p.start)
    
       dst = p.outdirname + "/" + p.outbasename 
-      if os.path.exists(dst): 
-          # By removing this dst, we're invalidating any previously derived data, but our redo-if-newer-than logic will handle the compute.
-          # XXX. There is still a chance for a race if a child already was in process on the old dir and in between multiple files.
 
-          tmp = p.outdirname + "/.del." + My_file_prefix + "_" + p.outbasename
-          os.rename(dst, tmp)
-          shutil.rmtree(tmp)
+      tmp = p.outdirname + "/.del." + My_file_prefix + "_" + p.outbasename
+      try:
+         # By removing this dst(if present) , we're invalidating any previously derived data, but our redo-if-newer-than logic will handle the compute.
+         # XXX. There is still a chance for a race if a child already was in process on the old dir and in between multiple files.
+         os.rename(dst, tmp)
+         shutil.rmtree(tmp)
+      except OSError, e:
+         if e.errno == errno.ENOENT:
+            # Didn't exist (or race to delete).  This is common and okay.
+            pass
+         else:
+            raise
 
       try:
           os.rename(dir, dst)
-      except OSError:
-          print >>sys.stderr, "Ignoring error (okay if this is a shared rootdir):"
-          traceback.print_exc()
+      except OSError, e:
+         if e.errno == errno.EEXIST:
+            print >>sys.stderr, "Warning: unable to finalze to %s (okay if this is a shared directory):" % dst
+            #traceback.print_exc()
+         else:
+            raise
 
       p.job.running.remove(p) 
 
@@ -2621,8 +2630,12 @@ class FmJob:
             return None
 
       # First check locally to see if output exists and is current
-      if os.path.exists(statfile):
+      try:
          lasttime = os.path.getmtime(statfile)
+      except:
+         lasttime = None
+
+      if lasttime:
          if newestinput <= lasttime:
             #print >>sys.stderr, "Local results current for", statfile, self.checkexit
  
@@ -2641,11 +2654,12 @@ class FmJob:
 
          #Remove it now before somebody uses it for something
          dir = os.path.dirname(statfile)
-         print >>sys.stderr, "Removing old local results", dir, lasttime, newestinput
+         print >>sys.stderr, "Removing stale results", dir, lasttime, newestinput
          parent = os.path.dirname(dir)
          dirname = os.path.basename(dir)
 
-         tmp = parent + "/.del." + dirname
+         tmp = parent + "/.del" + My_file_prefix + dirname
+         print >>sys.stderr, "Moving", dir, tmp
          os.rename(dir, tmp)
          shutil.rmtree(tmp)
          assert(not os.path.exists(statfile))
