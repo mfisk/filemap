@@ -1285,7 +1285,7 @@ locations of this instance."""
             srcfiles.append(a)
 
       tag = "put %s %s" % (srclist, dst)
-      redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove)
+      redundants = self.pickput(srcfiles, dst, procs, tag, pickn, hashbasename, serialize, remove, relativeroot)
 
       if remove and redundants:
          errors, results = procs.collect()
@@ -1301,7 +1301,7 @@ locations of this instance."""
 
       return procs
 
-   def pickput(self, srcs, dst, procs, tag, pickn, hashbasename, serialize, remove):
+   def pickput(self, srcs, dst, procs, tag, pickn, hashbasename, serialize, remove, relativeroot):
       nodesrcs = {}
       relative = None
       for s in srcs:
@@ -1330,6 +1330,10 @@ locations of this instance."""
             redundants -=  set(nodesrcs[self.thisname])
       else:
          redundants = None
+
+      if relativeroot and self.thisname in nodesrcs:
+         # Remove no-op copy to self (which could actually delete the files)
+         nodesrcs.pop(self.thisname)
 
       self.rsyncput(nodesrcs, dst, serialize, procs, tag)
 
