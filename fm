@@ -3593,13 +3593,8 @@ and the program re-run.
       for cmd in pipeline:
          reduce = False
 
-         # Look for reduce operations
-         if cmd[0][0] == ">":
-            reduce = cmd[0]
-            cmd = cmd[1:]
-
-         # Look for (and block on) redistribute operations
-         if cmd[0] == "<":
+         # Global barrier 
+         if cmd[0] == "<" or cmd[0][0] == ">":
             if jobname and not options.statusonly:
                # Install the jobs on each node
                self._putJobs(tmpdir, None)
@@ -3611,20 +3606,35 @@ and the program re-run.
                starttime = time.time()
 
             if not options.statusonly:
-               # Barrier; Wait for that job (and its parents) to finish:
-               if Verbose > -1:
-                  print >>sys.stderr, "Waiting for map job %s and redistribute." % jobname
                if jobname:
-                  args = ["wait", jobname, "redistribute"]
+                  args = ["wait", jobname]
+                  jobname = None # This won't be a parent of the first thing after the barrier
                else:
-                  args = ["redistribute"]
+                  args = []
 
-               r = self._Locations().forAllLocal(args + inglobs).collect(maxErrors=maxErrors, stopOnError=True)
-               if not r:
-                  #Kill job since we returned early with an error
-                  self.kill(joblist)
-                  return False
-            continue
+               if cmd[0] == "<":
+                  args += ["redistribute"] + inglobs
+
+               if args: 
+                  # Barrier; Wait for that job (and its parents) to finish:
+                  if Verbose > -1:
+                     print >>sys.stderr, "Waiting for %s" % ' '.join(args)
+
+                  r = self._Locations().forAllLocal(args).collect(maxErrors=maxErrors, stopOnError=True)
+                  if not r:
+                     #Kill job since we returned early with an error
+                     self.kill(joblist)
+                     return False
+               #else beginning of pipeline, or just had a barrier, so nothing to wait on
+
+            if cmd[0] == "<":
+               continue
+            # else reduce and we need to do the reduce job now
+
+         # Look for reduce operations
+         if cmd[0][0] == ">":
+            reduce = cmd[0]
+            cmd = cmd[1:]
       
          allinglobs.update(inglobs)
          jobname, inglobs = self._MapComponent(cmd, inglobs, outdirglobs, options, reduce=reduce, parent=jobname, tmpdir=tmpdir, procsPerCpu = int(options.procspercpu), checkexit=options.checkexit)
