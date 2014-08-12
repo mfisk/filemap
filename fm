@@ -914,18 +914,18 @@ class FmLocations:
          else:
             #singleton
             try:
-               interval = int(interval)
+               node = int(interval)
             except:
-               pass
-            expanded.append(interval)
+               node = interval
+            expanded.append(node)
             if not first: first = interval
 
-      # First is the first example node number string.
-      # It may be padded with leading zeros, the following will preserve that formatting:
-
-      # Recrusively try expanding each result (which may have a second list in it) and flatten the resulting lists
+      #print >>sys.stderr, 'Expanding using %s as template' % first
+      # Recursively try expanding each result (which may have a second list in it) and flatten the resulting lists
       ret = []
       for i in expanded:
+         # It may be padded with leading zeros, the following will preserve that formatting:
+         # First is the first example node number string.
          ret += self._expandList(prefix + str(first)[:-len(str(i))] + str(i) + suffix, values+[i])
           
       return ret
