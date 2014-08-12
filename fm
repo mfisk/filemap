@@ -4457,12 +4457,20 @@ class FmLocalCommands(CommandSetBase):
       return 
       
    def localls(self, args):
+      args = []
+
+      if self.Locations.this.cowdir:
+         os.chdir(self.Locations.this.cowdir)  
+         args += multiglob(["./" + a for a in args])
+
       os.chdir(self.Locations.this.rootdir)  
-      #args = [(a.lstrip("/")).rstrip("/") for a in args] # Make relative; even if it started with a /
-      procs = Procs()
-      args = multiglob(["./" + a for a in args])
+      args += multiglob(["./" + a for a in args])
+
       if not args:
          return
+
+      procs = Procs()
+
       output = []
       for apath in args:
 
