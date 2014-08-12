@@ -1136,14 +1136,13 @@ class FmLocations:
       if i < n:
          print >>sys.stderr, "Cannot pick %d locations" % (n)
 
-   def pick(self, n=None, seed=None, selfIsNoop=False):
+   def pick(self, n=None, seed=None):
       """Return a new FmLocations instance that uses a subset of the
 locations of this instance."""
 
       used = self.pickn(seed, n=n)
 
-      if selfIsNoop and self.thisname in used: 
-         used.remove(self.thisname)
+      assert(used)
 
       useddict = {}
       for u in used: 
