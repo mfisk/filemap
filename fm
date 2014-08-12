@@ -2294,7 +2294,7 @@ class JobScheduler:
       try:
           os.rename(dir, dst)
       except OSError, e:
-         if e.errno == errno.EEXIST:
+         if e.errno == errno.EEXIST or e.errno == errno.ENOTEMPTY:
             print >>sys.stderr, "Warning: unable to finalze to %s (okay if this is a shared directory):" % dst
             #traceback.print_exc()
          else:
@@ -2664,8 +2664,17 @@ class FmJob:
 
          tmp = parent + "/.del" + My_file_prefix + dirname
          print >>sys.stderr, "Moving", dir, tmp
-         os.rename(dir, tmp)
-         shutil.rmtree(tmp)
+         try:
+             os.rename(dir, tmp)
+             shutil.rmtree(tmp)
+         except OSError, e:
+              if e.errno == errno.ENOENT:
+                 # Somebody else just removed it, so let them have it
+                 print >>sys.stderr, "Looks like somebody else just removed %s, so skipping it" % (dir)
+                 return None
+              else:
+                 raise
+
          assert(not os.path.exists(statfile))
         
       #else: 
