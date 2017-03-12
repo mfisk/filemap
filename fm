@@ -4456,15 +4456,15 @@ class FmLocalCommands(CommandSetBase):
       if Verbose > 0: print >>sys.stderr, len(args)
       return 
       
-   def localls(self, args):
+   def localls(self, inargs):
       args = []
 
       if self.Locations.this.cowdir:
          os.chdir(self.Locations.this.cowdir)  
-         args += multiglob(["./" + a for a in args])
+         args += multiglob(["./" + a for a in inargs])
 
       os.chdir(self.Locations.this.rootdir)  
-      args += multiglob(["./" + a for a in args])
+      args += multiglob(["./" + a for a in inargs])
 
       if not args:
          return
