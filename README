@@ -31,5 +31,4 @@ FileMap is a file-based map-reduce system.
 You can think of it is parallel and distributed xargs or make.  
 It features replicated storage and intermediate result caching.
 
-http://mfisk.github.com/filemap
-
+https://github.com/mfisk/filemap/wiki
