@@ -3351,6 +3351,7 @@ Copy the specified file(s) into the virtual store.
 
       failover = 3
       while failover:
+         # store to a single location first (then replicate)
          errors, results = self._Locations().put(args, dst, pickn=1, serialize=options.serialize).collect(markInactive=self._Locations().config)
          if not errors:
             break
@@ -3878,7 +3879,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
       status, ps = procs.collect()
 
       pickles = {}
-      
+
       for p in ps:
          pkl = p.stdout.read()
          p.stdout.close()
@@ -3890,8 +3891,8 @@ Unlike 'get -c', duplicate instances of files will be included."""
          except:
             print >>sys.stderr, "Error", sys.exc_value, "parsing remote pickle results:", pkl
             return 1   # TODO: this value isn't ever expected/handled by the code calling this function
-                        # we should return an empty list or check the list contents or at least the
-                        # return type after this function is called
+                       # we should return an empty list or check the list contents or at least the
+                       # return type after this function is called
          pickles[p.queue] = unpkl
 
       return pickles
@@ -4300,8 +4301,11 @@ class FmLocalCommands(CommandSetBase):
          self.Locations = FmLocations(copyFrom=inputs, slave=node)
 
          setProcessName("fm _local -n %s %s" % (node, ' '.join(inputs.cmd)))
+         cmd = self.Locations.this.subst(inputs.cmd)
 
-         CommandSetBase.__init__(self, self.Locations.this.subst(inputs.cmd), p)
+         # Call parent initializer with input command (after % substitution done)
+         # This will call the appropriate method for the given command
+         CommandSetBase.__init__(self, cmd, p)
 
    def replicate(self, args):
       procs = Procs(retries=self.Locations.this.all2all_retries) 
@@ -4492,7 +4496,7 @@ class FmLocalCommands(CommandSetBase):
                 
          else:
             output.append(self.lsone(aname, s))
-            
+
       sys.stdout.write(cPickle.dumps(output))
       return
 
