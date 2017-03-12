@@ -35,16 +35,18 @@ dir=config-local
 m4 -D PWD=`pwd` -D SYNC=/tmp/fmtestsync filemap.conf.in > $dir/filemap.conf
 doSuite "$@"
 
-echo "=== Running with redis config ==="
-mkdir -p config-redis
-dir=config-redis
-redisport=`openssl rand 1 | od -d | head -1 | awk '{print 1024 + $2}'`
-echo "REDISPORT is $redisport" 1>&2
-export redisport
-redis-server --port $redisport &
-sleep 1
-redis-cli -p $redisport monitor &
-m4 -D PWD=`pwd` -D SYNC=redis://localhost:$redisport filemap.conf.in > $dir/filemap.conf
-doSuite "$@"
-kill %1 %2
+if python -c 'import redis'; then
+	echo "=== Running with redis config ==="
+	mkdir -p config-redis
+	dir=config-redis
+	redisport=`openssl rand 1 | od -d | head -1 | awk '{print 1024 + $2}'`
+	echo "REDISPORT is $redisport" 1>&2
+	export redisport
+	redis-server --port $redisport &
+	sleep 1
+	redis-cli -p $redisport monitor &
+	m4 -D PWD=`pwd` -D SYNC=redis://localhost:$redisport filemap.conf.in > $dir/filemap.conf
+	doSuite "$@"
+	kill %1 %2
+fi
 
