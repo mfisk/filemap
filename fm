@@ -2575,7 +2575,7 @@ class FmJob:
 
             outfilename = "/reduce/" + self.jobname + "/" + part + ".d"
 
-            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, canDefer=False, putargs=putargs)
+            p = self.computeItem(files, outfilename, options, procs, invalidateOnly, steal=False, putargs=putargs)
             if p: 
                #print >>sys.stderr, "Reduce part", part, "on node", Locations.thisname, files, "of", self.inputs
                return p
@@ -2602,18 +2602,22 @@ class FmJob:
             assert(not i)
             
          outfilename = relativename + ".d/" + escape(self.cmd)
-        
-         p = self.computeItem(i, outfilename, options, procs, invalidateOnly, self.cachedinputs_deferred != None)
+
+         #TODO: steal if (self.cachedinputs_deferred == None) because there might be a slow node that we could beat.
+         #But there's no point in doing this until we know how to later kill the slow node before it finishes.
+         #steal = (self.cachedinputs_deferred == None)
+         steal = False
+
+         p = self.computeItem(i, outfilename, options, procs, invalidateOnly, steal)
 
          if p == 'defer' and False:
-            # XXX. Limit to things we would pick()
             self.cachedinputs_deferred.append(i)
          elif p:
             return p
 
       return None # Nothing to do
 
-   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, canDefer, putargs="argv"):
+   def computeItem(self, inputs, outfilename, options, procs, invalidateOnly, steal, putargs="argv"):
       """Start (but don't wait for completion) running this job on of the next unprocessed input for this job."""
       if type(inputs) != type([]):
          inputs = [inputs]
@@ -2679,15 +2683,15 @@ class FmJob:
 
       # If we get here, then we're locally prepared to rerun
       # Check global synchronization to see if another node already ran it
-      l = self.locker.start(outfilename, newestinput, exclusive=canDefer)
+      l = self.locker.start(outfilename, newestinput, exclusive=(not steal))
 
       if l == 'done':
           # Somebody already completed
           return None
 
       elif l == False:
-          # Did not get (exclusive was requested and not available)
-          assert(canDefer)
+          # Did not get (exclusive was specified and item is in progress elsewhere)
+          assert(not steal)
           return 'defer'
 
       assert(l == True)
