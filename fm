@@ -2868,14 +2868,13 @@ class RedisSynchronizer:
 
         filename = self._canonicalize(filename)
         
-        #XXX Should this be nodename (for multiple nodes per host) insted of hostname?
         #XXX Make this a Lua script so it's atomic
                 
         r = self.redis.get(filename)
         #print >>sys.stderr, "REDIS GET", filename, r
         if r:
            r = r.split()
-           if r[0] != self.hostname and r[0] in self.locs.config.locs and not self.locs.config.locs[r[0]].inactive:
+           if r[0] != self.locs.thisname and r[0] in self.locs.config.locs and not self.locs.config.locs[r[0]].inactive:
               if r[1] >= newestinput:
                  if len(r) == 3 and r[2] == ".":
                     return 'done'
