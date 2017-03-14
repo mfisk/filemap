@@ -2868,10 +2868,17 @@ class RedisSynchronizer:
 
         filename = self._canonicalize(filename)
         
-        #XXX Make this a Lua script so it's atomic
-                
+	value = self.locs.thisname + " " + str(newestinput)
+
+	# First try at atomic test and set
+        r = self.redis.setnx(filename, value)
+	if r:
+		# Got it exclusively
+		return True
+
+	# Failed the atomic, so see who claimed it and if we want to steal (node dead)
+	#print >>sys.stderr, "REDIS GET", filename, r
         r = self.redis.get(filename)
-        #print >>sys.stderr, "REDIS GET", filename, r
         if r:
            r = r.split()
            if r[0] != self.locs.thisname and r[0] in self.locs.config.locs and not self.locs.config.locs[r[0]].inactive:
@@ -2882,7 +2889,7 @@ class RedisSynchronizer:
                  if len(r) < 3 and exclusive:
                     return False
 
-        self.redis.set(filename, self.locs.thisname + " " + str(newestinput))
+        self.redis.set(filename, value)
         return True
     
     def done(self, filename, timestamp):
