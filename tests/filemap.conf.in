@@ -81,7 +81,7 @@ syncdir = SYNC
 # The fm script will be executed under the interpreter specified here.
 # Default: python = python
 #
-# python = python2.4
+# python = python3
 
 #
 # SSH command (specify alternate path or options)
