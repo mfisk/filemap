@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 #
 # FileMap - http://mfisk.github.com/filemap
 #
@@ -18,16 +18,14 @@
 # Author: Mike Fisk <mfisk@lanl.gov>
 #
 
-# Following 2 lines are necessary only when running in python 2
+# FileMap currently runs in python 2 or python 3, and with mixed versions between controller and remote nodes
 from __future__ import absolute_import
 from __future__ import print_function
 
-import six.moves.configparser
 import atexit
 import base64
 import bisect
 import copy
-import six.moves.cPickle
 import io
 import errno
 import fcntl
@@ -55,8 +53,19 @@ import tempfile
 import time
 import traceback
 import zlib
-import six
-from six.moves import range
+
+if int(sys.version[0]) > 2:
+   RAWSTDIN = sys.stdin.buffer
+   RAWSTDOUT = sys.stdout.buffer
+   import pickle
+   import configparser
+   iteritems = dict.items
+else:
+   RAWSTDIN = sys.stdin
+   RAWSTDOUT = sys.stdout
+   import cPickle as pickle
+   import ConfigParser as configparser
+   iteritems = dict.iteritems
 
 try:
    import hashlib # New for python 2.5
@@ -92,7 +101,7 @@ ConfigDefaults = {
    "rsync": "rsync -tO",
    "share": "1",
    "syncdir": "/tmp/fmsync",
-   "python": "python3",
+   "python": "python",
    "processes": "1000",
    "dynamicload": ".1",
    "inactive": False,
@@ -365,7 +374,7 @@ def plot(inputfile, pngfile, options):
    import matplotlib.collections
    import matplotlib.backends.backend_agg
 
-   stats = six.moves.cPickle.load(inputfile)
+   stats = pickle.load(inputfile)
    inputfile.close()
 
    # Load all stats and keep track of min and max inputsizes along the way
@@ -751,7 +760,7 @@ class FmLocations:
          #print("locations is", name, file=sys.stderr)
          os.environ['FMCONFIG'] = name
          fh = os.fdopen(fd, 'wb')
-         fh.write(six.moves.cPickle.dumps(self.config, protocol=2))
+         fh.write(pickle.dumps(self.config, protocol=2))
          fh.close()
       else:
          self.config = SmartDict() # like a named tuple but for older python
@@ -775,7 +784,7 @@ class FmLocations:
             raise Exception("Unable to locate config file.  Set FMCONFIG or place filemap.conf in . or /etc")
 
          if filename.endswith('.pickle'):
-            self.config = six.moves.cPickle.load(fh)
+            self.config = pickle.load(fh)
          else:
             self.parseConfigFile(fh)
 
@@ -802,7 +811,7 @@ class FmLocations:
       """Populate self.config from config file."""
 
       # Read from file
-      self.configparser = six.moves.configparser.ConfigParser()
+      self.configparser = configparser.ConfigParser()
 
       #print >>sys.stderr, "Reading config", filename, self.configparser.sections()
       self.configparser.readfp(fh)
@@ -1152,7 +1161,7 @@ locations of this instance."""
 
       inputs = {'cmd': cmd, 'config': self.config}
 
-      return self.forAll(lcmd, subst=True, stdinstr=zlib.compress(six.moves.cPickle.dumps(inputs, protocol=2)), tag=' '.join(cmd))
+      return self.forAll(lcmd, subst=True, stdinstr=zlib.compress(pickle.dumps(inputs, protocol=2)), tag=' '.join(cmd))
 
    def forAll(self, Cmdv, src=[], dst=[], absolute=False, subst=False, trailer=None, glob=True, stdinstr=None, call=False, tag=None, quote=True):
       if src and type(src) != type([]):
@@ -2258,7 +2267,7 @@ class JobScheduler:
          p.job.running.remove(p)
          return
 
-      six.moves.cPickle.dump(stats, f, protocol=2)
+      pickle.dump(stats, f, protocol=2)
       f.close()
 
       # Remove empty outputs to avoid unnecessary downstream processing
@@ -2429,7 +2438,7 @@ class CpuProfile:
 
       unint = 0
       for f in os.listdir('/proc'):
-         if six.text_type(f).isnumeric(): # looks like a pid
+         if f.isnumeric(): # looks like a pid
             try:
                 line = open('/proc/' + f + '/stat').readline().split()
             except:
@@ -2458,7 +2467,7 @@ class FmJob:
    def __init__(self, fname, cpusPerJob = 1, locker = None):
       self.locker = locker
 
-      config = six.moves.configparser.ConfigParser()
+      config = configparser.ConfigParser()
 
       def config_get(field, default=None, raw=False):
          if config.has_option("mrjob", field):
@@ -2644,7 +2653,7 @@ class FmJob:
                return None
 
             try:
-               stats = six.moves.cPickle.load(open(statfile, mode='rb'))
+               stats = pickle.load(open(statfile, mode='rb'))
             except:
                print("Invalidating previous output based on unreadable stats file", statfile, file=sys.stderr)
             else:
@@ -3244,7 +3253,7 @@ Has unix "mkdir -p" semantics."""
       pkls = self._local_pickles(["localjobs"])
       jobs = {}
       for mx in pkls:
-         for jname,j in six.iteritems(pkls[mx]):
+         for jname,j in iteritems(pkls[mx]):
             if not jobs.get(jname):
                jobs[jname] = j
                j.nodes = [mx]
@@ -3258,7 +3267,7 @@ Has unix "mkdir -p" semantics."""
 
       first = True
 
-      for jname,j in six.iteritems(jobs):
+      for jname,j in iteritems(jobs):
          inputlist = j.inputs.split()
          flags = ""
          if j.reduce:
@@ -3679,7 +3688,7 @@ and the program re-run.
 
       tally = self._tallyStats(allstats, allinglobs, tally_start, wallclock)
       statsfile = gzip.GzipFile('.fm.stats.gz', 'w')
-      six.moves.cPickle.dump(allstats, statsfile)
+      pickle.dump(allstats, statsfile)
       statsfile.close()
 
       # Fetch stdout/stderr               
@@ -3890,7 +3899,7 @@ Unlike 'get -c', duplicate instances of files will be included."""
             continue
 
          try:
-            unpkl = six.moves.cPickle.loads(pkl)
+            unpkl = pickle.loads(pkl)
          except:
             print("Error", sys.exc_info()[1], "parsing remote pickle results:", pkl, file=sys.stderr)
             return 1   # TODO: this value isn't ever expected/handled by the code calling this function
@@ -4295,7 +4304,7 @@ class FmLocalCommands(CommandSetBase):
       assert(not args)
       assert(options.node)
 
-      inputs = SmartDict(six.moves.cPickle.loads(zlib.decompress(sys.stdin.buffer.read())))
+      inputs = SmartDict(pickle.loads(zlib.decompress(RAWSTDIN.read())))
 
       for node in options.node:
          # If -n is given, then we are a direct slave and 
@@ -4334,7 +4343,7 @@ class FmLocalCommands(CommandSetBase):
       disk, size, used, available, percent, mount = f.readline().split()
       disks = {}
       disks[disk] = (int(size)*1024, int(available)*1024)
-      sys.stdout.buffer.write(six.moves.cPickle.dumps(disks, protocol=2))
+      RAWSTDOUT.write(pickle.dumps(disks, protocol=2))
 
    def lsone(self, fname, fs):
       # Construct the dict that is pickled and passed to the client
@@ -4398,7 +4407,7 @@ class FmLocalCommands(CommandSetBase):
       statlist = []
       for apath in args:
          try:
-            stats = six.moves.cPickle.load(open(apath, 'rb'))
+            stats = pickle.load(open(apath, 'rb'))
             stats['statusfile'] = apath
             if stats['nodename'] == self.Locations.thisname:
                 # In case of shared directories, we may open status files for other nodes
@@ -4409,7 +4418,7 @@ class FmLocalCommands(CommandSetBase):
       if raw:
          return statlist
       else:
-         sys.stdout.buffer.write(six.moves.cPickle.dumps(statlist, protocol=2))
+         RAWSTDOUT.write(pickle.dumps(statlist, protocol=2))
          return 
 
    def localload(self, args):
@@ -4422,7 +4431,7 @@ class FmLocalCommands(CommandSetBase):
          #disk = disk.strip()
          ## See if this is our ROOTDIR
 
-      sys.stdout.buffer.write(six.moves.cPickle.dumps(load))
+      RAWSTDOUT.buffer.write(pickle.dumps(load))
       return
 
    def localjobs(self, args):
@@ -4434,7 +4443,7 @@ class FmLocalCommands(CommandSetBase):
             jobuid = os.stat(jobdir + "/" + j).st_uid
             jobs[j].uid = pwd.getpwuid(jobuid).pw_name
          
-      sys.stdout.buffer.write(six.moves.cPickle.dumps(jobs, protocol=2))
+      RAWSTDOUT.buffer.write(pickle.dumps(jobs, protocol=2))
       return
 
    def localrm(self, args):
@@ -4500,7 +4509,7 @@ class FmLocalCommands(CommandSetBase):
          else:
             output.append(self.lsone(aname, s))
 
-      sys.stdout.buffer.write(six.moves.cPickle.dumps(output, protocol=2))
+      RAWSTDOUT.write(pickle.dumps(output, protocol=2))
       return
 
    def kill(self, args=[]):
